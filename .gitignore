@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+.serena/
+logs/
+artifacts/e2e/
+__pycache__/
+*.pyc
