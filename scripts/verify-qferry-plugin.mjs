@@ -26,8 +26,12 @@ if (pluginJson.skills !== "./skills/" || pluginJson.mcpServers !== "./.mcp.json"
 }
 
 const mcpJson = JSON.parse(await readFile(resolve(repoRoot, "plugins/qferry/.mcp.json"), "utf8"));
-if (mcpJson.qferry?.args?.[0] !== "./dist/mcp.cjs") {
+const qferryServer = mcpJson.mcpServers?.qferry;
+if (qferryServer?.args?.[0] !== "./dist/mcp.cjs") {
   throw new Error(".mcp.json must launch plugin-local ./dist/mcp.cjs");
+}
+if (qferryServer.cwd !== ".") {
+  throw new Error('.mcp.json must set cwd to "." so Codex starts from the installed plugin directory');
 }
 
 const dist = await readFile(resolve(repoRoot, "plugins/qferry/dist/mcp.cjs"), "utf8");

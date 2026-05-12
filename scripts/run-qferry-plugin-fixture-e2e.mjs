@@ -25,7 +25,7 @@ async function main() {
   const summaryPath = resolve(artifactDir, "summary.md");
   const mcpConfigPath = resolve(pluginDir, ".mcp.json");
   const mcpConfig = JSON.parse(await readFile(mcpConfigPath, "utf8"));
-  const serverConfig = mcpConfig.qferry;
+  const serverConfig = mcpConfig.mcpServers?.qferry ?? mcpConfig.qferry;
   if (!serverConfig) {
     throw new Error("plugins/qferry/.mcp.json does not define qferry server");
   }

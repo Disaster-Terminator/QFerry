@@ -1,6 +1,70 @@
 # QFerry Codex 插件安装与验收
 
-本文档用于把 QFerry 从“仓库内 e2e 可跑”推进到“本机 Codex 可安装、可发现、可验收”。
+本文档面向维护者和开发者。普通用户优先阅读根目录 `README.md` 的快速开始。
+
+## 用户安装路径
+
+QFerry 当前通过 Codex 插件市场安装：
+
+```powershell
+codex plugin marketplace add Disaster-Terminator/QFerry
+```
+
+然后打开 Codex，运行 `/plugins`，按键盘右方向键切到 QFerry 所在插件市场，按 Enter 打开 `QFerry` 详情页，选择 `Install plugin`。
+
+Codex CLI 的 `codex plugin marketplace add/upgrade/remove` 管理的是插件市场，不是直接安装插件。插件安装在 Codex TUI 的 `/plugins` 里完成。
+
+## 插件目录
+
+仓库内插件目录是：
+
+```text
+G:\repository\QFerry\plugins\qferry
+```
+
+关键文件：
+
+```text
+plugins/qferry/.codex-plugin/plugin.json
+plugins/qferry/.mcp.json
+plugins/qferry/dist/mcp.cjs
+plugins/qferry/skills/qferry/SKILL.md
+```
+
+插件 MCP 配置必须使用 Codex plugin wrapper：
+
+```json
+{
+  "mcpServers": {
+    "qferry": {
+      "command": "node",
+      "args": ["./dist/mcp.cjs"],
+      "cwd": ".",
+      "startup_timeout_sec": 30,
+      "env": {
+        "QFERRY_PROVIDER": "fixture",
+        "QFERRY_MUTATION_ALLOWED": "0"
+      }
+    }
+  }
+}
+```
+
+`cwd: "."` 用来保证 Codex 从安装后的插件缓存目录启动 `node ./dist/mcp.cjs`，而不是从当前对话工作目录启动。不要把 `.mcp.json` 指向源码目录、`tsx` 或开发 checkout。
+
+## QQ 邮箱配置
+
+fixture provider 是默认路径，不需要真实邮箱授权。
+
+真实 QQ read-only 验收需要在本机环境提供：
+
+```text
+QQMAIL_EMAIL=your@qq.com
+QQMAIL_KEY=your-qq-mail-authorization-code
+QQMAIL_METADATA_SAMPLE_LIMIT=1
+```
+
+`QQMAIL_KEY` 是 QQ 邮箱 IMAP/SMTP 授权码，不是 QQ 登录密码。真实账号验收只允许小批量 metadata 读取。
 
 ## 当前边界
 
@@ -29,9 +93,43 @@ mutationsAttempted: 0
 QQMAIL_METADATA_SAMPLE_LIMIT=1
 ```
 
-## 公开前置检查
+## 部署后验收
 
-仓库公开前应确认：
+用户把插件部署到本机 Codex 后，下一轮测试目标是：
+
+1. Codex 能发现 QFerry 插件。
+2. Codex 能加载 `qferry` skill。
+3. QFerry MCP server 能从 plugin-local `dist/mcp.cjs` 启动。
+4. fixture 工具调用成功。
+5. QQ read-only 工具调用成功。
+6. 生成本地 trace artifacts。
+
+建议让 Codex 执行：
+
+```text
+Use QFerry to list mail folders with the fixture provider. Then explain which tools are available.
+```
+
+配置 QQ 邮箱后再执行：
+
+```text
+Use QFerry to inspect QQ Mail capability and list folders safely. Do not mutate mailbox data.
+```
+
+## 测试留痕
+
+预期验收 artifacts：
+
+```text
+logs/runs/<runId>.jsonl
+artifacts/e2e/<runId>/summary.md
+```
+
+这些文件用于验收和回溯，不提交到仓库。
+
+## 开发检查
+
+仓库公开或发布前应确认：
 
 ```powershell
 rtk pnpm run check
@@ -47,54 +145,6 @@ rtk uv run python -m unittest tests.test_probe_qqmail
 logs/
 artifacts/
 node_modules/
-```
-
-## 插件目录
-
-Codex 插件目录是：
-
-```text
-G:\repository\QFerry\plugins\qferry
-```
-
-关键文件：
-
-```text
-plugins/qferry/.codex-plugin/plugin.json
-plugins/qferry/.mcp.json
-plugins/qferry/dist/mcp.cjs
-plugins/qferry/skills/qferry/SKILL.md
-```
-
-`.mcp.json` 必须从插件目录启动：
-
-```json
-{
-  "qferry": {
-    "command": "node",
-    "args": ["./dist/mcp.cjs"]
-  }
-}
-```
-
-不要把 `.mcp.json` 指向源码目录或 `tsx`。
-
-## 本机部署后验收
-
-用户把插件部署到本机 Codex 后，下一轮测试目标是：
-
-1. Codex 能发现 QFerry 插件。
-2. Codex 能加载 `qferry` skill。
-3. QFerry MCP server 能从 plugin-local `dist/mcp.cjs` 启动。
-4. fixture 工具调用成功。
-5. QQ read-only 工具调用成功。
-6. 生成本地 trace artifacts。
-
-预期验收 artifacts：
-
-```text
-logs/runs/<runId>.jsonl
-artifacts/e2e/<runId>/summary.md
 ```
 
 ## License

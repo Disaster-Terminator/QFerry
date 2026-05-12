@@ -1,11 +1,14 @@
 {
-  "qferry": {
-    "command": "node",
-    "args": ["./dist/mcp.cjs"],
-    "startup_timeout_sec": 30,
-    "env": {
-      "QFERRY_PROVIDER": "fixture",
-      "QFERRY_MUTATION_ALLOWED": "0"
+  "mcpServers": {
+    "qferry": {
+      "command": "node",
+      "args": ["./dist/mcp.cjs"],
+      "cwd": ".",
+      "startup_timeout_sec": 30,
+      "env": {
+        "QFERRY_PROVIDER": "fixture",
+        "QFERRY_MUTATION_ALLOWED": "0"
+      }
     }
   }
 }
