@@ -1,0 +1,30 @@
+{
+  "version": "example-2026-05-12",
+  "defaultGroupId": "review",
+  "groups": [
+    {
+      "id": "archive",
+      "label": "Archive candidates"
+    },
+    {
+      "id": "review",
+      "label": "Needs review"
+    }
+  ],
+  "rules": [
+    {
+      "id": "newsletter-sender",
+      "groupId": "archive",
+      "match": {
+        "fromIncludes": "newsletter@"
+      }
+    },
+    {
+      "id": "digest-subject",
+      "groupId": "archive",
+      "match": {
+        "subjectIncludes": "digest"
+      }
+    }
+  ]
+}

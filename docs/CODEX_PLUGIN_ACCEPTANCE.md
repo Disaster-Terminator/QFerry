@@ -66,6 +66,23 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 `QQMAIL_KEY` 是 QQ 邮箱 IMAP/SMTP 授权码，不是 QQ 登录密码。真实账号验收只允许小批量 metadata 读取。
 
+## 规则文件
+
+QFerry 支持通过 `rulesFile` 加载持久化分类规则。仓库示例：
+
+```text
+examples/qferry.rules.json
+```
+
+规则文件包含：
+
+- `version`：规则版本，会写入 e2e summary。
+- `defaultGroupId`：没有命中规则时使用的 group。
+- `groups`：用户定义的分类组。
+- `rules`：按顺序匹配的 metadata 规则。
+
+工具仍兼容直接传入内联 `rules`。真实 QQ 路径使用规则文件时仍然只生成 preview plan，不执行邮箱写操作。
+
 ## 当前边界
 
 允许：
@@ -102,7 +119,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 3. QFerry MCP server 能从 plugin-local `dist/mcp.cjs` 启动。
 4. fixture 工具调用成功。
 5. QQ read-only 工具调用成功。
-6. 生成本地 trace artifacts。
+6. 规则文件版本和 preview plan 状态写入本地 trace artifacts。
 
 建议让 Codex 执行：
 

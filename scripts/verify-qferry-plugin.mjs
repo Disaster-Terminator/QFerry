@@ -6,6 +6,7 @@ import { dirname } from "node:path";
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const requiredFiles = [
   ".agents/plugins/marketplace.json",
+  "examples/qferry.rules.json",
   "plugins/qferry/.codex-plugin/plugin.json",
   "plugins/qferry/.mcp.json",
   "plugins/qferry/README.md",

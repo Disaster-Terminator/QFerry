@@ -64,10 +64,12 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 | --- | --- |
 | 文件夹读取 | 读取 QQ 邮箱文件夹列表 |
 | 小批量扫描 | 对 QQ 邮箱执行 bounded metadata search |
-| 分类规则 | 用自定义规则把邮件归入用户定义的 group |
-| 清理计划 | 生成 preview-only cleanup plan，不直接修改真实邮箱 |
+| 分类规则 | 用内联规则或 `qferry.rules.json` 把邮件归入用户定义的 group |
+| 清理计划 | 基于规则文件生成 preview-only cleanup plan，不直接修改真实邮箱 |
 | 测试留痕 | 写入 jsonl trace 和 Markdown summary |
 | 安全边界 | 默认禁止真实邮箱写操作 |
+
+规则文件示例见 [examples/qferry.rules.json](examples/qferry.rules.json)。规则文件包含 `version`、`defaultGroupId`、`groups` 和 `rules`，e2e summary 会记录规则版本和规则数量。
 
 ## 安全边界
 

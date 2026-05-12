@@ -20,6 +20,12 @@ Allowed by default:
 - Create operation plans.
 - Write trace artifacts.
 
+## Rules
+
+Prefer a persisted `qferry.rules.json` rules file when the user wants repeatable classification. The ruleset includes `version`, `defaultGroupId`, `groups`, and ordered `rules`.
+
+When a tool response includes `ruleset`, keep `ruleset.version`, `ruleset.ruleCount`, and `ruleset.source` in the acceptance summary. Inline rules are still acceptable for one-off classification.
+
 Not allowed by default:
 
 - Move messages.

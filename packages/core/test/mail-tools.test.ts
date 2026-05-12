@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { createMailTools } from "../src/tools/mail-tools.js";
 import { FixtureMailProvider } from "../src/providers/fixture-provider.js";
@@ -71,6 +74,41 @@ describe("mail tools", () => {
     });
   });
 
+  it("classifies messages with rules loaded from a rules file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-v1",
+      defaultGroupId: "review",
+      groups: [
+        { id: "archive", label: "Archive" },
+        { id: "review", label: "Review" },
+      ],
+      rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+    }), "utf8");
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    const result = await tools.classifyMessages({
+      folder: "INBOX",
+      limit: 10,
+      rulesFile,
+    });
+
+    expect(result.ruleset).toEqual({
+      source: rulesFile,
+      version: "rules-v1",
+      defaultGroupId: "review",
+      groupCount: 2,
+      ruleCount: 1,
+    });
+    expect(result.classifications).toContainEqual({
+      messageRef: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+      groupId: "archive",
+      matchedRuleId: "newsletter",
+      explanation: "from includes newsletter@",
+    });
+  });
+
   it("creates preview cleanup plans and does not mutate", async () => {
     const tools = createMailTools({ provider: FixtureMailProvider.demo() });
 
@@ -96,5 +134,41 @@ describe("mail tools", () => {
     expect(result.plan.messageRefs).toEqual([
       { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
     ]);
+  });
+
+  it("creates preview cleanup plans from a rules file and returns ruleset metadata", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-v2",
+      defaultGroupId: "review",
+      groups: [
+        { id: "archive", label: "Archive" },
+        { id: "review", label: "Review" },
+      ],
+      rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+    }), "utf8");
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    const result = await tools.planCleanup({
+      runId: "run-2",
+      folder: "INBOX",
+      limit: 10,
+      action: "move",
+      target: { folder: "Archive" },
+      rulesFile,
+      selectedGroupIds: ["archive"],
+    });
+
+    expect(result.ruleset).toMatchObject({
+      source: rulesFile,
+      version: "rules-v2",
+      ruleCount: 1,
+    });
+    expect(result.plan.status).toBe("preview");
+    expect(result.plan.messageRefs).toEqual([
+      { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+    ]);
+    expect(result.mutationsAttempted).toBe(0);
   });
 });

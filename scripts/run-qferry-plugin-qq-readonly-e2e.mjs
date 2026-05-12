@@ -55,6 +55,7 @@ async function main() {
   const artifactDir = resolve(repoRoot, "artifacts/e2e", runId);
   const tracePath = resolve(repoRoot, "logs/runs", `${runId}.jsonl`);
   const summaryPath = resolve(artifactDir, "summary.md");
+  const rulesFile = resolve(repoRoot, "examples/qferry.rules.json");
   const mcpConfigPath = resolve(pluginDir, ".mcp.json");
   const mcpConfig = JSON.parse(await readFile(mcpConfigPath, "utf8"));
   const serverConfig = mcpConfig.mcpServers?.qferry ?? mcpConfig.qferry;
@@ -103,7 +104,7 @@ async function main() {
   transport.stderr?.on("data", (chunk) => stderrChunks.push(String(chunk)));
 
   await client.connect(transport);
-  const capability = await client.callTool({ name: "get_capability_snapshot", arguments: {} });
+  const capability = await callToolWithStructuredContent(client, "get_capability_snapshot", {});
   await writeJsonl(tracePath, {
     ...baseEvent,
     event: "plugin_tool_called",
@@ -111,7 +112,7 @@ async function main() {
     structuredContentKeys: Object.keys(capability.structuredContent ?? {}),
   });
 
-  const mailboxes = await client.callTool({ name: "list_mailboxes", arguments: {} });
+  const mailboxes = await callToolWithStructuredContent(client, "list_mailboxes", {});
   const mailboxCount = Array.isArray(mailboxes.structuredContent?.mailboxes)
     ? mailboxes.structuredContent.mailboxes.length
     : 0;
@@ -122,7 +123,7 @@ async function main() {
     mailboxCount,
   });
 
-  const search = await client.callTool({ name: "search", arguments: { folder: "INBOX", limit: 1 } });
+  const search = await callToolWithStructuredContent(client, "search", { folder: "INBOX", limit: 1 });
   const sampledMessages = Array.isArray(search.structuredContent?.messages)
     ? search.structuredContent.messages.length
     : 0;
@@ -131,6 +132,31 @@ async function main() {
     event: "plugin_tool_called",
     toolName: "search",
     sampledMessages,
+  });
+
+  const previewPlan = await callToolWithStructuredContent(
+    client,
+    "plan_cleanup",
+    {
+      runId,
+      folder: "INBOX",
+      limit: 1,
+      action: "move",
+      target: { folder: "Archive" },
+      rulesFile,
+      selectedGroupIds: ["archive"],
+    },
+  );
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "plan_cleanup",
+    rulesetVersion: previewPlan.structuredContent?.ruleset?.version,
+    planStatus: previewPlan.structuredContent?.plan?.status,
+    plannedMessageRefs: Array.isArray(previewPlan.structuredContent?.plan?.messageRefs)
+      ? previewPlan.structuredContent.plan.messageRefs.length
+      : 0,
+    mutationsAttempted: previewPlan.structuredContent?.mutationsAttempted,
   });
 
   await client.close();
@@ -146,8 +172,13 @@ async function main() {
       "- dryRun: true",
       "- mutationAllowed: false",
       "- mutationsAttempted: 0",
+      `- rulesFile: ${rulesFile}`,
+      `- rulesetVersion: ${previewPlan.structuredContent?.ruleset?.version ?? "<missing>"}`,
+      `- rulesetRuleCount: ${previewPlan.structuredContent?.ruleset?.ruleCount ?? "<missing>"}`,
       `- folderCount: ${mailboxCount}`,
       `- sampledMessages: ${sampledMessages}`,
+      `- previewPlanStatus: ${previewPlan.structuredContent?.plan?.status ?? "<missing>"}`,
+      `- previewPlanMessageRefs: ${previewPlan.structuredContent?.plan?.messageRefs?.length ?? "<missing>"}`,
       `- trace: ${tracePath}`,
       `- mcpConfig: ${mcpConfigPath}`,
       `- stderrBytes: ${stderrChunks.join("").length}`,
@@ -170,6 +201,17 @@ async function main() {
     mutationsAttempted: 0,
     artifacts: { tracePath, summaryPath },
   }, null, 2)}\n`);
+}
+
+async function callToolWithStructuredContent(client, name, args) {
+  const result = await client.callTool({ name, arguments: args });
+  if (result.isError) {
+    throw new Error(`QFerry plugin tool ${name} returned an error: ${JSON.stringify(result.content)}`);
+  }
+  if (!result.structuredContent || Object.keys(result.structuredContent).length === 0) {
+    throw new Error(`QFerry plugin tool ${name} did not return structuredContent`);
+  }
+  return result;
 }
 
 await main();

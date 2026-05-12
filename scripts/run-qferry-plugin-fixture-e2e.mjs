@@ -23,6 +23,7 @@ async function main() {
   const artifactDir = resolve(repoRoot, "artifacts/e2e", runId);
   const tracePath = resolve(repoRoot, "logs/runs", `${runId}.jsonl`);
   const summaryPath = resolve(artifactDir, "summary.md");
+  const rulesFile = resolve(repoRoot, "examples/qferry.rules.json");
   const mcpConfigPath = resolve(pluginDir, ".mcp.json");
   const mcpConfig = JSON.parse(await readFile(mcpConfigPath, "utf8"));
   const serverConfig = mcpConfig.mcpServers?.qferry ?? mcpConfig.qferry;
@@ -69,25 +70,24 @@ async function main() {
   const calls = [
     ["list_mailboxes", {}],
     ["search", { folder: "INBOX", limit: 10, query: "digest" }],
-    ["classify_messages", {
-      folder: "INBOX",
-      limit: 10,
-      defaultGroupId: "review",
-      rules: [{ id: "newsletter", groupId: "bulk", match: { fromIncludes: "newsletter@" } }],
-    }],
+    ["classify_messages", { folder: "INBOX", limit: 10, rulesFile }],
     ["plan_cleanup", {
       runId,
       folder: "INBOX",
       limit: 10,
       action: "move",
       target: { folder: "Archive" },
-      rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+      rulesFile,
       selectedGroupIds: ["archive"],
     }],
   ];
+  let classifyResult;
+  let planResult;
 
   for (const [name, args] of calls) {
-    const result = await client.callTool({ name, arguments: args });
+    const result = await callToolWithStructuredContent(client, name, args);
+    if (name === "classify_messages") classifyResult = result.structuredContent;
+    if (name === "plan_cleanup") planResult = result.structuredContent;
     await writeJsonl(tracePath, {
       ...baseEvent,
       event: "plugin_tool_called",
@@ -108,8 +108,13 @@ async function main() {
       "- dryRun: true",
       "- mutationAllowed: false",
       "- mutationsAttempted: 0",
+      `- rulesFile: ${rulesFile}`,
+      `- rulesetVersion: ${classifyResult?.ruleset?.version ?? "<missing>"}`,
+      `- rulesetRuleCount: ${classifyResult?.ruleset?.ruleCount ?? "<missing>"}`,
       `- toolsListed: ${tools.tools.length}`,
       `- toolsCalled: ${calls.length}`,
+      `- previewPlanStatus: ${planResult?.plan?.status ?? "<missing>"}`,
+      `- previewPlanMessageRefs: ${planResult?.plan?.messageRefs?.length ?? "<missing>"}`,
       `- trace: ${tracePath}`,
       `- mcpConfig: ${mcpConfigPath}`,
       `- stderrBytes: ${stderrChunks.join("").length}`,
@@ -132,6 +137,17 @@ async function main() {
     mutationsAttempted: 0,
     artifacts: { tracePath, summaryPath },
   }, null, 2)}\n`);
+}
+
+async function callToolWithStructuredContent(client, name, args) {
+  const result = await client.callTool({ name, arguments: args });
+  if (result.isError) {
+    throw new Error(`QFerry plugin tool ${name} returned an error: ${JSON.stringify(result.content)}`);
+  }
+  if (!result.structuredContent || Object.keys(result.structuredContent).length === 0) {
+    throw new Error(`QFerry plugin tool ${name} did not return structuredContent`);
+  }
+  return result;
 }
 
 await main();
