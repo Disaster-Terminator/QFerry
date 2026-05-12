@@ -16,7 +16,10 @@
     "qferry:e2e:chatgpt-fixture": "pnpm --filter @qferry/chatgpt-app fixture:e2e"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "esbuild": "^0.28.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.8"
+    "vitest": "^4.0.8",
+    "zod": "^4.4.3"
   }
 }
