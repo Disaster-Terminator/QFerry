@@ -2,7 +2,7 @@
   "mcpServers": {
     "qferry": {
       "command": "node",
-      "args": ["./dist/mcp.cjs"],
+      "args": ["./mcp-bootstrap.mjs"],
       "cwd": ".",
       "startup_timeout_sec": 30,
       "env": {

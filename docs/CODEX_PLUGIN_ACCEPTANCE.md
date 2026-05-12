@@ -27,6 +27,7 @@ G:\repository\QFerry\plugins\qferry
 ```text
 plugins/qferry/.codex-plugin/plugin.json
 plugins/qferry/.mcp.json
+plugins/qferry/mcp-bootstrap.mjs
 plugins/qferry/dist/mcp.cjs
 plugins/qferry/skills/qferry/SKILL.md
 ```
@@ -38,7 +39,7 @@ plugins/qferry/skills/qferry/SKILL.md
   "mcpServers": {
     "qferry": {
       "command": "node",
-      "args": ["./dist/mcp.cjs"],
+      "args": ["./mcp-bootstrap.mjs"],
       "cwd": ".",
       "startup_timeout_sec": 30,
       "env": {
@@ -50,7 +51,7 @@ plugins/qferry/skills/qferry/SKILL.md
 }
 ```
 
-`cwd: "."` 用来保证 Codex 从安装后的插件缓存目录启动 `node ./dist/mcp.cjs`，而不是从当前对话工作目录启动。不要把 `.mcp.json` 指向源码目录、`tsx` 或开发 checkout。
+`cwd: "."` 用来保证 Codex 从安装后的插件缓存目录启动 plugin-local bootstrap，而不是从当前对话工作目录启动。`mcp-bootstrap.mjs` 再加载同目录下的 `dist/mcp.cjs`，并把运行 cwd 切到 `QFERRY_STATE_DIR` 或用户状态目录，避免 Windows 下 MCP 进程占住插件缓存目录，导致插件详情、升级或卸载失败。不要把 `.mcp.json` 指向源码目录、`tsx` 或开发 checkout。
 
 ## QQ 邮箱配置
 
@@ -88,7 +89,7 @@ examples/qferry.rules.json
 允许：
 
 - 安装本地 Codex 插件。
-- 启动 plugin-local MCP runtime：`plugins/qferry/dist/mcp.cjs`。
+- 启动 plugin-local MCP runtime：`plugins/qferry/mcp-bootstrap.mjs` -> `plugins/qferry/dist/mcp.cjs`。
 - 使用 fixture provider 验证工具发现和调用。
 - 使用 QQ read-only provider 验证真实 QQ 邮箱的 capability、文件夹列表、小批量 metadata。
 
@@ -116,7 +117,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 1. Codex 能发现 QFerry 插件。
 2. Codex 能加载 `qferry` skill。
-3. QFerry MCP server 能从 plugin-local `dist/mcp.cjs` 启动。
+3. QFerry MCP server 能从 plugin-local `mcp-bootstrap.mjs` 启动，并加载 `dist/mcp.cjs`。
 4. fixture 工具调用成功。
 5. QQ read-only 工具调用成功。
 6. 规则文件版本和 preview plan 状态写入本地 trace artifacts。

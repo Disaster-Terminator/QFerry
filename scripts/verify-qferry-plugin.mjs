@@ -10,6 +10,7 @@ const requiredFiles = [
   "plugins/qferry/.codex-plugin/plugin.json",
   "plugins/qferry/.mcp.json",
   "plugins/qferry/README.md",
+  "plugins/qferry/mcp-bootstrap.mjs",
   "plugins/qferry/skills/qferry/SKILL.md",
   "plugins/qferry/src/mcp.ts",
   "plugins/qferry/dist/mcp.cjs",
@@ -41,11 +42,18 @@ if (!marketplaceEntry.policy?.installation || !marketplaceEntry.policy?.authenti
 
 const mcpJson = JSON.parse(await readFile(resolve(repoRoot, "plugins/qferry/.mcp.json"), "utf8"));
 const qferryServer = mcpJson.mcpServers?.qferry;
-if (qferryServer?.args?.[0] !== "./dist/mcp.cjs") {
-  throw new Error(".mcp.json must launch plugin-local ./dist/mcp.cjs");
+if (qferryServer?.args?.[0] !== "./mcp-bootstrap.mjs") {
+  throw new Error(".mcp.json must launch plugin-local ./mcp-bootstrap.mjs");
 }
 if (qferryServer.cwd !== ".") {
   throw new Error('.mcp.json must set cwd to "." so Codex starts from the installed plugin directory');
+}
+
+const bootstrap = await readFile(resolve(repoRoot, "plugins/qferry/mcp-bootstrap.mjs"), "utf8");
+for (const required of ["process.chdir", '"dist", "mcp.cjs"', "QFERRY_STATE_DIR"]) {
+  if (!bootstrap.includes(required)) {
+    throw new Error(`mcp-bootstrap.mjs must keep Windows-safe cwd handling, missing: ${required}`);
+  }
 }
 
 const dist = await readFile(resolve(repoRoot, "plugins/qferry/dist/mcp.cjs"), "utf8");

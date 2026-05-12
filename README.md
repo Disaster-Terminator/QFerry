@@ -53,7 +53,8 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 ## 预期结果
 
 - Codex 能看到 QFerry skill。
-- QFerry MCP server 从插件目录里的 `./dist/mcp.cjs` 启动。
+- QFerry MCP server 通过插件目录里的 `./mcp-bootstrap.mjs` 启动，再加载 plugin-local `./dist/mcp.cjs`。
+- `mcp-bootstrap.mjs` 会把运行 cwd 切到用户状态目录，避免 Windows 下 MCP 进程占住插件缓存目录，导致插件详情、升级或卸载失败。
 - fixture provider 可调用 `list_mailboxes`、`search`、`classify_messages`、`plan_cleanup`。
 - QQ Mail read-only provider 可调用 `get_capability_snapshot`、`list_mailboxes` 和 bounded `search`。
 - 每次 e2e 留下 trace artifacts，方便验收回溯。
