@@ -1,7 +1,7 @@
 {
   "qferry": {
     "command": "node",
-    "args": ["./dist/mcp.js"],
+    "args": ["./dist/mcp.cjs"],
     "startup_timeout_sec": 30,
     "env": {
       "QFERRY_PROVIDER": "fixture",

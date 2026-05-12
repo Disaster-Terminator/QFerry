@@ -5,7 +5,7 @@ import { build } from "esbuild";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const source = resolve(repoRoot, "plugins/qferry/src/mcp.ts");
-const target = resolve(repoRoot, "plugins/qferry/dist/mcp.js");
+const target = resolve(repoRoot, "plugins/qferry/dist/mcp.cjs");
 
 await mkdir(dirname(target), { recursive: true });
 await build({
@@ -14,7 +14,7 @@ await build({
   bundle: true,
   platform: "node",
   target: "node20",
-  format: "esm",
+  format: "cjs",
   banner: { js: "#!/usr/bin/env node" },
   minify: true,
   logLevel: "silent",

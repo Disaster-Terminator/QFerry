@@ -118,5 +118,5 @@ async function main(): Promise<void> {
 
 const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
 if (import.meta.url === invokedPath) {
-  await main();
+  void main();
 }

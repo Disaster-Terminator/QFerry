@@ -12,6 +12,17 @@ describe("mail tools", () => {
     expect(result.mailboxes.map((mailbox) => mailbox.path)).toEqual(["INBOX", "Archive"]);
   });
 
+  it("returns provider capability snapshots when available", async () => {
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    const result = await tools.getCapabilitySnapshot();
+
+    expect(result.capability).toMatchObject({
+      provider: "fixture",
+      supportsMutation: false,
+    });
+  });
+
   it("searches bounded metadata without returning message bodies", async () => {
     const tools = createMailTools({ provider: FixtureMailProvider.demo() });
 

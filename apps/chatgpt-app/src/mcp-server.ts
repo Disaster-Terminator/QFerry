@@ -1,7 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { createMailTools, FixtureMailProvider, type MessageRef } from "@qferry/core";
+import {
+  createMailTools,
+  FixtureMailProvider,
+  QqReadOnlyProvider,
+  type MailProvider,
+  type MessageRef,
+} from "@qferry/core";
 import { pathToFileURL } from "node:url";
 
 const messageRefSchema = z.object({
@@ -29,7 +35,7 @@ export function createQFerryMcpServer(): McpServer {
     name: "qferry-chatgpt-app",
     version: "0.0.0",
   });
-  const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+  const tools = createMailTools({ provider: createProviderFromEnv() });
 
   server.registerTool(
     "list_mailboxes",
@@ -39,6 +45,16 @@ export function createQFerryMcpServer(): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => toToolResult(await tools.listMailboxes()),
+  );
+
+  server.registerTool(
+    "get_capability_snapshot",
+    {
+      title: "Get capability snapshot",
+      description: "Use this when you need provider capabilities and safety limits before scanning or planning.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async () => toToolResult(await tools.getCapabilitySnapshot()),
   );
 
   server.registerTool(
@@ -105,6 +121,32 @@ export function createQFerryMcpServer(): McpServer {
   return server;
 }
 
+function createProviderFromEnv(): MailProvider {
+  if (process.env.QFERRY_PROVIDER !== "qqmail") {
+    return FixtureMailProvider.demo();
+  }
+
+  const user = process.env.QQMAIL_EMAIL;
+  const pass = process.env.QQMAIL_KEY;
+  if (!user || !pass) {
+    throw new Error("QFERRY_PROVIDER=qqmail requires QQMAIL_EMAIL and QQMAIL_KEY");
+  }
+
+  return new QqReadOnlyProvider({
+    accountAlias: maskEmail(user),
+    host: process.env.QQMAIL_IMAP_HOST || "imap.qq.com",
+    port: Number.parseInt(process.env.QQMAIL_IMAP_PORT || "993", 10),
+    maxRecommendedScanLimit: Number.parseInt(process.env.QQMAIL_METADATA_SAMPLE_LIMIT || "1", 10),
+    auth: { user, pass },
+  });
+}
+
+function maskEmail(value: string): string {
+  const [name, domain] = value.split("@", 2);
+  if (!domain) return "<account-provided>";
+  return `${name.slice(0, 2) || "*"}***@${domain}`;
+}
+
 function toToolResult(structuredContent: Record<string, unknown>) {
   return {
     structuredContent,
@@ -124,5 +166,5 @@ async function main(): Promise<void> {
 
 const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
 if (import.meta.url === invokedPath) {
-  await main();
+  void main();
 }

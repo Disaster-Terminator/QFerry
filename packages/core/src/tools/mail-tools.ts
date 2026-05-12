@@ -1,6 +1,6 @@
 import { classifyMessages, type ClassificationRule, type MessageClassification } from "../classification.js";
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
-import type { MailboxInfo, MailProvider, MessageDetail, MessageSummary } from "../providers/types.js";
+import type { MailboxInfo, MailProvider, MessageDetail, MessageSummary, ProviderCapabilitySnapshot } from "../providers/types.js";
 
 export interface CreateMailToolsInput {
   provider: MailProvider;
@@ -31,6 +31,7 @@ export interface PlanCleanupInput {
 
 export interface MailTools {
   listMailboxes(): Promise<{ mailboxes: MailboxInfo[] }>;
+  getCapabilitySnapshot(): Promise<{ capability: ProviderCapabilitySnapshot }>;
   search(input: SearchMessagesInput): Promise<{ messages: MessageSummary[] }>;
   fetch(ref: MessageRef): Promise<{ message: MessageDetail }>;
   classifyMessages(input: ClassifyMessagesToolInput): Promise<{ classifications: MessageClassification[] }>;
@@ -45,6 +46,13 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
   return {
     async listMailboxes() {
       return { mailboxes: await input.provider.listMailboxes() };
+    },
+
+    async getCapabilitySnapshot() {
+      if (!input.provider.getCapabilitySnapshot) {
+        throw new Error("Provider does not expose a capability snapshot");
+      }
+      return { capability: await input.provider.getCapabilitySnapshot() };
     },
 
     async search(searchInput) {

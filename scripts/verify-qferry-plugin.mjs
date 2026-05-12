@@ -10,7 +10,7 @@ const requiredFiles = [
   "plugins/qferry/README.md",
   "plugins/qferry/skills/qferry/SKILL.md",
   "plugins/qferry/src/mcp.ts",
-  "plugins/qferry/dist/mcp.js",
+  "plugins/qferry/dist/mcp.cjs",
 ];
 
 for (const file of requiredFiles) {
@@ -26,11 +26,11 @@ if (pluginJson.skills !== "./skills/" || pluginJson.mcpServers !== "./.mcp.json"
 }
 
 const mcpJson = JSON.parse(await readFile(resolve(repoRoot, "plugins/qferry/.mcp.json"), "utf8"));
-if (mcpJson.qferry?.args?.[0] !== "./dist/mcp.js") {
-  throw new Error(".mcp.json must launch plugin-local ./dist/mcp.js");
+if (mcpJson.qferry?.args?.[0] !== "./dist/mcp.cjs") {
+  throw new Error(".mcp.json must launch plugin-local ./dist/mcp.cjs");
 }
 
-const dist = await readFile(resolve(repoRoot, "plugins/qferry/dist/mcp.js"), "utf8");
+const dist = await readFile(resolve(repoRoot, "plugins/qferry/dist/mcp.cjs"), "utf8");
 for (const forbidden of ["tsx", "apps/chatgpt-app/src", "../../.."]) {
   if (dist.includes(forbidden)) {
     throw new Error(`plugins/qferry/dist/mcp.js must be plugin-local runtime, found forbidden reference: ${forbidden}`);
