@@ -28,14 +28,14 @@ Use staged commits:
 
 - [ ] Add a failing verifier/test that rejects a plugin runtime which references `tsx`, `apps/chatgpt-app/src`, or repo source paths.
 - [ ] Replace `plugins/qferry/src/mcp.js` with a TypeScript or JavaScript plugin runtime entry that can be bundled.
-- [ ] Update `scripts/sync-qferry-plugin-runtime.mjs` to build plugin-local `plugins/qferry/dist/mcp.js` with esbuild.
-- [ ] Update verifier to prove `dist/mcp.js` exists and does not contain source-launcher references.
+- [ ] Update `scripts/sync-qferry-plugin-runtime.mjs` to build plugin-local `plugins/qferry/dist/mcp.cjs` with esbuild.
+- [ ] Update verifier to prove `dist/mcp.cjs` exists and does not contain source-launcher references.
 - [ ] Run `rtk pnpm run verify:qferry-plugin` and `rtk pnpm run check`.
 - [ ] Commit runtime bundling.
 
 ### Task 2: Plugin-local Fixture MCP E2E
 
-- [ ] Add an e2e runner that reads `plugins/qferry/.mcp.json`, starts `node ./dist/mcp.js` from the plugin directory, and talks MCP over stdio.
+- [ ] Add an e2e runner that reads `plugins/qferry/.mcp.json`, starts `node ./dist/mcp.cjs` from the plugin directory, and talks MCP over stdio.
 - [ ] Call `list_mailboxes`, `search`, `classify_messages`, and `plan_cleanup`.
 - [ ] Write `logs/runs/<runId>.jsonl` and `artifacts/e2e/<runId>/summary.md`.
 - [ ] Add root script `qferry:e2e:plugin-fixture`.

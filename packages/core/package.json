@@ -3,6 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "license": "Apache-2.0",
+  "author": "RayStorm",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
