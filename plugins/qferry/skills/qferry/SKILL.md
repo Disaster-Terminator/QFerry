@@ -7,6 +7,17 @@ description: Use QFerry when Codex needs to inspect, classify, or plan safe hand
 
 QFerry is a Gmail-like QQ Mail organization plugin for Codex. Use it for mailbox governance work: listing folders, bounded metadata search, deterministic classification, and preview-only operation planning.
 
+## Default Workflow
+
+For real mailbox work, call tools in this order:
+
+1. `get_status` to confirm provider, config source, account alias, read-only limits, and warnings.
+2. `list_mailboxes` to discover available folders.
+3. `triage_inbox` for the default Gmail-like inbox review summary.
+4. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups.
+
+Use `classify_messages` when debugging rules or doing focused classification. Prefer `triage_inbox` for normal inbox organization because it returns group counts, sampled message count, recommended next action, and `mutationsAttempted`.
+
 ## Safety Boundary
 
 Do not request real QQ Mail mutation through QFerry unless the user explicitly authorizes that specific operation. The current product milestone is read-only and preview-first.

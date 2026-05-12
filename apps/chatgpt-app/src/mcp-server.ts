@@ -114,6 +114,23 @@ export function createQFerryMcpServer(): McpServer {
   );
 
   server.registerTool(
+    "triage_inbox",
+    {
+      title: "Triage inbox",
+      description: "Use this as the default Gmail-like read-only inbox review: classify bounded metadata, summarize groups, and recommend preview-only next steps.",
+      inputSchema: {
+        folder: z.string(),
+        limit: z.number().int().min(1).max(20),
+        defaultGroupId: z.string().optional(),
+        rules: z.array(classificationRuleSchema).optional(),
+        rulesFile: z.string().optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await tools.triageInbox(input)),
+  );
+
+  server.registerTool(
     "plan_cleanup",
     {
       title: "Plan cleanup",

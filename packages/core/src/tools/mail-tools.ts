@@ -23,6 +23,17 @@ export interface ClassifyMessagesToolInput {
   rulesFile?: string;
 }
 
+export interface TriageInboxInput extends ClassifyMessagesToolInput {}
+
+export interface InboxTriageReport {
+  provider: string;
+  folder: string;
+  sampledMessages: number;
+  groupCounts: Record<string, number>;
+  recommendedNextAction: "review_preview_plan";
+  mutationsAttempted: 0;
+}
+
 export interface PlanCleanupInput {
   runId: string;
   folder: string;
@@ -46,6 +57,12 @@ export interface MailTools {
   classifyMessages(input: ClassifyMessagesToolInput): Promise<{
     classifications: MessageClassification[];
     ruleset?: ClassificationRulesetMetadata;
+  }>;
+  triageInbox(input: TriageInboxInput): Promise<{
+    triage: InboxTriageReport;
+    classifications: MessageClassification[];
+    ruleset?: ClassificationRulesetMetadata;
+    mutationsAttempted: 0;
   }>;
   planCleanup(input: PlanCleanupInput): Promise<{
     plan: OperationPlan;
@@ -120,6 +137,33 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       };
     },
 
+    async triageInbox(triageInput) {
+      const resolvedRules = await resolveRules(triageInput);
+      const messages = await input.provider.scanMailboxMetadata({
+        folder: triageInput.folder,
+        limit: triageInput.limit,
+      });
+      const classifications = classifyMessages({
+        messages,
+        rules: resolvedRules.rules,
+        defaultGroupId: resolvedRules.defaultGroupId,
+      });
+
+      return {
+        triage: {
+          provider: messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture",
+          folder: triageInput.folder,
+          sampledMessages: messages.length,
+          groupCounts: countGroups(classifications),
+          recommendedNextAction: "review_preview_plan",
+          mutationsAttempted: 0,
+        },
+        classifications,
+        ruleset: resolvedRules.ruleset,
+        mutationsAttempted: 0,
+      };
+    },
+
     async planCleanup(planInput) {
       const resolvedRules = await resolveRules({
         ...planInput,
@@ -152,6 +196,14 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       };
     },
   };
+}
+
+function countGroups(classifications: MessageClassification[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const classification of classifications) {
+    counts[classification.groupId] = (counts[classification.groupId] ?? 0) + 1;
+  }
+  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
 }
 
 async function resolveRules(input: {

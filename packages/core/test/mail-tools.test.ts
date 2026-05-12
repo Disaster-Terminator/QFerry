@@ -105,6 +105,37 @@ describe("mail tools", () => {
     });
   });
 
+  it("creates read-only inbox triage reports", async () => {
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    const result = await tools.triageInbox({
+      folder: "INBOX",
+      limit: 10,
+      defaultGroupId: "review",
+      rules: [
+        {
+          id: "newsletter",
+          groupId: "newsletter",
+          match: { fromIncludes: "newsletter@" },
+        },
+      ],
+    });
+
+    expect(result.triage).toEqual({
+      provider: "fixture",
+      folder: "INBOX",
+      sampledMessages: 2,
+      groupCounts: {
+        newsletter: 1,
+        review: 1,
+      },
+      recommendedNextAction: "review_preview_plan",
+      mutationsAttempted: 0,
+    });
+    expect(result.classifications).toHaveLength(2);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
   it("classifies messages with rules loaded from a rules file", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-"));
     const rulesFile = join(dir, "qferry.rules.json");

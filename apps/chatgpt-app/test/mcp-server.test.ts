@@ -24,10 +24,12 @@ describe("QFerry ChatGPT App MCP server", () => {
       "search",
       "fetch",
       "classify_messages",
+      "triage_inbox",
       "plan_cleanup",
     ]);
     expect(tools.tools.find((tool) => tool.name === "get_status")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "search")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "triage_inbox")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_capability_snapshot")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
 
@@ -104,6 +106,39 @@ describe("QFerry ChatGPT App MCP server", () => {
         provider: "fixture",
         supportsMutation: false,
       },
+    });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("calls read-only inbox triage through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "triage_inbox",
+      arguments: {
+        folder: "INBOX",
+        limit: 10,
+        defaultGroupId: "review",
+        rules: [{ id: "newsletter", groupId: "newsletter", match: { fromIncludes: "newsletter@" } }],
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      triage: {
+        provider: "fixture",
+        sampledMessages: 2,
+        mutationsAttempted: 0,
+      },
+      mutationsAttempted: 0,
     });
 
     await client.close();
