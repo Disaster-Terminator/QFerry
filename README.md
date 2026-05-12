@@ -24,13 +24,13 @@ Codex
 
 ## 快速开始
 
-普通用户不需要 clone、安装依赖或编译 QFerry。当前安装路径是 Codex 插件市场：
+通过 Codex 插件市场添加 QFerry：
 
 ```powershell
 codex plugin marketplace add Disaster-Terminator/QFerry
 ```
 
-然后打开 Codex，运行 `/plugins`，按键盘右方向键切到 QFerry 所在插件市场，按 Enter 打开 `QFerry` 详情页，选择 `Install plugin`。
+然后打开 Codex，运行 `/plugins`，按键盘右方向键切到 `[QFerry Local]` 插件市场，按 Enter 打开 `QFerry` 详情页，选择 `Install plugin`。
 
 安装后重新打开 Codex，然后让 Codex 使用 QFerry：
 

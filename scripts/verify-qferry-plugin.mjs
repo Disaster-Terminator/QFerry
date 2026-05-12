@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const requiredFiles = [
+  ".agents/plugins/marketplace.json",
   "plugins/qferry/.codex-plugin/plugin.json",
   "plugins/qferry/.mcp.json",
   "plugins/qferry/README.md",
@@ -23,6 +24,18 @@ if (pluginJson.name !== "qferry") {
 }
 if (pluginJson.skills !== "./skills/" || pluginJson.mcpServers !== "./.mcp.json") {
   throw new Error("plugin.json must reference plugin-local skills and .mcp.json");
+}
+
+const marketplaceJson = JSON.parse(await readFile(resolve(repoRoot, ".agents/plugins/marketplace.json"), "utf8"));
+const marketplaceEntry = marketplaceJson.plugins?.find((plugin) => plugin.name === "qferry");
+if (!marketplaceEntry) {
+  throw new Error("marketplace.json must include qferry plugin entry");
+}
+if (marketplaceEntry.source?.source !== "local" || marketplaceEntry.source?.path !== "./plugins/qferry") {
+  throw new Error("marketplace qferry entry must point to ./plugins/qferry");
+}
+if (!marketplaceEntry.policy?.installation || !marketplaceEntry.policy?.authentication || !marketplaceEntry.category) {
+  throw new Error("marketplace qferry entry must include installation policy, authentication policy, and category");
 }
 
 const mcpJson = JSON.parse(await readFile(resolve(repoRoot, "plugins/qferry/.mcp.json"), "utf8"));

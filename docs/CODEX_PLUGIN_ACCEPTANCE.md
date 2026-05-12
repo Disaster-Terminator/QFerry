@@ -10,7 +10,7 @@ QFerry 当前通过 Codex 插件市场安装：
 codex plugin marketplace add Disaster-Terminator/QFerry
 ```
 
-然后打开 Codex，运行 `/plugins`，按键盘右方向键切到 QFerry 所在插件市场，按 Enter 打开 `QFerry` 详情页，选择 `Install plugin`。
+然后打开 Codex，运行 `/plugins`，按键盘右方向键切到 `[QFerry Local]` 插件市场，按 Enter 打开 `QFerry` 详情页，选择 `Install plugin`。
 
 Codex CLI 的 `codex plugin marketplace add/upgrade/remove` 管理的是插件市场，不是直接安装插件。插件安装在 Codex TUI 的 `/plugins` 里完成。
 

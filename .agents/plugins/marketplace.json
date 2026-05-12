@@ -1,0 +1,20 @@
+{
+  "name": "qferry-local",
+  "interface": {
+    "displayName": "QFerry Local"
+  },
+  "plugins": [
+    {
+      "name": "qferry",
+      "source": {
+        "source": "local",
+        "path": "./plugins/qferry"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
