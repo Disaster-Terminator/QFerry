@@ -76,6 +76,15 @@ Characteristics:
 
 Build the shared backend and tool contract first, then wrap it.
 
+After code-level wheel audit, the recommended implementation language for the real core is Node/TypeScript. Keep the existing Python QQ probe as a low-dependency diagnostic tool only.
+
+Main reasons:
+
+- OpenAI Apps SDK and MCP examples are Node-friendly.
+- The strongest reference implementation is `leeguooooo/Mailbox`, which uses Node packages and `imapflow`.
+- `Mailbox` contains provider-specific lessons for QQ/163-style IMAP search problems.
+- TypeScript gives a better path to shared contracts across remote MCP, Codex plugin packaging, and local test tools.
+
 Phase 1 should be tool-only and trace-first:
 
 ```text
@@ -234,3 +243,4 @@ Privacy rule:
 - OpenAI Apps SDK MCP server guide: https://developers.openai.com/apps-sdk/build/mcp-server
 - Local Gmail Codex plugin notes inspected under `C:\Users\Disas\.codex\plugins\cache\openai-curated\gmail\63976030`
 - QQ Mail authorization-code help page: https://help.mail.qq.com/detail/106/985
+- Code-level wheel audit: `docs/WHEEL_AUDIT.md`
