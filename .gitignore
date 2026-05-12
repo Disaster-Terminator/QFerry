@@ -4,6 +4,8 @@
 .serena/
 logs/
 artifacts/e2e/
+**/logs/
+**/artifacts/e2e/
 __pycache__/
 *.pyc
 node_modules/

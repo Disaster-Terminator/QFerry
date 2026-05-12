@@ -39,6 +39,20 @@ plugins/codex
 
 The wrappers must not own mailbox logic. They call `packages/core`.
 
+## Codex Plugin Packaging Reference
+
+QFerry should follow the proven plugin packaging pattern from `G:\repository\supervisor` when the Codex plugin surface is added.
+
+Applicable practices:
+
+- Keep a plugin directory with `.codex-plugin/plugin.json`, `.mcp.json`, skills, README, and plugin-local `dist/`.
+- Make marketplace/plugin installs self-contained: `.mcp.json` should start runtime from plugin-local `./dist/...`, not from the source tree.
+- Build root runtime first, then sync/bundle the runtime into the plugin directory.
+- Add a package verifier based on `pnpm pack --dry-run --json` that fails if required docs, plugin manifests, skill files, or `dist/` runtime files are missing.
+- Do not rely on the user's local source checkout for a marketplace-installed plugin.
+
+QFerry should not add this plugin surface in the fixture e2e slice. Add it after the MCP tool contract exists.
+
 ## Storage Model
 
 QFerry exposes custom classification groups. Provider-specific storage targets are optional.
@@ -157,6 +171,7 @@ Allowed now:
 - Operation-plan model.
 - Fixture provider.
 - Unit tests.
+- Fixture e2e command and artifacts.
 
 Not allowed in this slice:
 

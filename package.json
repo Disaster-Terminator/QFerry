@@ -8,7 +8,8 @@
   ],
   "scripts": {
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "qferry:e2e:fixture": "pnpm --filter @qferry/core fixture:e2e"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

@@ -7,9 +7,11 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "fixture:e2e": "tsx src/e2e/fixture-e2e.ts --project-root ../.."
   },
   "devDependencies": {
-    "@types/node": "^24.10.1"
+    "@types/node": "^24.10.1",
+    "tsx": "^4.21.0"
   }
 }
