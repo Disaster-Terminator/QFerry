@@ -35,7 +35,15 @@ async function loadDotenv() {
 
 async function writeJsonl(path, event) {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(event, Object.keys(event).sort())}\n`, { encoding: "utf8", flag: "a" });
+  await writeFile(path, `${JSON.stringify(sortJson(event))}\n`, { encoding: "utf8", flag: "a" });
+}
+
+function sortJson(value) {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, nested]) => [key, sortJson(nested)]));
 }
 
 function describeError(error) {
@@ -155,6 +163,16 @@ async function main() {
   };
 
   await client.connect(transport);
+  const status = await callToolWithStructuredContent(client, "get_status", {});
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "get_status",
+    statusProvider: status.structuredContent?.status?.provider,
+    statusConfigSource: status.structuredContent?.status?.configSource,
+    statusWarnings: status.structuredContent?.status?.statusWarnings,
+  });
+
   const capability = await callToolWithStructuredContent(client, "get_capability_snapshot", {});
   await writeJsonl(tracePath, {
     ...baseEvent,
@@ -183,6 +201,24 @@ async function main() {
     event: "plugin_tool_called",
     toolName: "search",
     sampledMessages,
+  });
+
+  const triage = await callToolWithStructuredContent(
+    client,
+    "triage_inbox",
+    {
+      folder: "INBOX",
+      limit: 1,
+      rulesFile,
+    },
+  );
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "triage_inbox",
+    sampledMessages: triage.structuredContent?.triage?.sampledMessages,
+    triageGroupCounts: triage.structuredContent?.triage?.groupCounts,
+    mutationsAttempted: triage.structuredContent?.mutationsAttempted,
   });
 
   const previewPlan = await callToolWithStructuredContent(
@@ -223,11 +259,16 @@ async function main() {
       "- dryRun: true",
       "- mutationAllowed: false",
       "- mutationsAttempted: 0",
+      `- statusProvider: ${status.structuredContent?.status?.provider ?? "<missing>"}`,
+      `- statusConfigSource: ${status.structuredContent?.status?.configSource ?? "<missing>"}`,
+      `- statusWarnings: ${(status.structuredContent?.status?.statusWarnings ?? []).join("; ")}`,
       `- rulesFile: ${rulesFile}`,
       `- rulesetVersion: ${previewPlan.structuredContent?.ruleset?.version ?? "<missing>"}`,
       `- rulesetRuleCount: ${previewPlan.structuredContent?.ruleset?.ruleCount ?? "<missing>"}`,
       `- folderCount: ${mailboxCount}`,
       `- sampledMessages: ${sampledMessages}`,
+      `- triageGroupCounts: ${JSON.stringify(triage.structuredContent?.triage?.groupCounts ?? {})}`,
+      `- triageSampledMessages: ${triage.structuredContent?.triage?.sampledMessages ?? "<missing>"}`,
       `- previewPlanStatus: ${previewPlan.structuredContent?.plan?.status ?? "<missing>"}`,
       `- previewPlanMessageRefs: ${previewPlan.structuredContent?.plan?.messageRefs?.length ?? "<missing>"}`,
       `- trace: ${tracePath}`,

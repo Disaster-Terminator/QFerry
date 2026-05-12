@@ -65,7 +65,21 @@ QQMAIL_KEY=your-qq-mail-authorization-code
 QQMAIL_METADATA_SAMPLE_LIMIT=1
 ```
 
-`QQMAIL_KEY` 是 QQ 邮箱 IMAP/SMTP 授权码，不是 QQ 登录密码。真实账号验收只允许小批量 metadata 读取。
+非密钥配置也可以放在本机 JSON 文件，并通过 `QFERRY_CONFIG_FILE` 指向：
+
+```json
+{
+  "provider": "qqmail",
+  "qqmail": {
+    "email": "your@qq.com",
+    "imapHost": "imap.qq.com",
+    "imapPort": 993,
+    "metadataSampleLimit": 1
+  }
+}
+```
+
+`QQMAIL_KEY` 是 QQ 邮箱 IMAP/SMTP 授权码，不是 QQ 登录密码。它只通过环境变量提供，不写入本机 JSON、仓库、trace 或 summary。真实账号验收只允许小批量 metadata 读取。
 
 ## 规则文件
 

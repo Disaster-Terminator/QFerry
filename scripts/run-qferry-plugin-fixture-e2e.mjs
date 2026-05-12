@@ -15,7 +15,15 @@ function createRunId() {
 
 async function writeJsonl(path, event) {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(event, Object.keys(event).sort())}\n`, { encoding: "utf8", flag: "a" });
+  await writeFile(path, `${JSON.stringify(sortJson(event))}\n`, { encoding: "utf8", flag: "a" });
+}
+
+function sortJson(value) {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, nested]) => [key, sortJson(nested)]));
 }
 
 async function main() {
@@ -68,9 +76,11 @@ async function main() {
   });
 
   const calls = [
+    ["get_status", {}],
     ["list_mailboxes", {}],
     ["search", { folder: "INBOX", limit: 10, query: "digest" }],
     ["classify_messages", { folder: "INBOX", limit: 10, rulesFile }],
+    ["triage_inbox", { folder: "INBOX", limit: 10, rulesFile }],
     ["plan_cleanup", {
       runId,
       folder: "INBOX",
@@ -81,18 +91,25 @@ async function main() {
       selectedGroupIds: ["archive"],
     }],
   ];
+  let statusResult;
   let classifyResult;
+  let triageResult;
   let planResult;
 
   for (const [name, args] of calls) {
     const result = await callToolWithStructuredContent(client, name, args);
+    if (name === "get_status") statusResult = result.structuredContent;
     if (name === "classify_messages") classifyResult = result.structuredContent;
+    if (name === "triage_inbox") triageResult = result.structuredContent;
     if (name === "plan_cleanup") planResult = result.structuredContent;
     await writeJsonl(tracePath, {
       ...baseEvent,
       event: "plugin_tool_called",
       toolName: name,
       structuredContentKeys: Object.keys(result.structuredContent ?? {}),
+      statusProvider: result.structuredContent?.status?.provider,
+      sampledMessages: result.structuredContent?.triage?.sampledMessages,
+      triageGroupCounts: result.structuredContent?.triage?.groupCounts,
     });
   }
 
@@ -108,11 +125,16 @@ async function main() {
       "- dryRun: true",
       "- mutationAllowed: false",
       "- mutationsAttempted: 0",
+      `- statusProvider: ${statusResult?.status?.provider ?? "<missing>"}`,
+      `- statusConfigSource: ${statusResult?.status?.configSource ?? "<missing>"}`,
+      `- statusWarnings: ${(statusResult?.status?.statusWarnings ?? []).join("; ")}`,
       `- rulesFile: ${rulesFile}`,
       `- rulesetVersion: ${classifyResult?.ruleset?.version ?? "<missing>"}`,
       `- rulesetRuleCount: ${classifyResult?.ruleset?.ruleCount ?? "<missing>"}`,
       `- toolsListed: ${tools.tools.length}`,
       `- toolsCalled: ${calls.length}`,
+      `- triageGroupCounts: ${JSON.stringify(triageResult?.triage?.groupCounts ?? {})}`,
+      `- triageSampledMessages: ${triageResult?.triage?.sampledMessages ?? "<missing>"}`,
       `- previewPlanStatus: ${planResult?.plan?.status ?? "<missing>"}`,
       `- previewPlanMessageRefs: ${planResult?.plan?.messageRefs?.length ?? "<missing>"}`,
       `- trace: ${tracePath}`,

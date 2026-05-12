@@ -46,7 +46,21 @@ QQMAIL_KEY=your-qq-mail-authorization-code
 QQMAIL_METADATA_SAMPLE_LIMIT=1
 ```
 
-`QQMAIL_KEY` 是 QQ 邮箱 IMAP/SMTP 授权码，不是 QQ 登录密码。真实 QQ 邮箱路径默认只读，必须保持 `mutationsAttempted: 0`。
+也可以把非密钥配置放到本机 JSON 文件，并用 `QFERRY_CONFIG_FILE` 指向它：
+
+```json
+{
+  "provider": "qqmail",
+  "qqmail": {
+    "email": "your@qq.com",
+    "imapHost": "imap.qq.com",
+    "imapPort": 993,
+    "metadataSampleLimit": 1
+  }
+}
+```
+
+`QQMAIL_KEY` 是 QQ 邮箱 IMAP/SMTP 授权码，不是 QQ 登录密码。它只通过环境变量提供，不写入本机 JSON、仓库、trace 或 summary。真实 QQ 邮箱路径默认只读，必须保持 `mutationsAttempted: 0`。
 
 说明：Codex CLI 的 `codex plugin marketplace add` 只添加插件市场；插件安装在 Codex TUI 的 `/plugins` 里完成。
 
@@ -55,8 +69,8 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 - Codex 能看到 QFerry skill。
 - QFerry MCP server 通过插件目录里的 `./mcp-bootstrap.mjs` 启动，再加载 plugin-local `./dist/mcp.cjs`。
 - `mcp-bootstrap.mjs` 会把运行 cwd 切到用户状态目录，避免 Windows 下 MCP 进程占住插件缓存目录，导致插件详情、升级或卸载失败。
-- fixture provider 可调用 `list_mailboxes`、`search`、`classify_messages`、`plan_cleanup`。
-- QQ Mail read-only provider 可调用 `get_capability_snapshot`、`list_mailboxes` 和 bounded `search`。
+- fixture provider 可调用 `get_status`、`list_mailboxes`、`search`、`classify_messages`、`triage_inbox`、`plan_cleanup`。
+- QQ Mail read-only provider 可调用 `get_status`、`get_capability_snapshot`、`list_mailboxes`、bounded `search` 和 `triage_inbox`。
 - 每次 e2e 留下 trace artifacts，方便验收回溯。
 
 ## 当前能力
@@ -66,6 +80,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 | 文件夹读取 | 读取 QQ 邮箱文件夹列表 |
 | 小批量扫描 | 对 QQ 邮箱执行 bounded metadata search |
 | 分类规则 | 用内联规则或 `qferry.rules.json` 把邮件归入用户定义的 group |
+| 收件箱整理报告 | `triage_inbox` 汇总 groupCounts、样本数、建议下一步 |
 | 清理计划 | 基于规则文件生成 preview-only cleanup plan，不直接修改真实邮箱 |
 | 测试留痕 | 写入 jsonl trace 和 Markdown summary |
 | 安全边界 | 默认禁止真实邮箱写操作 |
