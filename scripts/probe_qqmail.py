@@ -79,9 +79,7 @@ def decode_bytes(value: bytes) -> str:
 def parse_fetch_summary(chunks: list[Any]) -> list[dict[str, str]]:
     summaries: list[dict[str, str]] = []
     for item in chunks:
-        if not isinstance(item, tuple) or not item:
-            continue
-        header = item[0]
+        header = item[0] if isinstance(item, tuple) and item else item
         if not isinstance(header, bytes):
             continue
         text = decode_bytes(header)
@@ -98,6 +96,22 @@ def parse_fetch_summary(chunks: list[Any]) -> list[dict[str, str]]:
             }
         )
     return summaries
+
+
+def build_readonly_operation_plan(run_id: str, account_alias: str) -> dict[str, Any]:
+    return {
+        "operationPlanId": f"qq_readonly_{run_id}",
+        "runId": run_id,
+        "provider": "qqmail",
+        "accountAlias": account_alias,
+        "action": "none",
+        "status": "preview",
+        "confirmationRequired": True,
+        "messageRefs": [],
+        "target": {},
+        "mutationAllowed": False,
+        "mutationsAttempted": 0,
+    }
 
 
 def fail(message: str) -> None:
@@ -121,6 +135,7 @@ def run_probe(project_root: Path) -> int:
     trace_path = project_root / "logs" / "runs" / f"{run_id}.jsonl"
     artifact_dir = project_root / "artifacts" / "e2e" / run_id
     capability_path = artifact_dir / "capability-snapshot.json"
+    operation_plan_path = artifact_dir / "operation-plan.json"
     summary_path = artifact_dir / "summary.md"
 
     start = time.monotonic()
@@ -151,6 +166,7 @@ def run_probe(project_root: Path) -> int:
         "port": port,
         "readOnlyOnly": True,
         "mutationsAttempted": [],
+        "mutationsAttemptedCount": 0,
         "folders": [],
         "capabilities": [],
         "selectedMailbox": None,
@@ -215,6 +231,17 @@ def run_probe(project_root: Path) -> int:
                 if sample_uids:
                     uid_set = ",".join(sample_uids)
                     typ, fetch_data = imap.uid("FETCH", uid_set, "(UID FLAGS INTERNALDATE RFC822.SIZE)")
+                    write_jsonl_event(
+                        trace_path,
+                        {
+                            **base_event,
+                            "event": "metadata_fetch_finished",
+                            "timestamp": now_iso(),
+                            "status": typ,
+                            "requestedUidCount": len(sample_uids),
+                            "responseChunkCount": len(fetch_data) if fetch_data else 0,
+                        },
+                    )
                     if typ == "OK":
                         snapshot["sampledMessages"] = parse_fetch_summary(fetch_data)
         write_jsonl_event(
@@ -255,7 +282,12 @@ def run_probe(project_root: Path) -> int:
 
         snapshot["durationMs"] = round((time.monotonic() - start) * 1000)
         artifact_dir.mkdir(parents=True, exist_ok=True)
+        operation_plan = build_readonly_operation_plan(run_id, mask_email(email))
         capability_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        operation_plan_path.write_text(
+            json.dumps(operation_plan, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         summary_path.write_text(
             "\n".join(
                 [
@@ -268,9 +300,10 @@ def run_probe(project_root: Path) -> int:
                     f"- selectedMailbox: {snapshot.get('selectedMailbox')}",
                     f"- inboxExists: {snapshot.get('exists')}",
                     f"- sampledMessages: {len(snapshot['sampledMessages'])}",
-                    f"- mutationsAttempted: {len(snapshot['mutationsAttempted'])}",
+                    f"- mutationsAttempted: {snapshot['mutationsAttemptedCount']}",
                     f"- trace: `{trace_path}`",
                     f"- capabilitySnapshot: `{capability_path}`",
+                    f"- operationPlan: `{operation_plan_path}`",
                 ]
             )
             + "\n",

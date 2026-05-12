@@ -1,0 +1,31 @@
+{
+  "name": "qferry",
+  "version": "0.0.0",
+  "description": "QQ Mail organization tools for Codex with read-only and preview-first safety.",
+  "author": {
+    "name": "Disaster-Terminator",
+    "email": "private@example.invalid",
+    "url": "https://github.com/Disaster-Terminator"
+  },
+  "homepage": "https://github.com/Disaster-Terminator/QFerry",
+  "repository": "https://github.com/Disaster-Terminator/QFerry",
+  "license": "MIT",
+  "keywords": ["codex", "mcp", "qqmail", "email", "gmail-like"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "QFerry",
+    "shortDescription": "Organize QQ Mail through safe, traceable mailbox tools.",
+    "longDescription": "QFerry exposes Gmail-like QQ Mail organization workflows to Codex. The initial plugin surface is read-only and preview-first: inspect bounded metadata, classify messages, create operation plans, and record trace artifacts before any real mailbox mutation is considered.",
+    "developerName": "Disaster-Terminator",
+    "category": "Productivity",
+    "capabilities": ["MCP", "Skills", "Local"],
+    "websiteURL": "https://github.com/Disaster-Terminator/QFerry",
+    "defaultPrompt": [
+      "Use QFerry to inspect QQ Mail folders safely.",
+      "Classify a bounded mailbox sample into QFerry groups.",
+      "Create a preview-only cleanup plan with trace artifacts."
+    ],
+    "brandColor": "#0F766E"
+  }
+}

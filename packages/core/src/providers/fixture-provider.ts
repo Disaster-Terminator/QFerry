@@ -1,4 +1,11 @@
-import type { MailboxInfo, MailProvider, MessageDetail, MessageSummary, ScanMailboxMetadataInput } from "./types.js";
+import type {
+  MailboxInfo,
+  MailProvider,
+  MessageDetail,
+  MessageSummary,
+  ProviderCapabilitySnapshot,
+  ScanMailboxMetadataInput,
+} from "./types.js";
 import type { MessageRef } from "../operation-plan.js";
 
 interface FixtureMessage extends MessageDetail {}
@@ -49,6 +56,19 @@ export class FixtureMailProvider implements MailProvider {
 
   async listMailboxes(): Promise<MailboxInfo[]> {
     return this.mailboxes;
+  }
+
+  async getCapabilitySnapshot(): Promise<ProviderCapabilitySnapshot> {
+    return {
+      provider: "fixture",
+      accountAlias: "demo",
+      supportsListMailboxes: true,
+      supportsMetadataScan: true,
+      supportsFetchMessage: true,
+      supportsMutation: false,
+      mutationActions: [],
+      maxRecommendedScanLimit: 10,
+    };
   }
 
   async scanMailboxMetadata(input: ScanMailboxMetadataInput): Promise<MessageSummary[]> {

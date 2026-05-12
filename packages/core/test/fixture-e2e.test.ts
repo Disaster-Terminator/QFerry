@@ -14,6 +14,7 @@ describe("fixture e2e", () => {
     expect(result.provider).toBe("fixture");
     expect(result.mutationsAttempted).toBe(0);
     expect(result.artifacts.summaryPath).toContain("summary.md");
+    expect(result.artifacts.capabilitySnapshotPath).toContain("capability-snapshot.json");
 
     const trace = await readFile(result.artifacts.tracePath, "utf8");
     expect(trace).toContain("fixture_e2e_started");
@@ -28,5 +29,9 @@ describe("fixture e2e", () => {
     expect(operationPlan).toContain('"status": "preview"');
     expect(operationPlan).toContain('"action": "move"');
     expect(operationPlan).not.toContain("fixture full body");
+
+    const capabilitySnapshot = await readFile(result.artifacts.capabilitySnapshotPath, "utf8");
+    expect(capabilitySnapshot).toContain('"provider": "fixture"');
+    expect(capabilitySnapshot).toContain('"supportsMutation": false');
   });
 });

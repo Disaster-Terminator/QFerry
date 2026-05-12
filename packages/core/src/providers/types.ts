@@ -6,6 +6,17 @@ export interface MailboxInfo {
   flags?: string[];
 }
 
+export interface ProviderCapabilitySnapshot {
+  provider: string;
+  accountAlias: string;
+  supportsListMailboxes: boolean;
+  supportsMetadataScan: boolean;
+  supportsFetchMessage: boolean;
+  supportsMutation: boolean;
+  mutationActions: string[];
+  maxRecommendedScanLimit: number;
+}
+
 export interface ScanMailboxMetadataInput {
   folder: string;
   limit: number;
@@ -28,4 +39,5 @@ export interface MailProvider {
   listMailboxes(): Promise<MailboxInfo[]>;
   scanMailboxMetadata(input: ScanMailboxMetadataInput): Promise<MessageSummary[]>;
   fetchMessage(ref: MessageRef): Promise<MessageDetail>;
+  getCapabilitySnapshot?(): Promise<ProviderCapabilitySnapshot>;
 }

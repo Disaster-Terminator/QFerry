@@ -10,4 +10,6 @@ __pycache__/
 *.pyc
 node_modules/
 dist/
+!plugins/qferry/dist/
+!plugins/qferry/dist/**
 coverage/

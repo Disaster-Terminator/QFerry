@@ -9,7 +9,11 @@
   "scripts": {
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "qferry:e2e:fixture": "pnpm --filter @qferry/core fixture:e2e"
+    "sync:qferry-plugin": "node scripts/sync-qferry-plugin-runtime.mjs",
+    "verify:qferry-plugin": "node scripts/verify-qferry-plugin.mjs",
+    "check": "pnpm run sync:qferry-plugin && pnpm run verify:qferry-plugin && pnpm test && pnpm run typecheck",
+    "qferry:e2e:fixture": "pnpm --filter @qferry/core fixture:e2e",
+    "qferry:e2e:chatgpt-fixture": "pnpm --filter @qferry/chatgpt-app fixture:e2e"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

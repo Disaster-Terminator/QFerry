@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import { createOperationPlan } from "../operation-plan.js";
 import { FixtureMailProvider } from "../providers/fixture-provider.js";
+import type { ProviderCapabilitySnapshot } from "../providers/types.js";
 import { JsonlTraceWriter, createRunId } from "../trace.js";
 
 export interface FixtureE2EInput {
@@ -18,6 +19,7 @@ export interface FixtureE2EResult {
   artifacts: {
     tracePath: string;
     summaryPath: string;
+    capabilitySnapshotPath: string;
     operationPlanPath: string;
   };
 }
@@ -27,6 +29,7 @@ export async function runFixtureE2E(input: FixtureE2EInput): Promise<FixtureE2ER
   const artifactDir = join(input.projectRoot, "artifacts", "e2e", runId);
   const tracePath = join(input.projectRoot, "logs", "runs", `${runId}.jsonl`);
   const summaryPath = join(artifactDir, "summary.md");
+  const capabilitySnapshotPath = join(artifactDir, "capability-snapshot.json");
   const operationPlanPath = join(artifactDir, "operation-plan.json");
 
   const trace = new JsonlTraceWriter(tracePath);
@@ -40,6 +43,15 @@ export async function runFixtureE2E(input: FixtureE2EInput): Promise<FixtureE2ER
 
   await mkdir(artifactDir, { recursive: true });
   await trace.write({ ...baseEvent, event: "fixture_e2e_started" });
+
+  const capabilitySnapshot: ProviderCapabilitySnapshot = await provider.getCapabilitySnapshot();
+  await writeFile(capabilitySnapshotPath, `${JSON.stringify(capabilitySnapshot, null, 2)}\n`, "utf8");
+  await trace.write({
+    ...baseEvent,
+    event: "capability_snapshot_written",
+    supportsMutation: capabilitySnapshot.supportsMutation,
+    maxRecommendedScanLimit: capabilitySnapshot.maxRecommendedScanLimit,
+  });
 
   const mailboxes = await provider.listMailboxes();
   await trace.write({ ...baseEvent, event: "mailboxes_listed", mailboxCount: mailboxes.length });
@@ -74,6 +86,7 @@ export async function runFixtureE2E(input: FixtureE2EInput): Promise<FixtureE2ER
     `- scannedMessages: ${messages.length}`,
     `- operationPlanId: ${plan.operationPlanId}`,
     `- trace: ${tracePath}`,
+    `- capabilitySnapshot: ${capabilitySnapshotPath}`,
     `- operationPlan: ${operationPlanPath}`,
     "",
   ].join("\n");
@@ -88,6 +101,7 @@ export async function runFixtureE2E(input: FixtureE2EInput): Promise<FixtureE2ER
     artifacts: {
       tracePath,
       summaryPath,
+      capabilitySnapshotPath,
       operationPlanPath,
     },
   };
