@@ -13,7 +13,8 @@
     "verify:qferry-plugin": "node scripts/verify-qferry-plugin.mjs",
     "check": "pnpm run sync:qferry-plugin && pnpm run verify:qferry-plugin && pnpm test && pnpm run typecheck",
     "qferry:e2e:fixture": "pnpm --filter @qferry/core fixture:e2e",
-    "qferry:e2e:chatgpt-fixture": "pnpm --filter @qferry/chatgpt-app fixture:e2e"
+    "qferry:e2e:chatgpt-fixture": "pnpm --filter @qferry/chatgpt-app fixture:e2e",
+    "qferry:e2e:plugin-fixture": "node scripts/run-qferry-plugin-fixture-e2e.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
