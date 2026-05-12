@@ -6,6 +6,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const pluginDir = resolve(repoRoot, "plugins/qferry");
+let failureContext;
 
 function createRunId() {
   const stamp = new Date().toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
@@ -35,6 +36,48 @@ async function loadDotenv() {
 async function writeJsonl(path, event) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(event, Object.keys(event).sort())}\n`, { encoding: "utf8", flag: "a" });
+}
+
+function describeError(error) {
+  return {
+    type: error instanceof Error ? error.name : typeof error,
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+async function recordFailure(error) {
+  if (!failureContext) return;
+  const errorInfo = describeError(error);
+  await writeJsonl(failureContext.tracePath, {
+    ...failureContext.baseEvent,
+    event: "plugin_qq_readonly_e2e_finished",
+    ok: false,
+    mutationsAttempted: 0,
+    artifactDir: failureContext.artifactDir,
+    error: errorInfo,
+    stderrBytes: failureContext.stderrBytes(),
+  });
+  await writeFile(
+    failureContext.summaryPath,
+    [
+      `# QFerry Plugin QQ Read-only E2E ${failureContext.baseEvent.runId}`,
+      "",
+      "- provider: qqmail",
+      `- accountAlias: ${failureContext.baseEvent.accountAlias}`,
+      "- surface: codex-plugin",
+      "- dryRun: true",
+      "- mutationAllowed: false",
+      "- mutationsAttempted: 0",
+      "- ok: false",
+      `- errorType: ${errorInfo.type}`,
+      `- errorMessage: ${errorInfo.message}`,
+      `- trace: ${failureContext.tracePath}`,
+      `- mcpConfig: ${failureContext.mcpConfigPath}`,
+      `- stderrBytes: ${failureContext.stderrBytes()}`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
 }
 
 function maskEmail(value) {
@@ -102,6 +145,14 @@ async function main() {
   const client = new Client({ name: "qferry-plugin-qq-readonly-e2e", version: "0.0.0" });
   const stderrChunks = [];
   transport.stderr?.on("data", (chunk) => stderrChunks.push(String(chunk)));
+  failureContext = {
+    baseEvent,
+    artifactDir,
+    tracePath,
+    summaryPath,
+    mcpConfigPath,
+    stderrBytes: () => stderrChunks.join("").length,
+  };
 
   await client.connect(transport);
   const capability = await callToolWithStructuredContent(client, "get_capability_snapshot", {});
@@ -195,6 +246,7 @@ async function main() {
     artifactDir,
   });
 
+  failureContext = undefined;
   process.stdout.write(`${JSON.stringify({
     provider: "qqmail",
     runId,
@@ -214,4 +266,7 @@ async function callToolWithStructuredContent(client, name, args) {
   return result;
 }
 
-await main();
+await main().catch(async (error) => {
+  await recordFailure(error);
+  throw error;
+});
