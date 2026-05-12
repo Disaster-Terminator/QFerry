@@ -6,3 +6,6 @@ logs/
 artifacts/e2e/
 __pycache__/
 *.pyc
+node_modules/
+dist/
+coverage/
