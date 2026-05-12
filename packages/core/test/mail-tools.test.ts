@@ -26,6 +26,37 @@ describe("mail tools", () => {
     });
   });
 
+  it("returns runtime status without auth secrets", async () => {
+    const tools = createMailTools({
+      provider: FixtureMailProvider.demo(),
+      runtimeConfig: {
+        provider: "qqmail",
+        accountAlias: "25***@qq.com",
+        configSource: "env",
+        mutationAllowed: false,
+        metadataSampleLimit: 1,
+        statusWarnings: [],
+        qqmail: {
+          email: "25abc@qq.com",
+          authCodePresent: true,
+          imapHost: "imap.qq.com",
+          imapPort: 993,
+        },
+      },
+    });
+
+    const result = await tools.getStatus();
+
+    expect(result.status).toMatchObject({
+      provider: "qqmail",
+      accountAlias: "25***@qq.com",
+      configSource: "env",
+      mutationAllowed: false,
+      metadataSampleLimit: 1,
+    });
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
   it("searches bounded metadata without returning message bodies", async () => {
     const tools = createMailTools({ provider: FixtureMailProvider.demo() });
 

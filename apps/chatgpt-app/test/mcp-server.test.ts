@@ -18,6 +18,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     const tools = await client.listTools();
 
     expect(tools.tools.map((tool) => tool.name)).toEqual([
+      "get_status",
       "list_mailboxes",
       "get_capability_snapshot",
       "search",
@@ -25,9 +26,34 @@ describe("QFerry ChatGPT App MCP server", () => {
       "classify_messages",
       "plan_cleanup",
     ]);
+    expect(tools.tools.find((tool) => tool.name === "get_status")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "search")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_capability_snapshot")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("calls runtime status through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({ name: "get_status", arguments: {} });
+
+    expect(result.structuredContent).toMatchObject({
+      status: {
+        provider: "fixture",
+        configSource: "defaults",
+        mutationAllowed: false,
+      },
+    });
 
     await client.close();
     await server.close();

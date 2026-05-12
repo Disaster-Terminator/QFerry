@@ -2,9 +2,11 @@ import { classifyMessages, type ClassificationRule, type MessageClassification }
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
 import type { MailboxInfo, MailProvider, MessageDetail, MessageSummary, ProviderCapabilitySnapshot } from "../providers/types.js";
 import { loadClassificationRuleset, type ClassificationRulesetMetadata } from "../ruleset.js";
+import type { QFerryRuntimeConfig } from "../runtime-config.js";
 
 export interface CreateMailToolsInput {
   provider: MailProvider;
+  runtimeConfig?: QFerryRuntimeConfig;
 }
 
 export interface SearchMessagesInput {
@@ -34,6 +36,9 @@ export interface PlanCleanupInput {
 }
 
 export interface MailTools {
+  getStatus(): Promise<{
+    status: QFerryRuntimeConfig;
+  }>;
   listMailboxes(): Promise<{ mailboxes: MailboxInfo[] }>;
   getCapabilitySnapshot(): Promise<{ capability: ProviderCapabilitySnapshot }>;
   search(input: SearchMessagesInput): Promise<{ messages: MessageSummary[] }>;
@@ -52,6 +57,25 @@ export interface MailTools {
 
 export function createMailTools(input: CreateMailToolsInput): MailTools {
   return {
+    async getStatus() {
+      if (input.runtimeConfig) {
+        return { status: input.runtimeConfig };
+      }
+      const capability = input.provider.getCapabilitySnapshot
+        ? await input.provider.getCapabilitySnapshot()
+        : undefined;
+      return {
+        status: {
+          provider: capability?.provider === "qqmail" ? "qqmail" : "fixture",
+          accountAlias: capability?.accountAlias ?? "demo",
+          configSource: "provider",
+          mutationAllowed: false,
+          metadataSampleLimit: capability?.maxRecommendedScanLimit ?? 1,
+          statusWarnings: [],
+        },
+      };
+    },
+
     async listMailboxes() {
       return { mailboxes: await input.provider.listMailboxes() };
     },

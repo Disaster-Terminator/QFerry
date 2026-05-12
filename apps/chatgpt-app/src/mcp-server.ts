@@ -4,9 +4,11 @@ import { z } from "zod";
 import {
   createMailTools,
   FixtureMailProvider,
+  loadQFerryRuntimeConfigSync,
   QqReadOnlyProvider,
   type MailProvider,
   type MessageRef,
+  type QFerryRuntimeConfig,
 } from "@qferry/core";
 import { pathToFileURL } from "node:url";
 
@@ -35,7 +37,18 @@ export function createQFerryMcpServer(): McpServer {
     name: "qferry-chatgpt-app",
     version: "0.0.0",
   });
-  const tools = createMailTools({ provider: createProviderFromEnv() });
+  const runtimeConfig = loadQFerryRuntimeConfigSync();
+  const tools = createMailTools({ provider: createProviderFromConfig(runtimeConfig), runtimeConfig });
+
+  server.registerTool(
+    "get_status",
+    {
+      title: "Get QFerry status",
+      description: "Use this first to confirm active provider, config source, account alias, read-only limits, and safety warnings.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async () => toToolResult(await tools.getStatus()),
+  );
 
   server.registerTool(
     "list_mailboxes",
@@ -124,30 +137,57 @@ export function createQFerryMcpServer(): McpServer {
   return server;
 }
 
-function createProviderFromEnv(): MailProvider {
-  if (process.env.QFERRY_PROVIDER !== "qqmail") {
+function createProviderFromConfig(runtimeConfig: QFerryRuntimeConfig): MailProvider {
+  if (runtimeConfig.provider !== "qqmail") {
     return FixtureMailProvider.demo();
   }
 
-  const user = process.env.QQMAIL_EMAIL;
+  const user = runtimeConfig.qqmail?.email;
   const pass = process.env.QQMAIL_KEY;
   if (!user || !pass) {
-    throw new Error("QFERRY_PROVIDER=qqmail requires QQMAIL_EMAIL and QQMAIL_KEY");
+    return new UnavailableMailProvider(runtimeConfig);
   }
 
   return new QqReadOnlyProvider({
-    accountAlias: maskEmail(user),
-    host: process.env.QQMAIL_IMAP_HOST || "imap.qq.com",
-    port: Number.parseInt(process.env.QQMAIL_IMAP_PORT || "993", 10),
-    maxRecommendedScanLimit: Number.parseInt(process.env.QQMAIL_METADATA_SAMPLE_LIMIT || "1", 10),
+    accountAlias: runtimeConfig.accountAlias,
+    host: runtimeConfig.qqmail?.imapHost || "imap.qq.com",
+    port: runtimeConfig.qqmail?.imapPort || 993,
+    maxRecommendedScanLimit: runtimeConfig.metadataSampleLimit,
     auth: { user, pass },
   });
 }
 
-function maskEmail(value: string): string {
-  const [name, domain] = value.split("@", 2);
-  if (!domain) return "<account-provided>";
-  return `${name.slice(0, 2) || "*"}***@${domain}`;
+class UnavailableMailProvider implements MailProvider {
+  constructor(private readonly runtimeConfig: QFerryRuntimeConfig) {}
+
+  async listMailboxes(): Promise<never> {
+    throw this.error();
+  }
+
+  async scanMailboxMetadata(): Promise<never> {
+    throw this.error();
+  }
+
+  async fetchMessage(): Promise<never> {
+    throw this.error();
+  }
+
+  async getCapabilitySnapshot() {
+    return {
+      provider: this.runtimeConfig.provider,
+      accountAlias: this.runtimeConfig.accountAlias,
+      supportsListMailboxes: false,
+      supportsMetadataScan: false,
+      supportsFetchMessage: false,
+      supportsMutation: false,
+      mutationActions: [],
+      maxRecommendedScanLimit: this.runtimeConfig.metadataSampleLimit,
+    };
+  }
+
+  private error(): Error {
+    return new Error(`QFerry provider is not ready: ${this.runtimeConfig.statusWarnings.join("; ")}`);
+  }
 }
 
 function toToolResult(structuredContent: Record<string, unknown>) {
