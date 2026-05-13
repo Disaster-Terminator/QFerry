@@ -311,7 +311,44 @@ async function main() {
     plannedMessageRefs: Array.isArray(previewPlan.structuredContent?.plan?.messageRefs)
       ? previewPlan.structuredContent.plan.messageRefs.length
       : 0,
-    mutationsAttempted: previewPlan.structuredContent?.mutationsAttempted,
+      mutationsAttempted: previewPlan.structuredContent?.mutationsAttempted,
+  });
+
+  const batchPreview = await callToolWithTrace(
+    client,
+    "preview_cleanup_batch",
+    {
+      runId,
+      folder: "INBOX",
+      pageSize: candidateLimit,
+      maxPages: 2,
+      maxMessageRefs: 5,
+      action: "move",
+      target: { folder: "Junk" },
+      rules: [
+        { id: "ad-subject", groupId: "ads_or_spam", match: { subjectIncludes: "广告" } },
+        { id: "promo-subject", groupId: "ads_or_spam", match: { subjectIncludes: "优惠" } },
+        { id: "newsletter-subject", groupId: "ads_or_spam", match: { subjectIncludes: "newsletter" } },
+        { id: "digest-subject", groupId: "ads_or_spam", match: { subjectIncludes: "digest" } },
+      ],
+      selectedGroupIds: ["ads_or_spam"],
+      order: "oldest",
+    },
+    tracePath,
+    baseEvent,
+  );
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "preview_cleanup_batch",
+    pagesScanned: batchPreview.structuredContent?.preview?.pagesScanned,
+    scannedMessages: batchPreview.structuredContent?.preview?.scannedMessages,
+    selectedMessageRefs: batchPreview.structuredContent?.preview?.selectedMessageRefs,
+    planStatus: batchPreview.structuredContent?.plan?.status,
+    plannedMessageRefs: Array.isArray(batchPreview.structuredContent?.plan?.messageRefs)
+      ? batchPreview.structuredContent.plan.messageRefs.length
+      : 0,
+    mutationsAttempted: batchPreview.structuredContent?.mutationsAttempted,
   });
 
   const blockedExecute = await client.callTool({
@@ -359,6 +396,10 @@ async function main() {
       `- triageSampledMessages: ${triage.structuredContent?.triage?.sampledMessages ?? "<missing>"}`,
       `- previewPlanStatus: ${previewPlan.structuredContent?.plan?.status ?? "<missing>"}`,
       `- previewPlanMessageRefs: ${previewPlan.structuredContent?.plan?.messageRefs?.length ?? "<missing>"}`,
+      `- batchPreviewPlanStatus: ${batchPreview.structuredContent?.plan?.status ?? "<missing>"}`,
+      `- batchPreviewSelectedRefs: ${batchPreview.structuredContent?.preview?.selectedMessageRefs ?? "<missing>"}`,
+      `- batchPreviewScannedMessages: ${batchPreview.structuredContent?.preview?.scannedMessages ?? "<missing>"}`,
+      `- batchPreviewPagesScanned: ${batchPreview.structuredContent?.preview?.pagesScanned ?? "<missing>"}`,
       `- executeCleanupBlocked: ${blockedExecute.isError === true}`,
       `- trace: ${tracePath}`,
       `- mcpConfig: ${mcpConfigPath}`,

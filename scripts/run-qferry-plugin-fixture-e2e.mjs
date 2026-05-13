@@ -79,6 +79,7 @@ async function main() {
     ["list_mailboxes", {}],
     ["get_mailbox_summary", { folder: "INBOX" }],
     ["search", { folder: "INBOX", limit: 10, query: "digest" }],
+    ["fetch", { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }],
     ["classify_messages", { folder: "INBOX", limit: 10, rulesFile }],
     ["triage_inbox", { folder: "INBOX", limit: 10, rulesFile }],
     ["group_spam_candidates", {
@@ -98,23 +99,38 @@ async function main() {
       rulesFile,
       selectedGroupIds: ["archive"],
     }],
+    ["preview_cleanup_batch", {
+      runId,
+      folder: "INBOX",
+      pageSize: 1,
+      maxPages: 2,
+      maxMessageRefs: 1,
+      action: "move",
+      target: { folder: "Archive" },
+      rulesFile,
+      selectedGroupIds: ["archive"],
+    }],
   ];
   let statusResult;
   let mailboxSummaryResult;
+  let fetchResult;
   let classifyResult;
   let triageResult;
   let spamCandidatesResult;
   let planResult;
+  let batchPreviewResult;
   let blockedExecuteResult;
 
   for (const [name, args] of calls) {
     const result = await callToolWithStructuredContent(client, name, args);
     if (name === "get_status") statusResult = result.structuredContent;
     if (name === "get_mailbox_summary") mailboxSummaryResult = result.structuredContent;
+    if (name === "fetch") fetchResult = result.structuredContent;
     if (name === "classify_messages") classifyResult = result.structuredContent;
     if (name === "triage_inbox") triageResult = result.structuredContent;
     if (name === "group_spam_candidates") spamCandidatesResult = result.structuredContent;
     if (name === "plan_cleanup") planResult = result.structuredContent;
+    if (name === "preview_cleanup_batch") batchPreviewResult = result.structuredContent;
     await writeJsonl(tracePath, {
       ...baseEvent,
       event: "plugin_tool_called",
@@ -124,7 +140,12 @@ async function main() {
       sampledMessages: result.structuredContent?.triage?.sampledMessages,
       triageGroupCounts: result.structuredContent?.triage?.groupCounts,
       mailboxExists: result.structuredContent?.mailbox?.exists,
+      fetchedSubject: result.structuredContent?.message?.subject,
       spamCandidateGroups: result.structuredContent?.groups,
+      batchPagesScanned: result.structuredContent?.preview?.pagesScanned,
+      batchScannedMessages: result.structuredContent?.preview?.scannedMessages,
+      batchSelectedMessageRefs: result.structuredContent?.preview?.selectedMessageRefs,
+      batchPlanStatus: result.structuredContent?.plan?.status,
     });
   }
 
@@ -158,6 +179,7 @@ async function main() {
       `- statusConfigSource: ${statusResult?.status?.configSource ?? "<missing>"}`,
       `- statusWarnings: ${(statusResult?.status?.statusWarnings ?? []).join("; ")}`,
       `- inboxExists: ${mailboxSummaryResult?.mailbox?.exists ?? "<missing>"}`,
+      `- fetchedSubject: ${fetchResult?.message?.subject ?? "<missing>"}`,
       `- rulesFile: ${rulesFile}`,
       `- rulesetVersion: ${classifyResult?.ruleset?.version ?? "<missing>"}`,
       `- rulesetRuleCount: ${classifyResult?.ruleset?.ruleCount ?? "<missing>"}`,
@@ -169,6 +191,10 @@ async function main() {
       `- spamCandidateGroups: ${JSON.stringify(Object.keys(spamCandidatesResult?.groups ?? {}))}`,
       `- previewPlanStatus: ${planResult?.plan?.status ?? "<missing>"}`,
       `- previewPlanMessageRefs: ${planResult?.plan?.messageRefs?.length ?? "<missing>"}`,
+      `- batchPreviewPlanStatus: ${batchPreviewResult?.plan?.status ?? "<missing>"}`,
+      `- batchPreviewSelectedRefs: ${batchPreviewResult?.preview?.selectedMessageRefs ?? "<missing>"}`,
+      `- batchPreviewScannedMessages: ${batchPreviewResult?.preview?.scannedMessages ?? "<missing>"}`,
+      `- batchPreviewPagesScanned: ${batchPreviewResult?.preview?.pagesScanned ?? "<missing>"}`,
       `- trace: ${tracePath}`,
       `- mcpConfig: ${mcpConfigPath}`,
       `- stderrBytes: ${stderrChunks.join("").length}`,

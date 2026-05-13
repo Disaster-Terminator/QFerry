@@ -195,6 +195,31 @@ export function createQFerryMcpServer(): McpServer {
   );
 
   server.registerTool(
+    "preview_cleanup_batch",
+    {
+      title: "Preview cleanup batch",
+      description: "Use this when you need a cross-page rules preview and bounded cleanup plan before any real mailbox mutation.",
+      inputSchema: {
+        runId: z.string(),
+        folder: z.string(),
+        pageSize: z.number().int().min(1).max(20),
+        maxPages: z.number().int().min(1).max(200),
+        maxMessageRefs: z.number().int().min(1).max(200),
+        action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
+        target: z.record(z.string(), z.string()).optional(),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+        rules: z.array(classificationRuleSchema).optional(),
+        rulesFile: z.string().optional(),
+        defaultGroupId: z.string().optional(),
+        selectedGroupIds: z.array(z.string()),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await tools.previewCleanupBatch(input)),
+  );
+
+  server.registerTool(
     "execute_cleanup",
     {
       title: "Execute cleanup",

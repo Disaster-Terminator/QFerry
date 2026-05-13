@@ -81,6 +81,40 @@ export interface PlanCleanupInput {
   selectedGroupIds: string[];
 }
 
+export interface PreviewCleanupBatchInput {
+  runId: string;
+  folder: string;
+  pageSize: number;
+  maxPages: number;
+  maxMessageRefs: number;
+  action: OperationAction;
+  target?: Record<string, string>;
+  scanOffset?: number;
+  order?: "newest" | "oldest";
+  rules?: ClassificationRule[];
+  rulesFile?: string;
+  defaultGroupId?: string;
+  selectedGroupIds: string[];
+}
+
+export interface CleanupBatchPreview {
+  provider: string;
+  folder: string;
+  scanOrder: "newest" | "oldest";
+  scanOffset: number;
+  pageSize: number;
+  maxPages: number;
+  pagesScanned: number;
+  scannedMessages: number;
+  selectedMessageRefs: number;
+  maxMessageRefs: number;
+  groupCounts: Record<string, number>;
+  sampledMessages: MessageSummary[];
+  selectedGroups: Record<string, SpamCandidate[]>;
+  ruleset?: ClassificationRulesetMetadata;
+  mutationsAttempted: 0;
+}
+
 export interface MailTools {
   getStatus(): Promise<{
     status: QFerryRuntimeConfig;
@@ -112,6 +146,13 @@ export interface MailTools {
   }>;
   executeCleanup(input: ExecuteCleanupInput): Promise<{ result: ExecuteCleanupResult }>;
   planCleanup(input: PlanCleanupInput): Promise<{
+    plan: OperationPlan;
+    classifications: MessageClassification[];
+    ruleset?: ClassificationRulesetMetadata;
+    mutationsAttempted: 0;
+  }>;
+  previewCleanupBatch(input: PreviewCleanupBatchInput): Promise<{
+    preview: CleanupBatchPreview;
     plan: OperationPlan;
     classifications: MessageClassification[];
     ruleset?: ClassificationRulesetMetadata;
@@ -329,6 +370,81 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         mutationsAttempted: 0,
       };
     },
+
+    async previewCleanupBatch(batchInput) {
+      const resolvedRules = await resolveRules({
+        ...batchInput,
+        defaultGroupId: batchInput.defaultGroupId ?? "review",
+      });
+      const pageSize = Math.max(batchInput.pageSize, 0);
+      const maxPages = Math.max(batchInput.maxPages, 0);
+      const maxMessageRefs = Math.max(batchInput.maxMessageRefs, 0);
+      const scanOffset = Math.max(batchInput.scanOffset ?? 0, 0);
+      const scanOrder = batchInput.order ?? "oldest";
+      const messages: MessageSummary[] = [];
+      const classifications: MessageClassification[] = [];
+      let pagesScanned = 0;
+
+      for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+        const page = await input.provider.scanMailboxMetadata({
+          folder: batchInput.folder,
+          limit: pageSize,
+          order: scanOrder,
+          offset: scanOffset + pageIndex * pageSize,
+        });
+        if (page.length === 0) break;
+        pagesScanned += 1;
+        messages.push(...page);
+        classifications.push(...classifyMessages({
+          messages: page,
+          rules: resolvedRules.rules,
+          defaultGroupId: resolvedRules.defaultGroupId,
+        }));
+        if (page.length < pageSize) break;
+      }
+
+      const selectedClassifications = classifications.filter((classification) =>
+        batchInput.selectedGroupIds.includes(classification.groupId));
+      const selectedRefs = selectedClassifications
+        .map((classification) => classification.messageRef)
+        .slice(0, maxMessageRefs);
+      const selectedRefKeys = new Set(selectedRefs.map(messageRefKey));
+      const selectedGroups = groupSpamCandidates(
+        messages,
+        selectedClassifications.filter((classification) => selectedRefKeys.has(messageRefKey(classification.messageRef))),
+      );
+      const provider = selectedRefs[0]?.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
+
+      return {
+        preview: {
+          provider,
+          folder: batchInput.folder,
+          scanOrder,
+          scanOffset,
+          pageSize,
+          maxPages,
+          pagesScanned,
+          scannedMessages: messages.length,
+          selectedMessageRefs: selectedRefs.length,
+          maxMessageRefs,
+          groupCounts: countGroups(classifications),
+          sampledMessages: messages.slice(0, Math.min(messages.length, 10)),
+          selectedGroups,
+          ruleset: resolvedRules.ruleset,
+          mutationsAttempted: 0,
+        },
+        plan: createOperationPlan({
+          runId: batchInput.runId,
+          provider,
+          action: batchInput.action,
+          messageRefs: selectedRefs,
+          target: batchInput.target,
+        }),
+        classifications,
+        ruleset: resolvedRules.ruleset,
+        mutationsAttempted: 0,
+      };
+    },
   };
 }
 
@@ -355,6 +471,10 @@ function groupSpamCandidates(messages: MessageSummary[], classifications: Messag
     });
   }
   return Object.fromEntries(Object.entries(groups).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function messageRefKey(ref: MessageRef): string {
+  return `${ref.provider}\0${ref.accountAlias}\0${ref.folder}\0${ref.uid}\0${ref.uidValidity ?? ""}`;
 }
 
 async function resolveRules(input: {

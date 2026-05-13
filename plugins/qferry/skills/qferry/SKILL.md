@@ -16,7 +16,8 @@ For real mailbox work, call tools in this order:
 3. `get_mailbox_summary` to get read-only folder counts before scanning.
 4. `triage_inbox` for the default Gmail-like inbox review summary.
 5. `group_spam_candidates` when the user wants to start from oldest obvious spam or ads. Present the grouped candidates for confirmation before any real operation.
-6. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups.
+6. `preview_cleanup_batch` when the user wants a cross-page rules preview and a bounded operation plan.
+7. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups or already reviewed message refs.
 
 Use `classify_messages` when debugging rules or doing focused classification. Prefer `triage_inbox` for normal inbox organization because it returns group counts, sampled message count, recommended next action, and `mutationsAttempted`.
 
@@ -32,6 +33,7 @@ Allowed by default:
 - Classify messages into QFerry-local groups.
 - Group oldest obvious spam or ads for confirmation.
 - Create operation plans.
+- Preview bounded cross-page cleanup batches.
 - Write trace artifacts.
 
 ## Rules

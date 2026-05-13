@@ -38,6 +38,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "triage_inbox",
       "group_spam_candidates",
       "plan_cleanup",
+      "preview_cleanup_batch",
       "execute_cleanup",
     ]);
     expect(tools.tools.find((tool) => tool.name === "get_status")?.annotations?.readOnlyHint).toBe(true);
@@ -47,6 +48,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "group_spam_candidates")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_capability_snapshot")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "preview_cleanup_batch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_cleanup")?.annotations?.destructiveHint).toBe(true);
 
     await client.close();
@@ -323,6 +325,57 @@ describe("QFerry ChatGPT App MCP server", () => {
 
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain("must be confirmed");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("previews cleanup batches through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "preview_cleanup_batch",
+      arguments: {
+        runId: "run-mcp-batch-preview",
+        folder: "INBOX",
+        pageSize: 1,
+        maxPages: 2,
+        maxMessageRefs: 1,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedGroupIds: ["archive"],
+        rules: [
+          { id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } },
+          { id: "security", groupId: "archive", match: { subjectIncludes: "Security" } },
+        ],
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      preview: {
+        provider: "fixture",
+        folder: "INBOX",
+        pagesScanned: 2,
+        scannedMessages: 2,
+        selectedMessageRefs: 1,
+        mutationsAttempted: 0,
+      },
+      plan: {
+        status: "preview",
+        confirmationRequired: true,
+        messageRefs: [
+          { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+        ],
+      },
+      mutationsAttempted: 0,
+    });
 
     await client.close();
     await server.close();

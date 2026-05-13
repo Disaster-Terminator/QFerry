@@ -98,6 +98,22 @@ examples/qferry.rules.json
 
 工具仍兼容直接传入内联 `rules`。真实 QQ 路径使用规则文件时仍然只生成 preview plan，不执行邮箱写操作。
 
+## 批量整理预览
+
+`preview_cleanup_batch` 是 Codex 插件侧的规则化批量整理入口。它跨页扫描 bounded metadata，应用 `rules` 或 `rulesFile`，按 `selectedGroupIds` 选出候选邮件，并生成 `status: "preview"` 的 operation plan。
+
+验收时必须关注这些字段：
+
+- `preview.pagesScanned`
+- `preview.scannedMessages`
+- `preview.groupCounts`
+- `preview.selectedMessageRefs`
+- `plan.status`
+- `plan.messageRefs.length`
+- `mutationsAttempted`
+
+真实 QQ read-only e2e 调用该工具时仍必须保持 `mutationsAttempted: 0`。只有用户明确授权某个 plan 后，才能把 plan 标记为 `confirmed` 并调用 `execute_cleanup`。
+
 ## 黑名单边界
 
 QQ 邮箱产品层面有“设置 / 反垃圾 / 黑名单或黑白名单”能力，但当前 QFerry 没有验证到可通过 IMAP/SMTP/MCP 直接写入 QQ 服务器侧黑名单的公开接口。
@@ -129,6 +145,7 @@ QFerry 当前支持的是规则层 blocklist：
 - 启动 plugin-local MCP runtime：`plugins/qferry/mcp-bootstrap.mjs` -> `plugins/qferry/dist/mcp.cjs`。
 - 使用 fixture provider 验证工具发现和调用。
 - 使用 QQ read-only provider 验证真实 QQ 邮箱的 capability、文件夹列表、小批量 metadata。
+- 使用 `preview_cleanup_batch` 验证跨页规则预览和 preview operation plan。
 
 禁止：
 
@@ -157,7 +174,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 3. QFerry MCP server 能从 plugin-local `mcp-bootstrap.mjs` 启动，并加载 `dist/mcp.cjs`。
 4. fixture 工具调用成功。
 5. QQ read-only 工具调用成功。
-6. 规则文件版本和 preview plan 状态写入本地 trace artifacts。
+6. 规则文件版本、批量预览统计和 preview plan 状态写入本地 trace artifacts。
 
 建议让 Codex 执行：
 

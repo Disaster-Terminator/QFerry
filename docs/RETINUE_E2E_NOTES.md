@@ -62,3 +62,21 @@ Findings:
 - All three short read-only jobs completed under concurrency.
 - Short, narrow prompts are reliable enough for QFerry cross-checks.
 - Broad repository-review jobs remain more likely to stall, so the QFerry workflow should keep Retinue tasks small and evidence-oriented.
+
+## 2026-05-13 Codex plugin batch preview planning audit
+
+Context:
+
+- Retinue was used for two concurrent read-only reviews while the main Codex thread implemented the batch cleanup preview tool.
+- Both jobs used the installed OpenCode backend and did not edit files.
+
+Observed jobs:
+
+- `job_c1b97dcb-b4dc-49a0-8c44-8a0c7639d93c` completed a QFerry Codex plugin test-surface audit. It confirmed the exposed MCP tools, existing plugin fixture/QQ read-only/QQ move e2e scripts, trace artifact discipline, and noted gaps such as missing plugin-fixture `fetch` coverage and limited read-only pagination coverage.
+- `job_e090bda8-dd99-4e3d-aff1-4ab0c0a62403` completed a Gmail-alignment audit. It identified urgency-based triage and structured search as the next product-level gaps after the cleanup preview workflow.
+
+Findings:
+
+- Retinue is now reliable for short, scoped QFerry read-only audits.
+- The batch cleanup preview slice is still valid for the current milestone because it completes the rules -> preview plan -> confirmed execute path.
+- The next Gmail-alignment slice should target urgency triage and structured search filters after this batch preview work is verified.

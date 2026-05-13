@@ -375,6 +375,69 @@ describe("mail tools", () => {
     expect(scanCalls).toBe(0);
   });
 
+  it("creates preview batch cleanup plans across pages", async () => {
+    const provider = FixtureMailProvider.demo();
+    const scanInputs: unknown[] = [];
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        scanMailboxMetadata: async (input) => {
+          scanInputs.push(input);
+          return provider.scanMailboxMetadata(input);
+        },
+      },
+    });
+
+    const result = await tools.previewCleanupBatch({
+      runId: "run-batch-preview",
+      folder: "INBOX",
+      pageSize: 1,
+      maxPages: 2,
+      maxMessageRefs: 1,
+      action: "move",
+      target: { folder: "Archive" },
+      selectedGroupIds: ["archive"],
+      rules: [
+        { id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } },
+        { id: "security", groupId: "archive", match: { subjectIncludes: "Security" } },
+      ],
+    });
+
+    expect(scanInputs).toEqual([
+      { folder: "INBOX", limit: 1, order: "oldest", offset: 0 },
+      { folder: "INBOX", limit: 1, order: "oldest", offset: 1 },
+    ]);
+    expect(result.preview).toMatchObject({
+      provider: "fixture",
+      folder: "INBOX",
+      scanOrder: "oldest",
+      scanOffset: 0,
+      pageSize: 1,
+      maxPages: 2,
+      pagesScanned: 2,
+      scannedMessages: 2,
+      selectedMessageRefs: 1,
+      maxMessageRefs: 1,
+      groupCounts: { archive: 2 },
+      mutationsAttempted: 0,
+    });
+    expect(result.preview.sampledMessages.map((message) => message.subject)).toEqual([
+      "Weekly digest",
+      "Security alert",
+    ]);
+    expect(result.preview.selectedGroups.archive).toHaveLength(1);
+    expect(result.plan.status).toBe("preview");
+    expect(result.plan.confirmationRequired).toBe(true);
+    expect(result.plan.target).toEqual({ folder: "Archive" });
+    expect(result.plan.messageRefs).toEqual([
+      { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+    ]);
+    expect(result.classifications).toHaveLength(2);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
   it("rejects execute cleanup for unconfirmed preview plans", async () => {
     const provider = FixtureMailProvider.demo();
     const tools = createMailTools({
