@@ -43,3 +43,22 @@ Recommendation:
 - Keep Retinue in the QFerry workflow for low-cost read-only exploration and pressure coverage.
 - Prefer short, concrete prompts when using OpenCode through Retinue; split broad reviews into smaller checks.
 - Treat `running` and `stalled` as useful test outcomes, record the job ids, and keep QFerry implementation decisions in the main Codex thread.
+
+## 2026-05-13 QFerry short-task pressure check after retry fix
+
+Context:
+
+- Retinue was used again after the QFerry QQ IMAP retry fix and plugin reload.
+- The run spawned three short, concrete read-only jobs at the configured `maxAgents=3` pool size.
+
+Observed jobs:
+
+- `job_53269ef3-2547-4ed3-ad02-53cb5b5f2aad` completed and identified `pnpm run qferry:e2e:plugin-qq-move-spam` as the real QQ spam move e2e command.
+- `job_b40df655-541c-46e5-bc81-72accccbe571` completed and identified `retries transient QQ IMAP connection failures once` as the retry test.
+- `job_7b58cae7-c1e3-4260-a18a-38aea272da49` completed and summarized the previous Retinue pressure findings.
+
+Findings:
+
+- All three short read-only jobs completed under concurrency.
+- Short, narrow prompts are reliable enough for QFerry cross-checks.
+- Broad repository-review jobs remain more likely to stall, so the QFerry workflow should keep Retinue tasks small and evidence-oriented.

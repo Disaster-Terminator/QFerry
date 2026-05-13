@@ -52,6 +52,10 @@ describe("mail tools", () => {
 
     expect(result.scanOrder).toBe("oldest");
     expect(result.scannedMessages).toBe(2);
+    expect(result.sampledMessages.map((message) => message.subject)).toEqual([
+      "Weekly digest",
+      "Security alert",
+    ]);
     expect(result.groups).toEqual({
       ads_or_newsletters: [
         {
@@ -172,6 +176,36 @@ describe("mail tools", () => {
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]?.subject).toBe("Weekly digest");
     expect(JSON.stringify(result)).not.toContain("fixture full body");
+  });
+
+  it("searches bounded metadata after an offset", async () => {
+    const provider = FixtureMailProvider.demo();
+    const scanInputs: unknown[] = [];
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        scanMailboxMetadata: async (input) => {
+          scanInputs.push(input);
+          return provider.scanMailboxMetadata(input);
+        },
+      },
+    });
+
+    const result = await tools.search({ folder: "INBOX", limit: 1, order: "oldest", offset: 1 });
+
+    expect(scanInputs).toEqual([{ folder: "INBOX", limit: 1, order: "oldest", offset: 1 }]);
+    expect(result.messages).toEqual([
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "security@example.com",
+        subject: "Security alert",
+        date: "2026-05-12T00:00:00.000Z",
+        snippet: "A security notification that should be reviewed.",
+        flags: [],
+      },
+    ]);
   });
 
   it("fetches a single message detail by provider ref", async () => {

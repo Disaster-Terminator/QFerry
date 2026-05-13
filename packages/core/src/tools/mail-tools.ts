@@ -14,6 +14,7 @@ export interface SearchMessagesInput {
   limit: number;
   query?: string;
   order?: "newest" | "oldest";
+  offset?: number;
 }
 
 export interface ClassifyMessagesToolInput {
@@ -104,6 +105,7 @@ export interface MailTools {
     scannedMessages: number;
     scanOrder: "oldest";
     scanOffset: number;
+    sampledMessages: MessageSummary[];
     groups: Record<string, SpamCandidate[]>;
     classifications: MessageClassification[];
     mutationsAttempted: 0;
@@ -161,6 +163,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         folder: searchInput.folder,
         limit: searchInput.limit,
         order: searchInput.order,
+        offset: searchInput.offset,
       });
 
       return {
@@ -239,6 +242,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         scannedMessages: messages.length,
         scanOrder: "oldest",
         scanOffset: Math.max(candidateInput.offset ?? 0, 0),
+        sampledMessages: messages,
         groups: groupSpamCandidates(messages, spamClassifications),
         classifications,
         mutationsAttempted: 0,

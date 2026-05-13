@@ -105,6 +105,33 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("passes search offsets through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "search",
+      arguments: { folder: "INBOX", limit: 1, order: "oldest", offset: 1 },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      messages: [
+        {
+          subject: "Security alert",
+        },
+      ],
+    });
+
+    await client.close();
+    await server.close();
+  });
+
   it("calls mailbox summary through the MCP server", async () => {
     const server = createQFerryMcpServer();
     const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
@@ -210,6 +237,14 @@ describe("QFerry ChatGPT App MCP server", () => {
       folder: "INBOX",
       scanOrder: "oldest",
       mutationsAttempted: 0,
+      sampledMessages: [
+        {
+          subject: "Weekly digest",
+        },
+        {
+          subject: "Security alert",
+        },
+      ],
       groups: {
         ads_or_newsletters: [
           {

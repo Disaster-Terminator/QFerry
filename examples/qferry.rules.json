@@ -25,6 +25,13 @@
       "match": {
         "subjectIncludes": "digest"
       }
+    },
+    {
+      "id": "block-known-junk-domain",
+      "groupId": "archive",
+      "match": {
+        "fromIncludes": "known-junk.example"
+      }
     }
   ]
 }

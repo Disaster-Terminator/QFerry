@@ -103,6 +103,7 @@ export function createQFerryMcpServer(): McpServer {
         limit: z.number().int().min(1).max(20),
         query: z.string().optional(),
         order: z.enum(["newest", "oldest"]).optional(),
+        offset: z.number().int().min(0).optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },

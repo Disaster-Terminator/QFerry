@@ -89,6 +89,8 @@ async function main() {
   const runId = createRunId();
   const candidateLimit = Number(process.env.QFERRY_MOVE_CANDIDATE_LIMIT ?? 10);
   const maxPages = Number(process.env.QFERRY_MOVE_MAX_PAGES ?? 25);
+  const maxMessages = Number(process.env.QFERRY_MOVE_MAX_MESSAGES ?? 1);
+  const matchFrom = process.env.QFERRY_MOVE_MATCH_FROM;
   const targetFolder = process.env.QFERRY_MOVE_TARGET_FOLDER ?? "Junk";
   const artifactDir = resolve(repoRoot, "artifacts/e2e", runId);
   const tracePath = resolve(repoRoot, "logs/runs", `${runId}.jsonl`);
@@ -108,6 +110,8 @@ async function main() {
     destructive: true,
     candidateLimit,
     maxPages,
+    maxMessages,
+    matchFrom: matchFrom ?? "<default-spam-rules>",
     targetFolder,
   };
   const state = {
@@ -117,13 +121,14 @@ async function main() {
     summaryPath,
     mcpConfigPath,
     candidate: undefined,
+    movedRefs: [],
     beforeInboxExists: undefined,
     afterInboxExists: undefined,
     beforeTargetExists: undefined,
     afterTargetExists: undefined,
     candidateOffset: undefined,
     planStatus: undefined,
-    operationPlanId: undefined,
+    operationPlanIds: [],
     moved: 0,
     mutationsAttempted: 0,
     noCandidate: false,
@@ -183,38 +188,95 @@ async function main() {
     targetExists: state.beforeTargetExists,
   });
 
-  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-    const offset = pageIndex * candidateLimit;
-    const spamCandidates = await callToolWithTrace(
+  const rules = matchFrom ? [{ id: `from-${matchFrom}`, groupId: "ads_or_spam", match: { fromIncludes: matchFrom } }] : spamRules();
+  for (let moveIndex = 0; moveIndex < maxMessages; moveIndex += 1) {
+    state.candidate = undefined;
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+      const offset = pageIndex * candidateLimit;
+      const spamCandidates = await callToolWithTrace(
+        client,
+        "group_spam_candidates",
+        {
+          folder: "INBOX",
+          limit: candidateLimit,
+          offset,
+          rules,
+        },
+        tracePath,
+        baseEvent,
+      );
+      const candidateRefs = extractCandidateRefs(spamCandidates.structuredContent?.groups);
+      state.candidate = candidateRefs[0];
+      state.candidateOffset = offset;
+      await writeJsonl(tracePath, {
+        ...baseEvent,
+        event: "plugin_spam_candidates_grouped",
+        candidateCount: candidateRefs.length,
+        moveIndex,
+        selectedRef: state.candidate,
+        sampledMessages: summarizeSampledMessages(spamCandidates.structuredContent?.sampledMessages),
+        scannedMessages: spamCandidates.structuredContent?.scannedMessages,
+        scanOrder: spamCandidates.structuredContent?.scanOrder,
+        scanOffset: spamCandidates.structuredContent?.scanOffset,
+        mutationsAttempted: spamCandidates.structuredContent?.mutationsAttempted,
+      });
+      if (state.candidate) break;
+      if (spamCandidates.structuredContent?.scannedMessages === 0) break;
+    }
+
+    if (!state.candidate) break;
+
+    const previewPlan = await callToolWithTrace(
       client,
-      "group_spam_candidates",
+      "plan_cleanup",
       {
+        runId,
         folder: "INBOX",
         limit: candidateLimit,
-        offset,
-        rules: spamRules(),
+        action: "move",
+        target: { folder: targetFolder },
+        selectedGroupIds: [],
+        messageRefs: [state.candidate],
       },
       tracePath,
       baseEvent,
     );
-    const candidateRefs = extractCandidateRefs(spamCandidates.structuredContent?.groups);
-    state.candidate = candidateRefs[0];
-    state.candidateOffset = offset;
+    const plan = previewPlan.structuredContent?.plan;
+    state.planStatus = plan?.status;
+    state.operationPlanIds.push(plan?.operationPlanId);
     await writeJsonl(tracePath, {
       ...baseEvent,
-      event: "plugin_spam_candidates_grouped",
-      candidateCount: candidateRefs.length,
-      selectedRef: state.candidate,
-      scannedMessages: spamCandidates.structuredContent?.scannedMessages,
-      scanOrder: spamCandidates.structuredContent?.scanOrder,
-      scanOffset: spamCandidates.structuredContent?.scanOffset,
-      mutationsAttempted: spamCandidates.structuredContent?.mutationsAttempted,
+      event: "plugin_move_plan_previewed",
+      moveIndex,
+      operationPlanId: plan?.operationPlanId,
+      planStatus: state.planStatus,
+      plannedMessageRefs: plan?.messageRefs?.length ?? 0,
+      targetFolder: plan?.target?.folder,
+      mutationsAttempted: previewPlan.structuredContent?.mutationsAttempted,
     });
-    if (state.candidate) break;
-    if (spamCandidates.structuredContent?.scannedMessages === 0) break;
+
+    const confirmedPlan = {
+      ...plan,
+      status: "confirmed",
+      confirmationRequired: false,
+    };
+    const execution = await callToolWithTrace(client, "execute_cleanup", { plan: confirmedPlan }, tracePath, baseEvent);
+    const mutationsAttempted = execution.structuredContent?.result?.mutationsAttempted ?? 0;
+    const moved = execution.structuredContent?.result?.moved ?? 0;
+    state.mutationsAttempted += mutationsAttempted;
+    state.moved += moved;
+    state.movedRefs.push(state.candidate);
+    await writeJsonl(tracePath, {
+      ...baseEvent,
+      event: "plugin_move_plan_executed",
+      moveIndex,
+      operationPlanId: plan?.operationPlanId,
+      result: execution.structuredContent?.result,
+      mutationsAttempted,
+    });
   }
 
-  if (!state.candidate) {
+  if (state.movedRefs.length === 0) {
     state.noCandidate = true;
     await client.close();
     await writeJsonl(tracePath, {
@@ -230,50 +292,6 @@ async function main() {
     printResult(runId, 0, tracePath, summaryPath, true);
     return;
   }
-
-  const previewPlan = await callToolWithTrace(
-    client,
-    "plan_cleanup",
-    {
-      runId,
-      folder: "INBOX",
-      limit: candidateLimit,
-      action: "move",
-      target: { folder: targetFolder },
-      selectedGroupIds: [],
-      messageRefs: [state.candidate],
-    },
-    tracePath,
-    baseEvent,
-  );
-  const plan = previewPlan.structuredContent?.plan;
-  state.planStatus = plan?.status;
-  state.operationPlanId = plan?.operationPlanId;
-  await writeJsonl(tracePath, {
-    ...baseEvent,
-    event: "plugin_move_plan_previewed",
-    operationPlanId: state.operationPlanId,
-    planStatus: state.planStatus,
-    plannedMessageRefs: plan?.messageRefs?.length ?? 0,
-    targetFolder: plan?.target?.folder,
-    mutationsAttempted: previewPlan.structuredContent?.mutationsAttempted,
-  });
-
-  const confirmedPlan = {
-    ...plan,
-    status: "confirmed",
-    confirmationRequired: false,
-  };
-  const execution = await callToolWithTrace(client, "execute_cleanup", { plan: confirmedPlan }, tracePath, baseEvent);
-  state.mutationsAttempted = execution.structuredContent?.result?.mutationsAttempted ?? 0;
-  state.moved = execution.structuredContent?.result?.moved ?? 0;
-  await writeJsonl(tracePath, {
-    ...baseEvent,
-    event: "plugin_move_plan_executed",
-    operationPlanId: state.operationPlanId,
-    result: execution.structuredContent?.result,
-    mutationsAttempted: state.mutationsAttempted,
-  });
 
   const afterInbox = await callToolWithTrace(client, "get_mailbox_summary", { folder: "INBOX" }, tracePath, baseEvent);
   state.afterInboxExists = afterInbox.structuredContent?.mailbox?.exists;
@@ -353,8 +371,19 @@ function extractCandidateRefs(groups) {
     .filter((ref) => ref && typeof ref === "object");
 }
 
+function summarizeSampledMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages.slice(0, 10).map((message) => ({
+    uid: message?.ref?.uid,
+    from: message?.from,
+    subject: message?.subject,
+    date: message?.date,
+    flags: message?.flags,
+  }));
+}
+
 function spamRules() {
-  return [
+  const rules = [
     { id: "ad-subject", groupId: "ads_or_spam", match: { subjectIncludes: "广告" } },
     { id: "promo-subject", groupId: "ads_or_spam", match: { subjectIncludes: "优惠" } },
     { id: "unsubscribe-subject", groupId: "ads_or_spam", match: { subjectIncludes: "退订" } },
@@ -362,6 +391,13 @@ function spamRules() {
     { id: "newsletter-from", groupId: "ads_or_spam", match: { fromIncludes: "newsletter" } },
     { id: "digest-subject", groupId: "ads_or_spam", match: { subjectIncludes: "digest" } },
   ];
+
+  const localFrom = process.env.QFERRY_MOVE_MATCH_FROM?.trim();
+  if (localFrom) {
+    rules.push({ id: "local-match-from", groupId: "ads_or_spam", match: { fromIncludes: localFrom } });
+  }
+
+  return rules;
 }
 
 async function writeSummary(state) {
@@ -379,10 +415,13 @@ async function writeSummary(state) {
       `- targetFolder: ${state.baseEvent.targetFolder}`,
       `- candidateLimit: ${state.baseEvent.candidateLimit}`,
       `- maxPages: ${state.baseEvent.maxPages}`,
+      `- maxMessages: ${state.baseEvent.maxMessages}`,
+      `- matchFrom: ${state.baseEvent.matchFrom}`,
       `- candidateOffset: ${state.candidateOffset ?? "<none>"}`,
       `- selectedRef: ${JSON.stringify(state.candidate ?? null)}`,
+      `- movedRefs: ${JSON.stringify(state.movedRefs)}`,
       `- planStatus: ${state.planStatus ?? "<none>"}`,
-      `- operationPlanId: ${state.operationPlanId ?? "<none>"}`,
+      `- operationPlanIds: ${JSON.stringify(state.operationPlanIds)}`,
       `- mutationsAttempted: ${state.mutationsAttempted}`,
       `- moved: ${state.moved}`,
       `- beforeInboxExists: ${state.beforeInboxExists ?? "<missing>"}`,

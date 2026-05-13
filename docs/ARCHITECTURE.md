@@ -180,3 +180,20 @@ Not allowed in this slice:
 - Codex plugin packaging.
 - Gmail mailbox mutation.
 - Full mailbox scan.
+
+## Blocklist Boundary
+
+QFerry has two separate blocklist layers:
+
+- QFerry rule-layer blocklist: deterministic metadata rules such as `fromIncludes: "known-junk.example"` that classify matching messages into cleanup/archive groups and make them eligible for preview or confirmed move workflows.
+- QQ Mail server-side blacklist: QQ Mail exposes blacklist/anti-spam settings in its Web/App settings surface, but QFerry has not found or verified a public IMAP/SMTP/API endpoint for adding senders or domains to that server-side blacklist.
+
+Current implementation supports the rule-layer blocklist and IMAP move-to-Junk cleanup. Server-side "do not enter mailbox" blocking is a separate future capability that needs QQ Web automation or a verified private endpoint before QFerry can claim support.
+
+Until that is implemented, pressure tests against known junk sources should:
+
+```text
+scan bounded metadata -> match blocklist rule -> preview plan -> confirmed move to Junk -> trace
+```
+
+They must not claim that the sender has been added to QQ Mail's server-side blacklist.
