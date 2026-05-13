@@ -15,6 +15,13 @@ export interface SearchMessagesInput {
   query?: string;
   order?: "newest" | "oldest";
   offset?: number;
+  fromIncludes?: string;
+  fromDomainIncludes?: string;
+  subjectIncludes?: string;
+  snippetIncludes?: string;
+  hasFlag?: string;
+  dateAfter?: string;
+  dateBefore?: string;
 }
 
 export interface ClassifyMessagesToolInput {
@@ -66,6 +73,22 @@ export interface InboxTriageReport {
   groupCounts: Record<string, number>;
   recommendedNextAction: "review_preview_plan";
   mutationsAttempted: 0;
+}
+
+export type PriorityBucketId = "urgent" | "needs_review" | "waiting" | "fyi" | "bulk";
+
+export interface PriorityCandidate {
+  message: MessageSummary;
+  bucketId: PriorityBucketId;
+  reason: string;
+  confidence: "high" | "medium" | "low";
+  nextAction: string;
+}
+
+export interface PriorityBucket {
+  id: PriorityBucketId;
+  label: string;
+  candidates: PriorityCandidate[];
 }
 
 export interface PlanCleanupInput {
@@ -131,6 +154,8 @@ export interface MailTools {
   triageInbox(input: TriageInboxInput): Promise<{
     triage: InboxTriageReport;
     classifications: MessageClassification[];
+    priorityBuckets: PriorityBucket[];
+    priorityCounts: Record<PriorityBucketId, number>;
     ruleset?: ClassificationRulesetMetadata;
     mutationsAttempted: 0;
   }>;
@@ -208,9 +233,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       });
 
       return {
-        messages: searchInput.query
-          ? messages.filter((message) => matchesQuery(message, searchInput.query ?? ""))
-          : messages,
+        messages: messages.filter((message) => matchesSearchInput(message, searchInput)),
       };
     },
 
@@ -245,6 +268,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         rules: resolvedRules.rules,
         defaultGroupId: resolvedRules.defaultGroupId,
       });
+      const priorityBuckets = buildPriorityBuckets(messages);
 
       return {
         triage: {
@@ -256,6 +280,8 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           mutationsAttempted: 0,
         },
         classifications,
+        priorityBuckets,
+        priorityCounts: countPriorityBuckets(priorityBuckets),
         ruleset: resolvedRules.ruleset,
         mutationsAttempted: 0,
       };
@@ -456,6 +482,127 @@ function countGroups(classifications: MessageClassification[]): Record<string, n
   return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
 }
 
+function buildPriorityBuckets(messages: MessageSummary[]): PriorityBucket[] {
+  const buckets: PriorityBucket[] = [
+    { id: "urgent", label: "Urgent", candidates: [] },
+    { id: "needs_review", label: "Needs Review", candidates: [] },
+    { id: "waiting", label: "Waiting", candidates: [] },
+    { id: "fyi", label: "FYI", candidates: [] },
+    { id: "bulk", label: "Bulk", candidates: [] },
+  ];
+  const byId = new Map(buckets.map((bucket) => [bucket.id, bucket]));
+
+  for (const message of messages) {
+    const candidate = classifyPriority(message);
+    byId.get(candidate.bucketId)?.candidates.push(candidate);
+  }
+
+  return buckets;
+}
+
+function countPriorityBuckets(buckets: PriorityBucket[]): Record<PriorityBucketId, number> {
+  return {
+    urgent: buckets.find((bucket) => bucket.id === "urgent")?.candidates.length ?? 0,
+    needs_review: buckets.find((bucket) => bucket.id === "needs_review")?.candidates.length ?? 0,
+    waiting: buckets.find((bucket) => bucket.id === "waiting")?.candidates.length ?? 0,
+    fyi: buckets.find((bucket) => bucket.id === "fyi")?.candidates.length ?? 0,
+    bulk: buckets.find((bucket) => bucket.id === "bulk")?.candidates.length ?? 0,
+  };
+}
+
+function classifyPriority(message: MessageSummary): PriorityCandidate {
+  const text = `${message.from}\n${message.subject}\n${message.snippet}`.toLocaleLowerCase();
+
+  if (hasAny(text, [
+    "security alert",
+    "安全",
+    "风险",
+    "urgent",
+    "asap",
+    "deadline",
+    "today",
+    "action required",
+    "立即",
+    "截止",
+  ])) {
+    return {
+      message,
+      bucketId: "urgent",
+      reason: "metadata indicates security, risk, deadline, or time pressure",
+      confidence: "medium",
+      nextAction: "review first and decide whether a response or cleanup is needed",
+    };
+  }
+
+  if (hasAny(text, [
+    "please reply",
+    "reply",
+    "request",
+    "question",
+    "follow up",
+    "follow-up",
+    "请",
+    "回复",
+    "确认",
+    "问题",
+  ])) {
+    return {
+      message,
+      bucketId: "needs_review",
+      reason: "metadata looks like a direct ask or follow-up",
+      confidence: "low",
+      nextAction: "inspect the message or thread before acting",
+    };
+  }
+
+  if (hasAny(text, ["waiting", "pending", "awaiting", "等候", "等待", "待处理"])) {
+    return {
+      message,
+      bucketId: "waiting",
+      reason: "metadata suggests the next blocker may be external",
+      confidence: "low",
+      nextAction: "keep for tracking unless it is stale",
+    };
+  }
+
+  if (hasAny(text, [
+    "newsletter",
+    "digest",
+    "unsubscribe",
+    "promotion",
+    "promo",
+    "广告",
+    "优惠",
+    "退订",
+  ])) {
+    return {
+      message,
+      bucketId: "bulk",
+      reason: "metadata looks like newsletter, digest, promotion, or other bulk mail",
+      confidence: "medium",
+      nextAction: "archive, move to Junk, or add a rule after review",
+    };
+  }
+
+  if (message.flags.includes("\\Seen")) {
+    return {
+      message,
+      bucketId: "fyi",
+      reason: "message is already seen and has no action-oriented metadata",
+      confidence: "low",
+      nextAction: "leave, archive, or use rules if this sender recurs",
+    };
+  }
+
+  return {
+    message,
+    bucketId: "fyi",
+    reason: "no action-oriented metadata detected",
+    confidence: "low",
+    nextAction: "review only if the sender or subject matters",
+  };
+}
+
 function groupSpamCandidates(messages: MessageSummary[], classifications: MessageClassification[]): Record<string, SpamCandidate[]> {
   const byRef = new Map(messages.map((message) => [message.ref.uid, message]));
   const groups: Record<string, SpamCandidate[]> = {};
@@ -508,8 +655,32 @@ async function resolveRules(input: {
   };
 }
 
+function matchesSearchInput(message: MessageSummary, input: SearchMessagesInput): boolean {
+  if (input.query && !matchesQuery(message, input.query)) return false;
+  if (input.fromIncludes && !includesIgnoreCase(message.from, input.fromIncludes)) return false;
+  if (input.fromDomainIncludes && !includesIgnoreCase(extractSenderDomain(message.from), input.fromDomainIncludes)) return false;
+  if (input.subjectIncludes && !includesIgnoreCase(message.subject, input.subjectIncludes)) return false;
+  if (input.snippetIncludes && !includesIgnoreCase(message.snippet, input.snippetIncludes)) return false;
+  if (input.hasFlag && !message.flags.includes(input.hasFlag)) return false;
+  if (input.dateAfter && new Date(message.date).getTime() < new Date(input.dateAfter).getTime()) return false;
+  if (input.dateBefore && new Date(message.date).getTime() > new Date(input.dateBefore).getTime()) return false;
+  return true;
+}
+
 function matchesQuery(message: MessageSummary, query: string): boolean {
-  const needle = query.toLocaleLowerCase();
   return [message.from, message.subject, message.snippet, message.ref.folder]
-    .some((value) => value.toLocaleLowerCase().includes(needle));
+    .some((value) => includesIgnoreCase(value, query));
+}
+
+function includesIgnoreCase(value: string, needle: string): boolean {
+  return value.toLocaleLowerCase().includes(needle.toLocaleLowerCase());
+}
+
+function hasAny(value: string, needles: string[]): boolean {
+  return needles.some((needle) => value.includes(needle.toLocaleLowerCase()));
+}
+
+function extractSenderDomain(from: string): string {
+  const match = from.match(/@([^>\s]+)/);
+  return match?.[1] ?? "";
 }

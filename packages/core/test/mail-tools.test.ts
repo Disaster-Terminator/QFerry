@@ -208,6 +208,33 @@ describe("mail tools", () => {
     ]);
   });
 
+  it("searches bounded metadata with structured filters", async () => {
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    const result = await tools.search({
+      folder: "INBOX",
+      limit: 10,
+      fromIncludes: "newsletter@",
+      fromDomainIncludes: "example.com",
+      subjectIncludes: "digest",
+      hasFlag: "\\Seen",
+      dateAfter: "2026-05-10T00:00:00.000Z",
+      dateBefore: "2026-05-12T00:00:00.000Z",
+    });
+
+    expect(result.messages).toEqual([
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "newsletter@example.com",
+        subject: "Weekly digest",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "A low priority newsletter.",
+        flags: ["\\Seen"],
+      },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("fixture full body");
+  });
+
   it("fetches a single message detail by provider ref", async () => {
     const tools = createMailTools({ provider: FixtureMailProvider.demo() });
 
@@ -274,6 +301,37 @@ describe("mail tools", () => {
       mutationsAttempted: 0,
     });
     expect(result.classifications).toHaveLength(2);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
+  it("adds urgency priority buckets to inbox triage reports", async () => {
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    const result = await tools.triageInbox({
+      folder: "INBOX",
+      limit: 10,
+      defaultGroupId: "review",
+      rules: [
+        { id: "newsletter", groupId: "newsletter", match: { fromIncludes: "newsletter@" } },
+      ],
+    });
+
+    expect(result.priorityCounts).toEqual({
+      urgent: 1,
+      needs_review: 0,
+      waiting: 0,
+      fyi: 0,
+      bulk: 1,
+    });
+    expect(result.priorityBuckets.find((bucket) => bucket.id === "urgent")?.candidates[0]).toMatchObject({
+      bucketId: "urgent",
+      message: { subject: "Security alert" },
+      nextAction: "review first and decide whether a response or cleanup is needed",
+    });
+    expect(result.priorityBuckets.find((bucket) => bucket.id === "bulk")?.candidates[0]).toMatchObject({
+      bucketId: "bulk",
+      message: { subject: "Weekly digest" },
+    });
     expect(result.mutationsAttempted).toBe(0);
   });
 

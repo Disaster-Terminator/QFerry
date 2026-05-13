@@ -209,6 +209,23 @@ async function main() {
     toolName: "search",
     sampledMessages,
   });
+  const structuredSearch = await callToolWithTrace(
+    client,
+    "search",
+    { folder: "INBOX", limit: 1, fromIncludes: "@", dateBefore: "2100-01-01T00:00:00.000Z" },
+    tracePath,
+    baseEvent,
+  );
+  const structuredSearchMessages = Array.isArray(structuredSearch.structuredContent?.messages)
+    ? structuredSearch.structuredContent.messages.length
+    : 0;
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "search_structured",
+    sampledMessages: structuredSearchMessages,
+    mutationsAttempted: 0,
+  });
 
   const spamCandidates = await callToolWithTrace(
     client,
@@ -284,6 +301,7 @@ async function main() {
     toolName: "triage_inbox",
     sampledMessages: triage.structuredContent?.triage?.sampledMessages,
     triageGroupCounts: triage.structuredContent?.triage?.groupCounts,
+    priorityCounts: triage.structuredContent?.priorityCounts,
     mutationsAttempted: triage.structuredContent?.mutationsAttempted,
   });
 
@@ -387,12 +405,14 @@ async function main() {
       `- folderCount: ${mailboxCount}`,
       `- inboxExists: ${mailboxSummary.structuredContent?.mailbox?.exists ?? "<missing>"}`,
       `- sampledMessages: ${sampledMessages}`,
+      `- structuredSearchMessages: ${structuredSearchMessages}`,
       `- spamCandidateGroups: ${JSON.stringify(Object.keys(spamCandidates.structuredContent?.groups ?? {}))}`,
       `- spamCandidateCount: ${countGroupedCandidates(spamCandidates.structuredContent?.groups)}`,
       `- spamPreviewPlanStatus: ${spamPreviewPlan?.structuredContent?.plan?.status ?? "<none>"}`,
       `- spamPreviewPlanMessageRefs: ${spamPreviewPlan?.structuredContent?.plan?.messageRefs?.length ?? 0}`,
       `- spamPreviewPlanTarget: ${spamPreviewPlan?.structuredContent?.plan?.target?.folder ?? "<none>"}`,
       `- triageGroupCounts: ${JSON.stringify(triage.structuredContent?.triage?.groupCounts ?? {})}`,
+      `- priorityCounts: ${JSON.stringify(triage.structuredContent?.priorityCounts ?? {})}`,
       `- triageSampledMessages: ${triage.structuredContent?.triage?.sampledMessages ?? "<missing>"}`,
       `- previewPlanStatus: ${previewPlan.structuredContent?.plan?.status ?? "<missing>"}`,
       `- previewPlanMessageRefs: ${previewPlan.structuredContent?.plan?.messageRefs?.length ?? "<missing>"}`,

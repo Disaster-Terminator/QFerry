@@ -79,6 +79,7 @@ async function main() {
     ["list_mailboxes", {}],
     ["get_mailbox_summary", { folder: "INBOX" }],
     ["search", { folder: "INBOX", limit: 10, query: "digest" }],
+    ["search", { folder: "INBOX", limit: 10, fromIncludes: "newsletter@", fromDomainIncludes: "example.com", subjectIncludes: "digest", hasFlag: "\\Seen" }],
     ["fetch", { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }],
     ["classify_messages", { folder: "INBOX", limit: 10, rulesFile }],
     ["triage_inbox", { folder: "INBOX", limit: 10, rulesFile }],
@@ -113,6 +114,7 @@ async function main() {
   ];
   let statusResult;
   let mailboxSummaryResult;
+  let structuredSearchResult;
   let fetchResult;
   let classifyResult;
   let triageResult;
@@ -125,6 +127,7 @@ async function main() {
     const result = await callToolWithStructuredContent(client, name, args);
     if (name === "get_status") statusResult = result.structuredContent;
     if (name === "get_mailbox_summary") mailboxSummaryResult = result.structuredContent;
+    if (name === "search" && args.fromIncludes) structuredSearchResult = result.structuredContent;
     if (name === "fetch") fetchResult = result.structuredContent;
     if (name === "classify_messages") classifyResult = result.structuredContent;
     if (name === "triage_inbox") triageResult = result.structuredContent;
@@ -139,7 +142,11 @@ async function main() {
       statusProvider: result.structuredContent?.status?.provider,
       sampledMessages: result.structuredContent?.triage?.sampledMessages,
       triageGroupCounts: result.structuredContent?.triage?.groupCounts,
+      priorityCounts: result.structuredContent?.priorityCounts,
       mailboxExists: result.structuredContent?.mailbox?.exists,
+      searchResultCount: Array.isArray(result.structuredContent?.messages)
+        ? result.structuredContent.messages.length
+        : undefined,
       fetchedSubject: result.structuredContent?.message?.subject,
       spamCandidateGroups: result.structuredContent?.groups,
       batchPagesScanned: result.structuredContent?.preview?.pagesScanned,
@@ -179,6 +186,7 @@ async function main() {
       `- statusConfigSource: ${statusResult?.status?.configSource ?? "<missing>"}`,
       `- statusWarnings: ${(statusResult?.status?.statusWarnings ?? []).join("; ")}`,
       `- inboxExists: ${mailboxSummaryResult?.mailbox?.exists ?? "<missing>"}`,
+      `- structuredSearchMessages: ${structuredSearchResult?.messages?.length ?? "<missing>"}`,
       `- fetchedSubject: ${fetchResult?.message?.subject ?? "<missing>"}`,
       `- rulesFile: ${rulesFile}`,
       `- rulesetVersion: ${classifyResult?.ruleset?.version ?? "<missing>"}`,
@@ -187,6 +195,7 @@ async function main() {
       `- toolsCalled: ${calls.length + 1}`,
       `- executeCleanupBlocked: ${blockedExecuteResult?.isError === true}`,
       `- triageGroupCounts: ${JSON.stringify(triageResult?.triage?.groupCounts ?? {})}`,
+      `- priorityCounts: ${JSON.stringify(triageResult?.priorityCounts ?? {})}`,
       `- triageSampledMessages: ${triageResult?.triage?.sampledMessages ?? "<missing>"}`,
       `- spamCandidateGroups: ${JSON.stringify(Object.keys(spamCandidatesResult?.groups ?? {}))}`,
       `- previewPlanStatus: ${planResult?.plan?.status ?? "<missing>"}`,

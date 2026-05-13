@@ -114,6 +114,32 @@ examples/qferry.rules.json
 
 真实 QQ read-only e2e 调用该工具时仍必须保持 `mutationsAttempted: 0`。只有用户明确授权某个 plan 后，才能把 plan 标记为 `confirmed` 并调用 `execute_cleanup`。
 
+## 结构化搜索与优先级分桶
+
+`search` 支持 metadata-only 结构化过滤：
+
+- `fromIncludes`
+- `fromDomainIncludes`
+- `subjectIncludes`
+- `snippetIncludes`
+- `hasFlag`
+- `dateAfter`
+- `dateBefore`
+- `order`
+- `offset`
+
+这些过滤在 bounded metadata scan 之后执行，语义是 AND，不读取正文、不下载附件。
+
+`triage_inbox` 在原有 `groupCounts` 外返回行动优先级：
+
+- `urgent`
+- `needs_review`
+- `waiting`
+- `fyi`
+- `bulk`
+
+验收时记录 `priorityCounts`，并把它当作候选排序信号，不把 metadata 启发式当成绝对判断。
+
 ## 黑名单边界
 
 QQ 邮箱产品层面有“设置 / 反垃圾 / 黑名单或黑白名单”能力，但当前 QFerry 没有验证到可通过 IMAP/SMTP/MCP 直接写入 QQ 服务器侧黑名单的公开接口。
@@ -145,6 +171,8 @@ QFerry 当前支持的是规则层 blocklist：
 - 启动 plugin-local MCP runtime：`plugins/qferry/mcp-bootstrap.mjs` -> `plugins/qferry/dist/mcp.cjs`。
 - 使用 fixture provider 验证工具发现和调用。
 - 使用 QQ read-only provider 验证真实 QQ 邮箱的 capability、文件夹列表、小批量 metadata。
+- 使用结构化 `search` 验证 metadata 过滤，不读取正文。
+- 使用 `triage_inbox` 验证 priority buckets。
 - 使用 `preview_cleanup_batch` 验证跨页规则预览和 preview operation plan。
 
 禁止：

@@ -80,3 +80,21 @@ Findings:
 - Retinue is now reliable for short, scoped QFerry read-only audits.
 - The batch cleanup preview slice is still valid for the current milestone because it completes the rules -> preview plan -> confirmed execute path.
 - The next Gmail-alignment slice should target urgency triage and structured search filters after this batch preview work is verified.
+
+## 2026-05-13 Structured search and urgency triage audit
+
+Context:
+
+- Retinue was used for two concurrent read-only audits before implementing structured search filters and urgency triage buckets.
+- The main thread kept implementation decisions and real QQ e2e control.
+
+Observed jobs:
+
+- `job_96595326-bc7a-4c28-b956-35ebd1c348ac` completed the vision guard audit. It confirmed the slice stays aligned with QFerry's QQ Mail Gmail-like organization, Codex-plugin-first, preview-first, traceable-test vision.
+- `job_93916bf8-ab0b-4f86-a4bf-8d682d156b0b` completed the structured search risk audit. It recommended in-memory structured filtering after bounded scans as the safest path, and warned against provider-level IMAP filter pushdown for this slice.
+
+Findings:
+
+- Structured metadata filters and priority buckets are a valid next Gmail-alignment step.
+- The implementation should remain metadata-only and backward-compatible.
+- Provider-level filter pushdown can be revisited later after QQ IMAP behavior is better characterized.
