@@ -68,6 +68,30 @@ describe("classification", () => {
     expect(JSON.stringify(results)).not.toContain("body");
   });
 
+  it("can match a sender domain without matching the display name", () => {
+    const results = classifyMessages({
+      messages: [{
+        ...baseMessage,
+        from: "Epic Games <store@mail.epicgames.com>",
+        subject: "Spring sale",
+      }],
+      defaultGroupId: "review",
+      rules: [
+        {
+          id: "epic-domain",
+          groupId: "bulk",
+          match: { fromDomainIncludes: "epicgames.com" },
+        },
+      ],
+    });
+
+    expect(results[0]).toMatchObject({
+      groupId: "bulk",
+      matchedRuleId: "epic-domain",
+      explanation: "from domain includes epicgames.com",
+    });
+  });
+
   it("uses the default group when no rule matches", () => {
     const results = classifyMessages({
       messages: [baseMessage],

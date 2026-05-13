@@ -39,6 +39,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "group_spam_candidates",
       "plan_cleanup",
       "preview_cleanup_batch",
+      "plan_sender_governance",
       "execute_cleanup",
     ]);
     expect(tools.tools.find((tool) => tool.name === "get_status")?.annotations?.readOnlyHint).toBe(true);
@@ -49,6 +50,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "get_capability_snapshot")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "preview_cleanup_batch")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "plan_sender_governance")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_cleanup")?.annotations?.destructiveHint).toBe(true);
 
     await client.close();
@@ -431,6 +433,61 @@ describe("QFerry ChatGPT App MCP server", () => {
         pagesScanned: 2,
         scannedMessages: 2,
         selectedMessageRefs: 1,
+        mutationsAttempted: 0,
+      },
+      plan: {
+        status: "preview",
+        confirmationRequired: true,
+        messageRefs: [
+          { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+        ],
+      },
+      mutationsAttempted: 0,
+    });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("plans sender governance through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "plan_sender_governance",
+      arguments: {
+        runId: "run-mcp-sender-governance",
+        folder: "INBOX",
+        pageSize: 1,
+        maxPages: 2,
+        maxMessageRefs: 1,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedSenderDomains: ["example.com"],
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      governance: {
+        provider: "fixture",
+        folder: "INBOX",
+        scannedMessages: 2,
+        selectedMessageRefs: 1,
+        serverBlocklistCapability: { supported: false },
+        domainCandidates: [
+          {
+            domain: "example.com",
+            suggestedRule: {
+              match: { fromDomainIncludes: "example.com" },
+            },
+          },
+        ],
         mutationsAttempted: 0,
       },
       plan: {

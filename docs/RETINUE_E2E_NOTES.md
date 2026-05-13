@@ -133,3 +133,20 @@ Findings:
 
 - `priority.weight` should remain optional, bounded, and local to ordering candidates inside the configured bucket.
 - E2E trace summaries now record `priorityBucketWeights` alongside `priorityCounts`, so weight behavior leaves an auditable artifact without logging message bodies or secrets.
+
+## 2026-05-13 Sender governance audit
+
+Context:
+
+- Retinue was used for two concurrent read-only audits while the main thread implemented sender/domain governance planning.
+- The main thread kept implementation, real QQ e2e, and product decisions.
+
+Observed jobs:
+
+- `job_ae93535e-ab5d-4db1-a9a3-de2128ab6fd3` stalled after repeated tool-call rounds without a completed assistant text. This is recorded as a Retinue pressure signal, not as QFerry implementation evidence.
+- `job_783aa036-d4dd-4888-86b4-9135c509217a` completed the implementation audit. It confirmed the provider boundary: QFerry's QQ mutable provider exposes IMAP `move`, but no server-side blocklist/filter mutation. It also identified the missing persisted `fromDomainIncludes` ruleset support, which this slice added.
+
+Findings:
+
+- Sender/domain governance should remain preview-first: bounded metadata scan, local rule suggestions, and operation plans only for explicitly selected sender/domain filters.
+- `serverBlocklistCapability.supported` remains `false` until a provider exposes a real, auditable QQ server-side blocklist API.

@@ -3,6 +3,7 @@ import type { MessageSummary } from "./providers/types.js";
 
 export interface ClassificationRuleMatch {
   fromIncludes?: string;
+  fromDomainIncludes?: string;
   subjectIncludes?: string;
   snippetIncludes?: string;
   folderEquals?: string;
@@ -71,6 +72,11 @@ function explainMatch(match: ClassificationRuleMatch, message: MessageSummary): 
     parts.push(`from includes ${match.fromIncludes}`);
   }
 
+  if (match.fromDomainIncludes !== undefined) {
+    if (!includesIgnoreCase(extractSenderDomain(message.from), match.fromDomainIncludes)) return undefined;
+    parts.push(`from domain includes ${match.fromDomainIncludes}`);
+  }
+
   if (match.subjectIncludes !== undefined) {
     if (!includesIgnoreCase(message.subject, match.subjectIncludes)) return undefined;
     parts.push(`subject includes ${match.subjectIncludes}`);
@@ -96,4 +102,9 @@ function explainMatch(match: ClassificationRuleMatch, message: MessageSummary): 
 
 function includesIgnoreCase(value: string, needle: string): boolean {
   return value.toLocaleLowerCase().includes(needle.toLocaleLowerCase());
+}
+
+function extractSenderDomain(from: string): string {
+  const match = from.match(/@([^>\s]+)/);
+  return match?.[1] ?? "";
 }

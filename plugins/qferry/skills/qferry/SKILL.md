@@ -36,13 +36,18 @@ Allowed by default:
 - Group oldest obvious spam or ads for confirmation.
 - Create operation plans.
 - Preview bounded cross-page cleanup batches.
+- Plan sender/domain governance candidates and local rule suggestions.
 - Write trace artifacts.
 
 ## Rules
 
 Prefer a persisted `qferry.rules.json` rules file when the user wants repeatable classification. The ruleset includes `version`, `defaultGroupId`, `groups`, and ordered `rules`.
 
+Rules can match `fromIncludes`, `fromDomainIncludes`, `subjectIncludes`, `snippetIncludes`, `folderEquals`, and `hasFlag` without reading message bodies.
+
 Rules may include optional `priority` metadata with `bucketId`, `reason`, `confidence`, `weight`, and `nextAction`. Use it to make user-specific senders/domains consistently land in `urgent`, `needs_review`, `waiting`, `fyi`, or `bulk` without changing QQ server state. `weight` is a 0-100 candidate ordering signal inside the selected bucket.
+
+Use `plan_sender_governance` when the user wants Gmail-like sender/domain cleanup. It returns domain candidates, suggested local rules, a preview-only operation plan for explicitly selected sender/domain filters, and `serverBlocklistCapability.supported: false` when the current provider exposes no QQ server-side blocklist mutation API.
 
 When a tool response includes `ruleset`, keep `ruleset.version`, `ruleset.ruleCount`, and `ruleset.source` in the acceptance summary. Inline rules are still acceptable for one-off classification.
 

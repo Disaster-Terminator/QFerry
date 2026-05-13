@@ -370,6 +370,38 @@ async function main() {
     mutationsAttempted: batchPreview.structuredContent?.mutationsAttempted,
   });
 
+  const senderGovernance = await callToolWithTrace(
+    client,
+    "plan_sender_governance",
+    {
+      runId,
+      folder: "INBOX",
+      pageSize: candidateLimit,
+      maxPages: 2,
+      maxMessageRefs: 0,
+      action: "move",
+      target: { folder: "Junk" },
+      order: "oldest",
+    },
+    tracePath,
+    baseEvent,
+  );
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "plan_sender_governance",
+    pagesScanned: senderGovernance.structuredContent?.governance?.pagesScanned,
+    scannedMessages: senderGovernance.structuredContent?.governance?.scannedMessages,
+    domainCandidates: senderGovernance.structuredContent?.governance?.domainCandidates?.length,
+    selectedMessageRefs: senderGovernance.structuredContent?.governance?.selectedMessageRefs,
+    blocklistSupported: senderGovernance.structuredContent?.governance?.serverBlocklistCapability?.supported,
+    planStatus: senderGovernance.structuredContent?.plan?.status,
+    plannedMessageRefs: Array.isArray(senderGovernance.structuredContent?.plan?.messageRefs)
+      ? senderGovernance.structuredContent.plan.messageRefs.length
+      : 0,
+    mutationsAttempted: senderGovernance.structuredContent?.mutationsAttempted,
+  });
+
   const blockedExecute = await client.callTool({
     name: "execute_cleanup",
     arguments: { plan: previewPlan.structuredContent?.plan },
@@ -422,6 +454,9 @@ async function main() {
       `- batchPreviewSelectedRefs: ${batchPreview.structuredContent?.preview?.selectedMessageRefs ?? "<missing>"}`,
       `- batchPreviewScannedMessages: ${batchPreview.structuredContent?.preview?.scannedMessages ?? "<missing>"}`,
       `- batchPreviewPagesScanned: ${batchPreview.structuredContent?.preview?.pagesScanned ?? "<missing>"}`,
+      `- senderGovernanceDomainCandidates: ${senderGovernance.structuredContent?.governance?.domainCandidates?.length ?? "<missing>"}`,
+      `- senderGovernanceSelectedRefs: ${senderGovernance.structuredContent?.governance?.selectedMessageRefs ?? "<missing>"}`,
+      `- senderGovernanceBlocklistSupported: ${senderGovernance.structuredContent?.governance?.serverBlocklistCapability?.supported ?? "<missing>"}`,
       `- executeCleanupBlocked: ${blockedExecute.isError === true}`,
       `- trace: ${tracePath}`,
       `- mcpConfig: ${mcpConfigPath}`,

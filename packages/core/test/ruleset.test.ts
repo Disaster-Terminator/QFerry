@@ -18,7 +18,7 @@ describe("classification ruleset", () => {
         {
           id: "newsletter",
           groupId: "archive",
-          match: { fromIncludes: "newsletter@" },
+          match: { fromIncludes: "newsletter@", fromDomainIncludes: "example.com" },
           priority: {
             bucketId: "bulk",
             reason: "Configured newsletter sender rule",
@@ -38,6 +38,7 @@ describe("classification ruleset", () => {
       ruleCount: 1,
     });
     expect(ruleset.rules[0]?.groupId).toBe("archive");
+    expect(ruleset.rules[0]?.match).toMatchObject({ fromDomainIncludes: "example.com" });
     expect(ruleset.rules[0]?.priority).toEqual({
       bucketId: "bulk",
       reason: "Configured newsletter sender rule",

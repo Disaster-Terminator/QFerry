@@ -119,6 +119,53 @@ export interface PreviewCleanupBatchInput {
   selectedGroupIds: string[];
 }
 
+export interface PlanSenderGovernanceInput {
+  runId: string;
+  folder: string;
+  pageSize: number;
+  maxPages: number;
+  maxMessageRefs: number;
+  action: OperationAction;
+  target?: Record<string, string>;
+  scanOffset?: number;
+  order?: "newest" | "oldest";
+  selectedSenderDomains?: string[];
+  selectedFromIncludes?: string[];
+}
+
+export interface SenderGovernanceCandidate {
+  domain: string;
+  messageCount: number;
+  seenCount: number;
+  unreadCount: number;
+  firstDate: string;
+  lastDate: string;
+  sampleSubjects: string[];
+  senders: string[];
+  suggestedRule: ClassificationRule;
+}
+
+export interface SenderGovernanceReport {
+  provider: string;
+  folder: string;
+  scanOrder: "newest" | "oldest";
+  scanOffset: number;
+  pageSize: number;
+  maxPages: number;
+  pagesScanned: number;
+  scannedMessages: number;
+  selectedMessageRefs: number;
+  maxMessageRefs: number;
+  domainCandidates: SenderGovernanceCandidate[];
+  selectedSenderDomains: string[];
+  selectedFromIncludes: string[];
+  serverBlocklistCapability: {
+    supported: false;
+    reason: string;
+  };
+  mutationsAttempted: 0;
+}
+
 export interface CleanupBatchPreview {
   provider: string;
   folder: string;
@@ -180,6 +227,11 @@ export interface MailTools {
     plan: OperationPlan;
     classifications: MessageClassification[];
     ruleset?: ClassificationRulesetMetadata;
+    mutationsAttempted: 0;
+  }>;
+  planSenderGovernance(input: PlanSenderGovernanceInput): Promise<{
+    governance: SenderGovernanceReport;
+    plan: OperationPlan;
     mutationsAttempted: 0;
   }>;
 }
@@ -470,6 +522,68 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         mutationsAttempted: 0,
       };
     },
+
+    async planSenderGovernance(governanceInput) {
+      const pageSize = Math.max(governanceInput.pageSize, 0);
+      const maxPages = Math.max(governanceInput.maxPages, 0);
+      const maxMessageRefs = Math.max(governanceInput.maxMessageRefs, 0);
+      const scanOffset = Math.max(governanceInput.scanOffset ?? 0, 0);
+      const scanOrder = governanceInput.order ?? "oldest";
+      const messages: MessageSummary[] = [];
+      let pagesScanned = 0;
+
+      for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+        const page = await input.provider.scanMailboxMetadata({
+          folder: governanceInput.folder,
+          limit: pageSize,
+          order: scanOrder,
+          offset: scanOffset + pageIndex * pageSize,
+        });
+        if (page.length === 0) break;
+        pagesScanned += 1;
+        messages.push(...page);
+        if (page.length < pageSize) break;
+      }
+
+      const selectedSenderDomains = governanceInput.selectedSenderDomains ?? [];
+      const selectedFromIncludes = governanceInput.selectedFromIncludes ?? [];
+      const selectedRefs = messages
+        .filter((message) => matchesSenderGovernanceSelection(message, selectedSenderDomains, selectedFromIncludes))
+        .map((message) => message.ref)
+        .slice(0, maxMessageRefs);
+      const provider = selectedRefs[0]?.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
+
+      return {
+        governance: {
+          provider,
+          folder: governanceInput.folder,
+          scanOrder,
+          scanOffset,
+          pageSize,
+          maxPages,
+          pagesScanned,
+          scannedMessages: messages.length,
+          selectedMessageRefs: selectedRefs.length,
+          maxMessageRefs,
+          domainCandidates: buildSenderGovernanceCandidates(messages),
+          selectedSenderDomains,
+          selectedFromIncludes,
+          serverBlocklistCapability: {
+            supported: false,
+            reason: "Provider capability exposes move only; server-side blocklist or filter mutation is not available through QFerry.",
+          },
+          mutationsAttempted: 0,
+        },
+        plan: createOperationPlan({
+          runId: governanceInput.runId,
+          provider,
+          action: governanceInput.action,
+          messageRefs: selectedRefs,
+          target: governanceInput.target,
+        }),
+        mutationsAttempted: 0,
+      };
+    },
   };
 }
 
@@ -672,6 +786,61 @@ function groupSpamCandidates(messages: MessageSummary[], classifications: Messag
     });
   }
   return Object.fromEntries(Object.entries(groups).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function buildSenderGovernanceCandidates(messages: MessageSummary[]): SenderGovernanceCandidate[] {
+  const byDomain = new Map<string, MessageSummary[]>();
+  for (const message of messages) {
+    const domain = extractSenderDomain(message.from);
+    if (!domain) continue;
+    byDomain.set(domain, [...(byDomain.get(domain) ?? []), message]);
+  }
+
+  return [...byDomain.entries()]
+    .map(([domain, domainMessages]) => {
+      const dates = domainMessages.map((message) => message.date).sort();
+      const sampleSubjects = [...new Set(domainMessages.map((message) => message.subject))].slice(0, 3);
+      const senders = [...new Set(domainMessages.map((message) => message.from))].slice(0, 5);
+      const suggestedRule: ClassificationRule = {
+        id: `sender-domain-${slugifyRuleId(domain)}`,
+        groupId: "sender_governance",
+        match: { fromDomainIncludes: domain },
+        priority: {
+          bucketId: "bulk",
+          reason: `Messages from ${domain} recur in the scanned window`,
+          confidence: domainMessages.length > 1 ? "high" : "medium",
+          weight: Math.min(100, 50 + domainMessages.length * 10),
+          nextAction: "Review sender samples, then preview a move plan or keep as a local rule",
+        },
+      };
+      return {
+        domain,
+        messageCount: domainMessages.length,
+        seenCount: domainMessages.filter((message) => message.flags.includes("\\Seen")).length,
+        unreadCount: domainMessages.filter((message) => !message.flags.includes("\\Seen")).length,
+        firstDate: dates[0] ?? "",
+        lastDate: dates[dates.length - 1] ?? "",
+        sampleSubjects,
+        senders,
+        suggestedRule,
+      };
+    })
+    .sort((left, right) => right.messageCount - left.messageCount || left.domain.localeCompare(right.domain));
+}
+
+function matchesSenderGovernanceSelection(
+  message: MessageSummary,
+  selectedSenderDomains: string[],
+  selectedFromIncludes: string[],
+): boolean {
+  if (selectedSenderDomains.length === 0 && selectedFromIncludes.length === 0) return false;
+  const domain = extractSenderDomain(message.from);
+  return selectedSenderDomains.some((selectedDomain) => includesIgnoreCase(domain, selectedDomain))
+    || selectedFromIncludes.some((fromNeedle) => includesIgnoreCase(message.from, fromNeedle));
+}
+
+function slugifyRuleId(value: string): string {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "unknown";
 }
 
 function messageRefKey(ref: MessageRef): string {

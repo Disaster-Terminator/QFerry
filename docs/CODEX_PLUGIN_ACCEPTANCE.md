@@ -95,6 +95,7 @@ examples/qferry.rules.json
 - `defaultGroupId`：没有命中规则时使用的 group。
 - `groups`：用户定义的分类组。
 - `rules`：按顺序匹配的 metadata 规则。
+- `rules[].match.fromDomainIncludes`：按发件人域名匹配，适合 sender/domain 治理规则。
 - `rules[].priority`：可选优先级分桶配置，包含 `bucketId`、`reason`、`confidence`、`weight`、`nextAction`。`weight` 为 0-100，用于同一 bucket 内候选排序。
 
 工具仍兼容直接传入内联 `rules`。真实 QQ 路径使用规则文件时仍然只生成 preview plan，不执行邮箱写操作。
@@ -146,6 +147,8 @@ examples/qferry.rules.json
 ## 黑名单边界
 
 QQ 邮箱产品层面有“设置 / 反垃圾 / 黑名单或黑白名单”能力，但当前 QFerry 没有验证到可通过 IMAP/SMTP/MCP 直接写入 QQ 服务器侧黑名单的公开接口。
+
+`plan_sender_governance` 是当前替代路径：它只扫描 bounded metadata，聚合发件人域名候选，生成本地规则建议，并在选定 sender/domain 后生成 `status: "preview"` 的 move plan。工具输出必须保留 `serverBlocklistCapability.supported: false`，直到上游 provider 明确暴露可审计的服务器侧黑名单接口。
 
 QFerry 当前支持的是规则层 blocklist：
 

@@ -97,7 +97,7 @@ function readRules(value: unknown): ClassificationRule[] {
       throw new Error(`QFerry ruleset rule at index ${index} must match at least one metadata field`);
     }
     for (const [key, entryValue] of Object.entries(normalizedMatch)) {
-      if (!["fromIncludes", "subjectIncludes", "snippetIncludes", "folderEquals", "hasFlag"].includes(key)) {
+      if (!["fromIncludes", "fromDomainIncludes", "subjectIncludes", "snippetIncludes", "folderEquals", "hasFlag"].includes(key)) {
         throw new Error(`QFerry ruleset rule at index ${index} has unsupported match field: ${key}`);
       }
       if (typeof entryValue !== "string" || entryValue.length === 0) {

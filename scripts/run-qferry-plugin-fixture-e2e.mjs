@@ -111,6 +111,16 @@ async function main() {
       rulesFile,
       selectedGroupIds: ["archive"],
     }],
+    ["plan_sender_governance", {
+      runId,
+      folder: "INBOX",
+      pageSize: 1,
+      maxPages: 2,
+      maxMessageRefs: 1,
+      action: "move",
+      target: { folder: "Archive" },
+      selectedSenderDomains: ["example.com"],
+    }],
   ];
   let statusResult;
   let mailboxSummaryResult;
@@ -121,6 +131,7 @@ async function main() {
   let spamCandidatesResult;
   let planResult;
   let batchPreviewResult;
+  let senderGovernanceResult;
   let blockedExecuteResult;
 
   for (const [name, args] of calls) {
@@ -134,6 +145,7 @@ async function main() {
     if (name === "group_spam_candidates") spamCandidatesResult = result.structuredContent;
     if (name === "plan_cleanup") planResult = result.structuredContent;
     if (name === "preview_cleanup_batch") batchPreviewResult = result.structuredContent;
+    if (name === "plan_sender_governance") senderGovernanceResult = result.structuredContent;
     await writeJsonl(tracePath, {
       ...baseEvent,
       event: "plugin_tool_called",
@@ -154,6 +166,9 @@ async function main() {
       batchScannedMessages: result.structuredContent?.preview?.scannedMessages,
       batchSelectedMessageRefs: result.structuredContent?.preview?.selectedMessageRefs,
       batchPlanStatus: result.structuredContent?.plan?.status,
+      senderGovernanceDomainCandidates: result.structuredContent?.governance?.domainCandidates?.length,
+      senderGovernanceSelectedRefs: result.structuredContent?.governance?.selectedMessageRefs,
+      senderGovernanceBlocklistSupported: result.structuredContent?.governance?.serverBlocklistCapability?.supported,
     });
   }
 
@@ -206,6 +221,9 @@ async function main() {
       `- batchPreviewSelectedRefs: ${batchPreviewResult?.preview?.selectedMessageRefs ?? "<missing>"}`,
       `- batchPreviewScannedMessages: ${batchPreviewResult?.preview?.scannedMessages ?? "<missing>"}`,
       `- batchPreviewPagesScanned: ${batchPreviewResult?.preview?.pagesScanned ?? "<missing>"}`,
+      `- senderGovernanceDomainCandidates: ${senderGovernanceResult?.governance?.domainCandidates?.length ?? "<missing>"}`,
+      `- senderGovernanceSelectedRefs: ${senderGovernanceResult?.governance?.selectedMessageRefs ?? "<missing>"}`,
+      `- senderGovernanceBlocklistSupported: ${senderGovernanceResult?.governance?.serverBlocklistCapability?.supported ?? "<missing>"}`,
       `- trace: ${tracePath}`,
       `- mcpConfig: ${mcpConfigPath}`,
       `- stderrBytes: ${stderrChunks.join("").length}`,

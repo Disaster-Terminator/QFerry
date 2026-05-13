@@ -557,6 +557,67 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("plans sender and domain governance without server-side blocklist mutation", async () => {
+    const provider = FixtureMailProvider.demo();
+    const scanInputs: unknown[] = [];
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        scanMailboxMetadata: async (input) => {
+          scanInputs.push(input);
+          return provider.scanMailboxMetadata(input);
+        },
+      },
+    });
+
+    const result = await tools.planSenderGovernance({
+      runId: "run-sender-governance",
+      folder: "INBOX",
+      pageSize: 1,
+      maxPages: 2,
+      maxMessageRefs: 1,
+      action: "move",
+      target: { folder: "Archive" },
+      selectedSenderDomains: ["example.com"],
+    });
+
+    expect(scanInputs).toEqual([
+      { folder: "INBOX", limit: 1, order: "oldest", offset: 0 },
+      { folder: "INBOX", limit: 1, order: "oldest", offset: 1 },
+    ]);
+    expect(result.governance).toMatchObject({
+      provider: "fixture",
+      folder: "INBOX",
+      scanOrder: "oldest",
+      scannedMessages: 2,
+      selectedMessageRefs: 1,
+      mutationsAttempted: 0,
+      serverBlocklistCapability: {
+        supported: false,
+        reason: "Provider capability exposes move only; server-side blocklist or filter mutation is not available through QFerry.",
+      },
+    });
+    expect(result.governance.domainCandidates[0]).toMatchObject({
+      domain: "example.com",
+      messageCount: 2,
+      suggestedRule: {
+        groupId: "sender_governance",
+        match: { fromDomainIncludes: "example.com" },
+        priority: {
+          bucketId: "bulk",
+          weight: 70,
+        },
+      },
+    });
+    expect(result.plan.status).toBe("preview");
+    expect(result.plan.messageRefs).toEqual([
+      { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+    ]);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
   it("rejects execute cleanup for unconfirmed preview plans", async () => {
     const provider = FixtureMailProvider.demo();
     const tools = createMailTools({

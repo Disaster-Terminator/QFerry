@@ -26,6 +26,7 @@ const classificationRuleSchema = z.object({
   groupId: z.string(),
   match: z.object({
     fromIncludes: z.string().optional(),
+    fromDomainIncludes: z.string().optional(),
     subjectIncludes: z.string().optional(),
     snippetIncludes: z.string().optional(),
     folderEquals: z.string().optional(),
@@ -231,6 +232,29 @@ export function createQFerryMcpServer(): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => toToolResult(await tools.previewCleanupBatch(input)),
+  );
+
+  server.registerTool(
+    "plan_sender_governance",
+    {
+      title: "Plan sender governance",
+      description: "Use this when you need bounded sender/domain governance candidates, local rule suggestions, and a preview-only cleanup plan while recording that server-side QQ blocklist is not exposed.",
+      inputSchema: {
+        runId: z.string(),
+        folder: z.string(),
+        pageSize: z.number().int().min(1).max(20),
+        maxPages: z.number().int().min(1).max(200),
+        maxMessageRefs: z.number().int().min(0).max(200),
+        action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
+        target: z.record(z.string(), z.string()).optional(),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+        selectedSenderDomains: z.array(z.string()).optional(),
+        selectedFromIncludes: z.array(z.string()).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await tools.planSenderGovernance(input)),
   );
 
   server.registerTool(
