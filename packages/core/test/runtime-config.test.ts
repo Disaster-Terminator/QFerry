@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { loadQFerryRuntimeConfig } from "../src/runtime-config.js";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadQFerryRuntimeConfig, loadQFerryRuntimeSecretsSync } from "../src/runtime-config.js";
 
 describe("runtime config", () => {
   it("defaults to fixture with read-only safety limits", async () => {
@@ -77,6 +80,18 @@ describe("runtime config", () => {
     expect(JSON.stringify(config)).not.toContain("secret-auth-code");
   });
 
+  it("loads QQ auth code from the same local env source without adding it to status config", () => {
+    const dir = mkdtempSync(join(tmpdir(), "qferry-runtime-secrets-"));
+    const envFile = join(dir, ".env");
+    writeFileSync(envFile, "QQMAIL_KEY=secret-auth-code\n", "utf8");
+
+    const secrets = loadQFerryRuntimeSecretsSync({
+      QFERRY_ENV_FILE: envFile,
+    });
+
+    expect(secrets.qqmailKey).toBe("secret-auth-code");
+  });
+
   it("loads local JSON config when env provider is not set", async () => {
     const config = await loadQFerryRuntimeConfig({
       env: { QFERRY_CONFIG_FILE: "G:\\local\\qferry-config.json" },
@@ -111,8 +126,8 @@ describe("runtime config", () => {
       readFile: async (path) => {
         if (path.endsWith(".env")) return undefined;
         return JSON.stringify({
-        provider: "qqmail",
-        qqmail: { email: "local@qq.com", metadataSampleLimit: 7 },
+          provider: "qqmail",
+          qqmail: { email: "local@qq.com", metadataSampleLimit: 7 },
         });
       },
     });

@@ -25,6 +25,10 @@ export interface LoadQFerryRuntimeConfigInput {
   readFile?: (path: string) => Promise<string | undefined>;
 }
 
+export interface QFerryRuntimeSecrets {
+  qqmailKey?: string;
+}
+
 interface LocalConfigFile {
   provider?: string;
   qqmail?: {
@@ -98,6 +102,15 @@ export function loadQFerryRuntimeConfigSync(env: Record<string, string | undefin
   const localConfigPath = mergedEnv.QFERRY_CONFIG_FILE?.trim() || defaultConfigPath();
   const localConfig = loadLocalConfigSync(localConfigPath);
   return buildRuntimeConfig(mergedEnv, localConfig, env.QFERRY_PROVIDER ? "env" : envFile.loaded ? `env-file:${envFile.path}` : undefined);
+}
+
+export function loadQFerryRuntimeSecretsSync(env: Record<string, string | undefined> = process.env): QFerryRuntimeSecrets {
+  const envFilePath = env.QFERRY_ENV_FILE?.trim() || defaultEnvFilePath();
+  const envFile = loadEnvFileSync(envFilePath);
+  const mergedEnv = { ...envFile.values, ...env };
+  return {
+    qqmailKey: mergedEnv.QQMAIL_KEY,
+  };
 }
 
 async function readConfigFile(filePath: string): Promise<string | undefined> {

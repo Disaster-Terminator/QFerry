@@ -5,6 +5,7 @@ import {
   createMailTools,
   FixtureMailProvider,
   loadQFerryRuntimeConfigSync,
+  loadQFerryRuntimeSecretsSync,
   QqMutableProvider,
   type MailProvider,
   type MessageRef,
@@ -212,7 +213,7 @@ function createProviderFromConfig(runtimeConfig: QFerryRuntimeConfig): MailProvi
   }
 
   const user = runtimeConfig.qqmail?.email;
-  const pass = process.env.QQMAIL_KEY;
+  const pass = loadQFerryRuntimeSecretsSync().qqmailKey;
   if (!user || !pass) {
     return new UnavailableMailProvider(runtimeConfig);
   }
