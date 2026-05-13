@@ -63,6 +63,10 @@ function groupRefsByFolder(refs: MessageRef[]): Map<string, MessageRef[]> {
 }
 
 function assertUidValidity(refs: MessageRef[], openedUidValidity: bigint | number | string | undefined): void {
+  const missing = refs.find((ref) => ref.uidValidity === undefined);
+  if (missing) {
+    throw new Error(`QQ message ref requires UIDVALIDITY: ${missing.folder}/${missing.uid}`);
+  }
   if (openedUidValidity === undefined) return;
   const actual = String(openedUidValidity);
   const mismatched = refs.find((ref) => ref.uidValidity !== undefined && ref.uidValidity !== actual);

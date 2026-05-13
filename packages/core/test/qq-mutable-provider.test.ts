@@ -73,4 +73,23 @@ describe("QQ mutable provider", () => {
       { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
     ], "垃圾箱")).rejects.toThrow(/UIDVALIDITY mismatch/);
   });
+
+  it("rejects QQ move refs without UIDVALIDITY", async () => {
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => ({
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async () => ({ exists: 1, uidValidity: 999n }),
+        fetch: async function* () {},
+        messageMove: async () => ({ uidMap: new Map() }),
+      }),
+    });
+
+    await expect(provider.moveMessages([
+      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1" },
+    ], "垃圾箱")).rejects.toThrow(/requires UIDVALIDITY/);
+  });
 });

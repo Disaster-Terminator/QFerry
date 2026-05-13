@@ -206,10 +206,15 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 状态字段验收时要区分：
 
 - `mutationAllowed`：兼容字段，表示当前 provider 路径具备执行 mutation 的产品能力。
-- `mutationCapable`：provider 是否具备 mutation capability。
+- `authConfigured`：当前运行环境是否已配置真实 provider 所需凭据。
+- `providerReady`：当前 provider 是否具备执行工具调用的运行条件。
+- `mutationCapable`：当前 provider 是否具备可实际调用的 mutation capability。
+- `mutationOperationallyReady`：当前账号/凭据是否已达到真实 mutation 的运行条件。
 - `mutationRequiresConfirmation`：真实 mutation 是否必须通过 preview plan、`confirm_cleanup_plan` 和 `execute_cleanup`。
 
 QQ provider 的 `fetch` 必须按 `folder + uid + uidValidity` 精确读取选中邮件 metadata，不能依赖最新 bounded scan 回查 UID。
+
+Gmail-like 大批量治理验收优先走 `bulk_governance_preview`。该工具可以扫描较大 metadata 窗口并按 sender/domain/content 分类，但仍是 dry-run preview；真实 QQ mutation 只允许在用户明确授权后，对高置信广告/营销等小范围子集执行。
 
 ## 部署后验收
 

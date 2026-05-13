@@ -7,6 +7,8 @@ import type {
   MessageSummary,
   ProviderCapabilitySnapshot,
   ScanMailboxMetadataInput,
+  ScanMailboxMetadataWindowInput,
+  ScanMailboxMetadataWindowResult,
 } from "./types.js";
 
 export interface QqReadOnlyClient {
@@ -146,6 +148,47 @@ export class QqReadOnlyProvider implements MailProvider {
       }
 
       return messages;
+    });
+  }
+
+  async scanMailboxMetadataWindow(input: ScanMailboxMetadataWindowInput): Promise<ScanMailboxMetadataWindowResult> {
+    const limit = Math.min(Math.max(input.limit, 0), this.maxRecommendedScanLimit);
+    const maxPages = Math.max(input.maxPages, 0);
+    if (limit === 0 || maxPages === 0) return { messages: [], pagesScanned: 0 };
+
+    return this.withClient("scan_mailbox_metadata_window", async (client) => {
+      const mailbox = await client.mailboxOpen(input.folder, { readOnly: true });
+      const newest = input.order !== "oldest";
+      const baseOffset = Math.max(input.offset ?? 0, 0);
+      const maxSequence = Math.max(mailbox.exists, 1);
+      const messages: MessageSummary[] = [];
+      let pagesScanned = 0;
+
+      for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+        const offset = baseOffset + pageIndex * limit;
+        if (offset >= mailbox.exists) break;
+        const end = newest ? Math.max(maxSequence - offset, 1) : Math.min(offset + limit, maxSequence);
+        const start = newest ? Math.max(end - limit + 1, 1) : Math.min(offset + 1, maxSequence);
+        let pageCount = 0;
+        pagesScanned += 1;
+
+        for await (const message of client.fetch(
+          `${start}:${end}`,
+          { envelope: true, flags: true, internalDate: true, size: true, uid: true },
+          { uid: false },
+        )) {
+          pageCount += 1;
+          messages.push(toMessageSummary({
+            accountAlias: this.input.accountAlias,
+            folder: input.folder,
+            uidValidity: mailbox.uidValidity,
+            message,
+          }));
+        }
+        if (pageCount < limit) break;
+      }
+
+      return { messages, pagesScanned };
     });
   }
 
@@ -299,6 +342,9 @@ function toMessageSummary(input: {
 }
 
 function assertUidValidity(ref: MessageRef, mailboxUidValidity: bigint | number | string | undefined): void {
+  if (ref.uidValidity === undefined) {
+    throw new Error(`QQ message ref requires UIDVALIDITY: ${ref.folder}/${ref.uid}`);
+  }
   if (ref.uidValidity === undefined || mailboxUidValidity === undefined) return;
   const current = String(mailboxUidValidity);
   if (ref.uidValidity !== current) {

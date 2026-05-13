@@ -5,6 +5,8 @@ import { loadClassificationRuleset, type ClassificationRulesetMetadata } from ".
 import { formatRulesetPatchChangelog, renderRulesetPatchDraft, type RulesetPatchDraft } from "../ruleset-patch.js";
 import type { QFerryRuntimeConfig } from "../runtime-config.js";
 
+const CLIENT_REFS_PLAN_LIMIT = 20;
+
 export interface CreateMailToolsInput {
   provider: MailProvider;
   runtimeConfig?: QFerryRuntimeConfig;
@@ -136,6 +138,58 @@ export interface PlanSenderGovernanceInput {
   rulesFile?: string;
 }
 
+export type BulkGovernanceCategoryId =
+  | "high_confidence_marketing"
+  | "newsletter_or_digest"
+  | "security_or_account"
+  | "receipt_or_purchase"
+  | "developer_community"
+  | "review";
+
+export interface BulkGovernancePreviewInput {
+  runId: string;
+  folder: string;
+  pageSize: number;
+  maxPages: number;
+  maxMessageRefs: number;
+  action: OperationAction;
+  target?: Record<string, string>;
+  scanOffset?: number;
+  order?: "newest" | "oldest";
+  selectedCategoryIds: BulkGovernanceCategoryId[];
+}
+
+export interface BulkGovernanceCandidate {
+  categoryId: BulkGovernanceCategoryId;
+  domain: string;
+  messageCount: number;
+  selectedMessageRefs: number;
+  confidence: PriorityConfidence;
+  firstDate: string;
+  lastDate: string;
+  sampleSubjectHashes: string[];
+  sampleSubjectLengths: number[];
+  sampleSenders: string[];
+  reason: string;
+}
+
+export interface BulkGovernancePreview {
+  provider: string;
+  folder: string;
+  scanOrder: "newest" | "oldest";
+  scanOffset: number;
+  pageSize: number;
+  maxPages: number;
+  pagesScanned: number;
+  scannedMessages: number;
+  selectedMessageRefs: number;
+  maxMessageRefs: number;
+  selectedCategoryIds: BulkGovernanceCategoryId[];
+  categoryCounts: Partial<Record<BulkGovernanceCategoryId, number>>;
+  categoryCandidates: Partial<Record<BulkGovernanceCategoryId, BulkGovernanceCandidate[]>>;
+  mutationsAttempted: 0;
+}
+
 export interface SenderGovernanceCandidate {
   domain: string;
   messageCount: number;
@@ -238,6 +292,11 @@ export interface MailTools {
     plan: OperationPlan;
     mutationsAttempted: 0;
   }>;
+  bulkGovernancePreview(input: BulkGovernancePreviewInput): Promise<{
+    preview: BulkGovernancePreview;
+    plan: OperationPlan;
+    mutationsAttempted: 0;
+  }>;
 }
 
 export function createMailTools(input: CreateMailToolsInput): MailTools {
@@ -256,7 +315,10 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           configSource: "provider",
           mutationAllowed: false,
           mutationCapable: capability?.supportsMutation ?? false,
+          mutationOperationallyReady: capability?.supportsMutation ?? false,
           mutationRequiresConfirmation: capability?.supportsMutation ?? false,
+          authConfigured: capability !== undefined,
+          providerReady: capability !== undefined,
           metadataSampleLimit: capability?.maxRecommendedScanLimit ?? 1,
           statusWarnings: [],
         },
@@ -410,6 +472,9 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
 
     async planCleanup(planInput) {
       if (planInput.messageRefs && planInput.messageRefs.length > 0) {
+        if (planInput.messageRefs.length > CLIENT_REFS_PLAN_LIMIT) {
+          throw new Error(`client_refs cleanup plans are limited to ${CLIENT_REFS_PLAN_LIMIT} message refs`);
+        }
         return {
           plan: createOperationPlan({
             runId: planInput.runId,
@@ -417,6 +482,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
             action: planInput.action,
             messageRefs: planInput.messageRefs,
             target: planInput.target,
+            source: "client_refs",
           }),
           classifications: [],
           mutationsAttempted: 0,
@@ -610,6 +676,69 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         mutationsAttempted: 0,
       };
     },
+
+    async bulkGovernancePreview(bulkInput) {
+      const pageSize = Math.max(bulkInput.pageSize, 0);
+      const maxPages = Math.max(bulkInput.maxPages, 0);
+      const maxMessageRefs = Math.max(bulkInput.maxMessageRefs, 0);
+      const scanOffset = Math.max(bulkInput.scanOffset ?? 0, 0);
+      const scanOrder = bulkInput.order ?? "oldest";
+      const scanWindow = input.provider.scanMailboxMetadataWindow
+        ? await input.provider.scanMailboxMetadataWindow({
+          folder: bulkInput.folder,
+          limit: pageSize,
+          maxPages,
+          order: scanOrder,
+          offset: scanOffset,
+        })
+        : await scanMetadataWindowWithPages(input.provider, {
+          folder: bulkInput.folder,
+          limit: pageSize,
+          maxPages,
+          order: scanOrder,
+          offset: scanOffset,
+        });
+      const messages = scanWindow.messages;
+      const pagesScanned = scanWindow.pagesScanned;
+
+      const categorized = messages.map((message) => ({
+        message,
+        classification: classifyBulkGovernanceMessage(message),
+      }));
+      const selectedRefs = categorized
+        .filter((entry) => bulkInput.selectedCategoryIds.includes(entry.classification.categoryId))
+        .map((entry) => entry.message.ref)
+        .slice(0, maxMessageRefs);
+      const provider = selectedRefs[0]?.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
+
+      return {
+        preview: {
+          provider,
+          folder: bulkInput.folder,
+          scanOrder,
+          scanOffset,
+          pageSize,
+          maxPages,
+          pagesScanned,
+          scannedMessages: messages.length,
+          selectedMessageRefs: selectedRefs.length,
+          maxMessageRefs,
+          selectedCategoryIds: bulkInput.selectedCategoryIds,
+          categoryCounts: countBulkCategories(categorized.map((entry) => entry.classification.categoryId)),
+          categoryCandidates: buildBulkGovernanceCandidates(categorized, new Set(selectedRefs.map(messageRefKey))),
+          mutationsAttempted: 0,
+        },
+        plan: createOperationPlan({
+          runId: bulkInput.runId,
+          provider,
+          action: bulkInput.action,
+          messageRefs: selectedRefs,
+          target: bulkInput.target,
+          source: "bulk_governance",
+        }),
+        mutationsAttempted: 0,
+      };
+    },
   };
 }
 
@@ -620,6 +749,33 @@ function redactRuntimeConfig(config: QFerryRuntimeConfig): QFerryRuntimeConfig {
     ...config,
     qqmail,
   };
+}
+
+async function scanMetadataWindowWithPages(
+  provider: MailProvider,
+  input: {
+    folder: string;
+    limit: number;
+    maxPages: number;
+    order: "newest" | "oldest";
+    offset: number;
+  },
+): Promise<{ messages: MessageSummary[]; pagesScanned: number }> {
+  const messages: MessageSummary[] = [];
+  let pagesScanned = 0;
+  for (let pageIndex = 0; pageIndex < input.maxPages; pageIndex += 1) {
+    const page = await provider.scanMailboxMetadata({
+      folder: input.folder,
+      limit: input.limit,
+      order: input.order,
+      offset: input.offset + pageIndex * input.limit,
+    });
+    pagesScanned += 1;
+    if (page.length === 0) break;
+    messages.push(...page);
+    if (page.length < input.limit) break;
+  }
+  return { messages, pagesScanned };
 }
 
 function countGroups(classifications: MessageClassification[]): Record<string, number> {
@@ -852,6 +1008,108 @@ function buildSenderGovernanceCandidates(messages: MessageSummary[]): SenderGove
       };
     })
     .sort((left, right) => right.messageCount - left.messageCount || left.domain.localeCompare(right.domain));
+}
+
+function classifyBulkGovernanceMessage(message: MessageSummary): {
+  categoryId: BulkGovernanceCategoryId;
+  confidence: PriorityConfidence;
+  reason: string;
+} {
+  const domain = extractSenderDomain(message.from);
+  const text = `${message.from}\n${message.subject}\n${message.snippet}`.toLocaleLowerCase();
+
+  if (hasAny(domain, ["wargaming.net", "epicgames.com", "postermaster.sony.com.cn"])
+    || hasAny(text, ["广告", "(ad)", "优惠", "促销", "特卖", "礼物已到位", "登录游戏即可", "promotion", "promo"])) {
+    return { categoryId: "high_confidence_marketing", confidence: "high", reason: "metadata matches known marketing sender or promotion subject pattern" };
+  }
+
+  if (hasAny(text, ["安全代码", "security code", "异常登录", "new sign-in", "验证码", "验证", "account", "帐户", "账号"])) {
+    return { categoryId: "security_or_account", confidence: "high", reason: "metadata indicates account, login, verification, or security mail" };
+  }
+
+  if (hasAny(text, ["购买", "receipt", "invoice", "账单", "订单", "payment", "支付", "subscription"])) {
+    return { categoryId: "receipt_or_purchase", confidence: "high", reason: "metadata indicates a receipt, purchase, payment, or subscription" };
+  }
+
+  if (hasAny(text, ["newsletter", "digest", "unsubscribe", "退订", "周报", "月报"])) {
+    return { categoryId: "newsletter_or_digest", confidence: "medium", reason: "metadata indicates newsletter, digest, or unsubscribe-capable bulk mail" };
+  }
+
+  if (hasAny(domain, ["github.com", "codeforces.com", "gitee.com", "oschina.net"])
+    || hasAny(text, ["codeforces round", "pull request", "issue", "commit"])) {
+    return { categoryId: "developer_community", confidence: "medium", reason: "metadata indicates developer community or repository activity" };
+  }
+
+  return { categoryId: "review", confidence: "low", reason: "no high-confidence bulk governance category matched" };
+}
+
+function countBulkCategories(categoryIds: BulkGovernanceCategoryId[]): Partial<Record<BulkGovernanceCategoryId, number>> {
+  const counts: Partial<Record<BulkGovernanceCategoryId, number>> = {};
+  for (const categoryId of categoryIds) {
+    counts[categoryId] = (counts[categoryId] ?? 0) + 1;
+  }
+  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function buildBulkGovernanceCandidates(
+  categorized: Array<{
+    message: MessageSummary;
+    classification: { categoryId: BulkGovernanceCategoryId; confidence: PriorityConfidence; reason: string };
+  }>,
+  selectedRefKeys: Set<string>,
+): Partial<Record<BulkGovernanceCategoryId, BulkGovernanceCandidate[]>> {
+  const grouped = new Map<string, Array<typeof categorized[number]>>();
+  for (const entry of categorized) {
+    const domain = extractSenderDomain(entry.message.from) || "<unknown>";
+    const key = `${entry.classification.categoryId}\0${domain}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), entry]);
+  }
+
+  const candidates: Partial<Record<BulkGovernanceCategoryId, BulkGovernanceCandidate[]>> = {};
+  for (const entries of grouped.values()) {
+    const first = entries[0];
+    if (!first) continue;
+    const categoryId = first.classification.categoryId;
+    const domain = extractSenderDomain(first.message.from) || "<unknown>";
+    const dates = entries.map((entry) => entry.message.date).sort();
+    const candidate: BulkGovernanceCandidate = {
+      categoryId,
+      domain,
+      messageCount: entries.length,
+      selectedMessageRefs: entries.filter((entry) => selectedRefKeys.has(messageRefKey(entry.message.ref))).length,
+      confidence: highestConfidence(entries.map((entry) => entry.classification.confidence)),
+      firstDate: dates[0] ?? "",
+      lastDate: dates[dates.length - 1] ?? "",
+      sampleSubjectHashes: [...new Set(entries.map((entry) => hashText(entry.message.subject)))].slice(0, 3),
+      sampleSubjectLengths: [...new Set(entries.map((entry) => entry.message.subject.length))].slice(0, 3),
+      sampleSenders: [...new Set(entries.map((entry) => redactSender(entry.message.from)))].slice(0, 3),
+      reason: first.classification.reason,
+    };
+    candidates[categoryId] = [...(candidates[categoryId] ?? []), candidate]
+      .sort((left, right) => right.messageCount - left.messageCount || left.domain.localeCompare(right.domain));
+  }
+  return candidates;
+}
+
+function highestConfidence(confidences: PriorityConfidence[]): PriorityConfidence {
+  if (confidences.includes("high")) return "high";
+  if (confidences.includes("medium")) return "medium";
+  return "low";
+}
+
+function hashText(value: string): string {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+function redactSender(value: string): string {
+  const domain = extractSenderDomain(value);
+  if (!domain) return "<unknown>";
+  const displayName = value.includes("<") ? value.slice(0, value.indexOf("<")).trim() : "";
+  return displayName ? `${displayName} <***@${domain}>` : `***@${domain}`;
 }
 
 function buildRulesetPatchDraft(input: {

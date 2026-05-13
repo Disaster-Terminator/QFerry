@@ -11,7 +11,10 @@ export interface QFerryRuntimeConfig {
   configSource: string;
   mutationAllowed: boolean;
   mutationCapable: boolean;
+  mutationOperationallyReady: boolean;
   mutationRequiresConfirmation: boolean;
+  authConfigured: boolean;
+  providerReady: boolean;
   metadataSampleLimit: number;
   statusWarnings: string[];
   qqmail?: {
@@ -63,7 +66,10 @@ export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInpu
       configSource,
       mutationAllowed: false,
       mutationCapable: false,
+      mutationOperationallyReady: false,
       mutationRequiresConfirmation: false,
+      authConfigured: false,
+      providerReady: true,
       metadataSampleLimit: 1,
       statusWarnings: [],
     };
@@ -82,14 +88,18 @@ export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInpu
   const statusWarnings: string[] = [];
   if (!email) statusWarnings.push("QQMAIL_EMAIL is required for qqmail provider");
   if (!authCode) statusWarnings.push("QQMAIL_KEY is required for qqmail provider");
+  const authConfigured = Boolean(email && authCode);
 
   return {
     provider: "qqmail",
     accountAlias: email ? maskEmail(email) : "<account-missing>",
     configSource,
     mutationAllowed: true,
-    mutationCapable: true,
+    mutationCapable: authConfigured,
+    mutationOperationallyReady: authConfigured,
     mutationRequiresConfirmation: true,
+    authConfigured,
+    providerReady: authConfigured,
     metadataSampleLimit,
     statusWarnings,
     qqmail: {
@@ -179,7 +189,10 @@ function buildRuntimeConfig(
       configSource,
       mutationAllowed: false,
       mutationCapable: false,
+      mutationOperationallyReady: false,
       mutationRequiresConfirmation: false,
+      authConfigured: false,
+      providerReady: true,
       metadataSampleLimit: 1,
       statusWarnings: [],
     };
@@ -198,14 +211,18 @@ function buildRuntimeConfig(
   const statusWarnings: string[] = [];
   if (!email) statusWarnings.push("QQMAIL_EMAIL is required for qqmail provider");
   if (!authCode) statusWarnings.push("QQMAIL_KEY is required for qqmail provider");
+  const authConfigured = Boolean(email && authCode);
 
   return {
     provider: "qqmail",
     accountAlias: email ? maskEmail(email) : "<account-missing>",
     configSource,
     mutationAllowed: true,
-    mutationCapable: true,
+    mutationCapable: authConfigured,
+    mutationOperationallyReady: authConfigured,
     mutationRequiresConfirmation: true,
+    authConfigured,
+    providerReady: authConfigured,
     metadataSampleLimit,
     statusWarnings,
     qqmail: {

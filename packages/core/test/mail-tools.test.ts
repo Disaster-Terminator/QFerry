@@ -146,7 +146,10 @@ describe("mail tools", () => {
         configSource: "env",
         mutationAllowed: false,
         mutationCapable: false,
+        mutationOperationallyReady: false,
         mutationRequiresConfirmation: false,
+        authConfigured: true,
+        providerReady: true,
         metadataSampleLimit: 1,
         statusWarnings: [],
         qqmail: {
@@ -664,6 +667,152 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("builds Gmail-like bulk governance previews from sender and content categories", async () => {
+    const messages = [
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "1", uidValidity: "999" },
+        from: "Microsoft 帐户团队 <account-security-noreply@accountprotection.microsoft.com>",
+        subject: "Microsoft 帐户安全代码",
+        date: "2023-01-01T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "2", uidValidity: "999" },
+        from: "World of Warships <wows_sea@prm.wargaming.net>",
+        subject: "高级账号和补给箱——礼物已到位！",
+        date: "2023-01-02T00:00:00.000Z",
+        snippet: "size=100",
+        flags: ["\\Seen"],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "3", uidValidity: "999" },
+        from: "Steam Support <noreply@steampowered.com>",
+        subject: "感谢您在 Steam 上的购买！",
+        date: "2023-01-03T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "4", uidValidity: "999" },
+        from: "World of Warships <wows_sea@prm.wargaming.net>",
+        subject: "登录游戏即可领取礼物",
+        date: "2023-01-04T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
+    ];
+    const scanInputs: unknown[] = [];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        getMailboxSummary: async (folder) => ({ path: folder, exists: messages.length, uidValidity: "999" }),
+        getCapabilitySnapshot: async () => ({
+          provider: "qqmail",
+          accountAlias: "25***@qq.com",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 50,
+        }),
+        scanMailboxMetadata: async (input) => {
+          scanInputs.push(input);
+          const offset = input.offset ?? 0;
+          return messages.slice(offset, offset + input.limit);
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.bulkGovernancePreview({
+      runId: "run-bulk-governance",
+      folder: "INBOX",
+      pageSize: 2,
+      maxPages: 3,
+      maxMessageRefs: 50,
+      action: "move",
+      target: { folder: "Junk" },
+      selectedCategoryIds: ["high_confidence_marketing"],
+      order: "oldest",
+    });
+
+    expect(scanInputs).toEqual([
+      { folder: "INBOX", limit: 2, order: "oldest", offset: 0 },
+      { folder: "INBOX", limit: 2, order: "oldest", offset: 2 },
+      { folder: "INBOX", limit: 2, order: "oldest", offset: 4 },
+    ]);
+    expect(result.preview).toMatchObject({
+      provider: "qqmail",
+      scannedMessages: 4,
+      selectedMessageRefs: 2,
+      categoryCounts: {
+        high_confidence_marketing: 2,
+        receipt_or_purchase: 1,
+        security_or_account: 1,
+      },
+      mutationsAttempted: 0,
+    });
+    expect(result.preview.categoryCandidates.high_confidence_marketing?.[0]).toMatchObject({
+      domain: "prm.wargaming.net",
+      messageCount: 2,
+      confidence: "high",
+    });
+    expect(result.plan.source).toBe("bulk_governance");
+    expect(result.plan.messageRefs.map((ref) => ref.uid)).toEqual(["2", "4"]);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
+  it("uses provider bulk metadata windows for Gmail-like governance when available", async () => {
+    const scanCalls: unknown[] = [];
+    const bulkScanCalls: unknown[] = [];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async (input) => {
+          scanCalls.push(input);
+          return [];
+        },
+        scanMailboxMetadataWindow: async (input) => {
+          bulkScanCalls.push(input);
+          return {
+            pagesScanned: 1,
+            messages: [{
+              ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+              from: "newsletter@example.com",
+              subject: "Weekly digest",
+              date: "2026-05-11T00:00:00.000Z",
+              snippet: "A low priority newsletter.",
+              flags: ["\\Seen"],
+            }],
+          };
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.bulkGovernancePreview({
+      runId: "run-bulk-window",
+      folder: "INBOX",
+      pageSize: 10,
+      maxPages: 50,
+      maxMessageRefs: 100,
+      action: "move",
+      target: { folder: "Archive" },
+      selectedCategoryIds: ["newsletter_or_digest"],
+    });
+
+    expect(scanCalls).toEqual([]);
+    expect(bulkScanCalls).toEqual([{ folder: "INBOX", limit: 10, maxPages: 50, order: "oldest", offset: 0 }]);
+    expect(result.preview.pagesScanned).toBe(1);
+    expect(result.preview.selectedMessageRefs).toBe(1);
+  });
+
   it("rejects execute cleanup for unconfirmed preview plans", async () => {
     const provider = FixtureMailProvider.demo();
     const tools = createMailTools({
@@ -674,7 +823,10 @@ describe("mail tools", () => {
         configSource: "test",
       mutationAllowed: false,
       mutationCapable: false,
+      mutationOperationallyReady: false,
       mutationRequiresConfirmation: false,
+      authConfigured: false,
+      providerReady: true,
       metadataSampleLimit: 10,
         statusWarnings: [],
       },
@@ -723,7 +875,10 @@ describe("mail tools", () => {
         configSource: "test",
         mutationAllowed: true,
         mutationCapable: true,
+        mutationOperationallyReady: true,
         mutationRequiresConfirmation: true,
+        authConfigured: true,
+        providerReady: true,
         metadataSampleLimit: 10,
         statusWarnings: [],
       },
@@ -750,6 +905,39 @@ describe("mail tools", () => {
       moved: 1,
     });
     expect(movedRefs).toEqual([{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" }]);
+  });
+
+  it("marks direct message-ref cleanup plans as client refs and limits their size", async () => {
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+    const refs = Array.from({ length: 21 }, (_, index) => ({
+      provider: "fixture" as const,
+      accountAlias: "demo",
+      folder: "INBOX",
+      uid: String(index + 1),
+    }));
+
+    await expect(tools.planCleanup({
+      runId: "run-too-many-client-refs",
+      folder: "INBOX",
+      limit: 10,
+      action: "move",
+      target: { folder: "Archive" },
+      messageRefs: refs,
+      selectedGroupIds: [],
+    })).rejects.toThrow(/client_refs cleanup plans are limited to 20 message refs/);
+
+    const result = await tools.planCleanup({
+      runId: "run-client-refs",
+      folder: "INBOX",
+      limit: 10,
+      action: "move",
+      target: { folder: "Archive" },
+      messageRefs: refs.slice(0, 2),
+      selectedGroupIds: [],
+    });
+
+    expect(result.plan.source).toBe("client_refs");
+    expect(result.plan.messageRefs).toHaveLength(2);
   });
 
   it("creates preview cleanup plans from a rules file and returns ruleset metadata", async () => {

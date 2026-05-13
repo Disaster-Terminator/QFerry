@@ -39,6 +39,9 @@ describe("runtime config", () => {
     expect(config.configSource).toBe("env");
     expect(config.mutationAllowed).toBe(true);
     expect(config.mutationCapable).toBe(true);
+    expect(config.authConfigured).toBe(true);
+    expect(config.providerReady).toBe(true);
+    expect(config.mutationOperationallyReady).toBe(true);
     expect(config.mutationRequiresConfirmation).toBe(true);
     expect(config.metadataSampleLimit).toBe(3);
     expect(config.qqmail).toMatchObject({
@@ -120,6 +123,10 @@ describe("runtime config", () => {
     expect(config.accountAlias).toBe("lo***@qq.com");
     expect(config.configSource).toBe("file:G:\\local\\qferry-config.json");
     expect(config.metadataSampleLimit).toBe(7);
+    expect(config.authConfigured).toBe(false);
+    expect(config.providerReady).toBe(false);
+    expect(config.mutationOperationallyReady).toBe(false);
+    expect(config.mutationCapable).toBe(false);
     expect(config.statusWarnings).toContain("QQMAIL_KEY is required for qqmail provider");
   });
 

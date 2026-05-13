@@ -166,6 +166,53 @@ describe("QQ read-only provider", () => {
     ]);
   });
 
+  it("scans QQ metadata windows through one IMAP connection", async () => {
+    const fetchCalls: unknown[] = [];
+    let connectCalls = 0;
+    const client = {
+      connect: async () => {
+        connectCalls += 1;
+      },
+      logout: async () => undefined,
+      list: async () => [],
+      mailboxOpen: async () => ({ exists: 5, uidValidity: 999n }),
+      fetch: (range: unknown, query: unknown, options: unknown) => {
+        fetchCalls.push({ range, query, options });
+        const uids = range === "1:2" ? [1, 2] : range === "3:4" ? [3, 4] : [5];
+        return asyncMessages(uids.map((uid) => ({
+          uid,
+          flags: new Set(),
+          size: 512,
+          internalDate: new Date("2026-05-01T00:00:00.000Z"),
+          envelope: {
+            from: [{ name: "Sender", address: `${uid}@example.com` }],
+            subject: `Message ${uid}`,
+            date: new Date("2026-05-01T00:00:00.000Z"),
+          },
+        })));
+      },
+    };
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => client,
+      maxRecommendedScanLimit: 2,
+    });
+
+    const result = await provider.scanMailboxMetadataWindow({
+      folder: "INBOX",
+      limit: 2,
+      maxPages: 3,
+      order: "oldest",
+      offset: 0,
+    });
+
+    expect(connectCalls).toBe(1);
+    expect(fetchCalls.map((call) => (call as { range: unknown }).range)).toEqual(["1:2", "3:4", "5:5"]);
+    expect(result.pagesScanned).toBe(3);
+    expect(result.messages.map((message) => message.ref.uid)).toEqual(["1", "2", "3", "4", "5"]);
+  });
+
   it("summarizes a QQ mailbox with read-only open", async () => {
     const opened: unknown[] = [];
     const client = {
@@ -246,6 +293,27 @@ describe("QQ read-only provider", () => {
       subject: "Old promotion",
       bodyText: "",
     });
+  });
+
+  it("rejects QQ fetch refs without UIDVALIDITY", async () => {
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => ({
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async () => ({ exists: 1, uidValidity: 999n }),
+        fetch: () => asyncMessages([]),
+      }),
+    });
+
+    await expect(provider.fetchMessage({
+      provider: "qqmail",
+      accountAlias: "masked@qq.com",
+      folder: "INBOX",
+      uid: "2048",
+    })).rejects.toThrow(/requires UIDVALIDITY/);
   });
 
   it("wraps QQ IMAP command failures with operation context", async () => {

@@ -409,6 +409,40 @@ async function main() {
     mutationsAttempted: senderGovernance.structuredContent?.mutationsAttempted,
   });
 
+  const bulkGovernance = await callToolWithTrace(
+    client,
+    "bulk_governance_preview",
+    {
+      runId,
+      folder: "INBOX",
+      pageSize: candidateLimit,
+      maxPages: 10,
+      maxMessageRefs: 50,
+      action: "move",
+      target: { folder: "Junk" },
+      order: "oldest",
+      selectedCategoryIds: ["high_confidence_marketing"],
+    },
+    tracePath,
+    baseEvent,
+  );
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "bulk_governance_preview",
+    pagesScanned: bulkGovernance.structuredContent?.preview?.pagesScanned,
+    scannedMessages: bulkGovernance.structuredContent?.preview?.scannedMessages,
+    selectedMessageRefs: bulkGovernance.structuredContent?.preview?.selectedMessageRefs,
+    categoryCounts: bulkGovernance.structuredContent?.preview?.categoryCounts,
+    selectedCategoryIds: bulkGovernance.structuredContent?.preview?.selectedCategoryIds,
+    planStatus: bulkGovernance.structuredContent?.plan?.status,
+    planSource: bulkGovernance.structuredContent?.plan?.source,
+    plannedMessageRefs: Array.isArray(bulkGovernance.structuredContent?.plan?.messageRefs)
+      ? bulkGovernance.structuredContent.plan.messageRefs.length
+      : 0,
+    mutationsAttempted: bulkGovernance.structuredContent?.mutationsAttempted,
+  });
+
   const rulesetPatchDryRun = await callToolWithTrace(
     client,
     "apply_ruleset_patch",
@@ -518,6 +552,10 @@ async function main() {
       `- senderGovernanceSkippedDuplicates: ${senderGovernance.structuredContent?.rulesetPatch?.skippedDuplicateRules?.length ?? "<missing>"}`,
       `- senderGovernanceRenderedDraftRules: ${senderGovernance.structuredContent?.rulesetPatch?.renderedDraft?.rules?.length ?? "<missing>"}`,
       `- senderGovernanceChangelogLines: ${countLines(senderGovernance.structuredContent?.rulesetPatch?.changelog)}`,
+      `- bulkGovernanceScannedMessages: ${bulkGovernance.structuredContent?.preview?.scannedMessages ?? "<missing>"}`,
+      `- bulkGovernanceSelectedRefs: ${bulkGovernance.structuredContent?.preview?.selectedMessageRefs ?? "<missing>"}`,
+      `- bulkGovernanceCategoryCounts: ${JSON.stringify(bulkGovernance.structuredContent?.preview?.categoryCounts ?? {})}`,
+      `- bulkGovernancePlanSource: ${bulkGovernance.structuredContent?.plan?.source ?? "<missing>"}`,
       `- rulesetPatchDryRunApplied: ${rulesetPatchDryRun.structuredContent?.applied ?? "<missing>"}`,
       `- rulesetPatchDryRunAddedRules: ${rulesetPatchDryRun.structuredContent?.addedRuleCount ?? "<missing>"}`,
       `- governanceLedger: ${ledgerPath}`,

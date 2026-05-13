@@ -30,6 +30,15 @@ export interface ScanMailboxMetadataInput {
   offset?: number;
 }
 
+export interface ScanMailboxMetadataWindowInput extends ScanMailboxMetadataInput {
+  maxPages: number;
+}
+
+export interface ScanMailboxMetadataWindowResult {
+  messages: MessageSummary[];
+  pagesScanned: number;
+}
+
 export interface MessageSummary {
   ref: MessageRef;
   from: string;
@@ -46,6 +55,7 @@ export interface MessageDetail extends MessageSummary {
 export interface MailProvider {
   listMailboxes(): Promise<MailboxInfo[]>;
   scanMailboxMetadata(input: ScanMailboxMetadataInput): Promise<MessageSummary[]>;
+  scanMailboxMetadataWindow?(input: ScanMailboxMetadataWindowInput): Promise<ScanMailboxMetadataWindowResult>;
   fetchMessage(ref: MessageRef): Promise<MessageDetail>;
   getCapabilitySnapshot?(): Promise<ProviderCapabilitySnapshot>;
   getMailboxSummary?(folder: string): Promise<MailboxSummary>;

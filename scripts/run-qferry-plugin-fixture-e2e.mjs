@@ -122,6 +122,16 @@ async function main() {
       target: { folder: "Archive" },
       selectedSenderDomains: ["example.com"],
     }],
+    ["bulk_governance_preview", {
+      runId,
+      folder: "INBOX",
+      pageSize: 2,
+      maxPages: 2,
+      maxMessageRefs: 10,
+      action: "move",
+      target: { folder: "Archive" },
+      selectedCategoryIds: ["newsletter_or_digest"],
+    }],
   ];
   let statusResult;
   let mailboxSummaryResult;
@@ -133,6 +143,7 @@ async function main() {
   let planResult;
   let batchPreviewResult;
   let senderGovernanceResult;
+  let bulkGovernanceResult;
   let rulesetPatchApplyResult;
   let blockedExecuteResult;
 
@@ -148,6 +159,7 @@ async function main() {
     if (name === "plan_cleanup") planResult = result.structuredContent;
     if (name === "preview_cleanup_batch") batchPreviewResult = result.structuredContent;
     if (name === "plan_sender_governance") senderGovernanceResult = result.structuredContent;
+    if (name === "bulk_governance_preview") bulkGovernanceResult = result.structuredContent;
     await writeJsonl(tracePath, {
       ...baseEvent,
       event: "plugin_tool_called",
@@ -155,7 +167,10 @@ async function main() {
       structuredContentKeys: Object.keys(result.structuredContent ?? {}),
       statusProvider: result.structuredContent?.status?.provider,
       statusMutationCapable: result.structuredContent?.status?.mutationCapable,
+      statusMutationOperationallyReady: result.structuredContent?.status?.mutationOperationallyReady,
       statusMutationRequiresConfirmation: result.structuredContent?.status?.mutationRequiresConfirmation,
+      statusAuthConfigured: result.structuredContent?.status?.authConfigured,
+      statusProviderReady: result.structuredContent?.status?.providerReady,
       sampledMessages: result.structuredContent?.triage?.sampledMessages,
       triageGroupCounts: result.structuredContent?.triage?.groupCounts,
       priorityCounts: result.structuredContent?.priorityCounts,
@@ -177,6 +192,10 @@ async function main() {
       senderGovernanceSkippedDuplicates: result.structuredContent?.rulesetPatch?.skippedDuplicateRules?.length,
       senderGovernanceRenderedDraftRules: result.structuredContent?.rulesetPatch?.renderedDraft?.rules?.length,
       senderGovernanceChangelogLines: countLines(result.structuredContent?.rulesetPatch?.changelog),
+      bulkGovernanceScannedMessages: result.structuredContent?.preview?.scannedMessages,
+      bulkGovernanceSelectedRefs: result.structuredContent?.preview?.selectedMessageRefs,
+      bulkGovernanceCategoryCounts: result.structuredContent?.preview?.categoryCounts,
+      bulkGovernancePlanSource: result.structuredContent?.plan?.source,
     });
   }
 
@@ -250,7 +269,10 @@ async function main() {
       `- statusProvider: ${statusResult?.status?.provider ?? "<missing>"}`,
       `- statusConfigSource: ${statusResult?.status?.configSource ?? "<missing>"}`,
       `- statusMutationCapable: ${statusResult?.status?.mutationCapable ?? "<missing>"}`,
+      `- statusMutationOperationallyReady: ${statusResult?.status?.mutationOperationallyReady ?? "<missing>"}`,
       `- statusMutationRequiresConfirmation: ${statusResult?.status?.mutationRequiresConfirmation ?? "<missing>"}`,
+      `- statusAuthConfigured: ${statusResult?.status?.authConfigured ?? "<missing>"}`,
+      `- statusProviderReady: ${statusResult?.status?.providerReady ?? "<missing>"}`,
       `- statusWarnings: ${(statusResult?.status?.statusWarnings ?? []).join("; ")}`,
       `- inboxExists: ${mailboxSummaryResult?.mailbox?.exists ?? "<missing>"}`,
       `- structuredSearchMessages: ${structuredSearchResult?.messages?.length ?? "<missing>"}`,
@@ -279,6 +301,10 @@ async function main() {
       `- senderGovernanceSkippedDuplicates: ${senderGovernanceResult?.rulesetPatch?.skippedDuplicateRules?.length ?? "<missing>"}`,
       `- senderGovernanceRenderedDraftRules: ${senderGovernanceResult?.rulesetPatch?.renderedDraft?.rules?.length ?? "<missing>"}`,
       `- senderGovernanceChangelogLines: ${countLines(senderGovernanceResult?.rulesetPatch?.changelog)}`,
+      `- bulkGovernanceScannedMessages: ${bulkGovernanceResult?.preview?.scannedMessages ?? "<missing>"}`,
+      `- bulkGovernanceSelectedRefs: ${bulkGovernanceResult?.preview?.selectedMessageRefs ?? "<missing>"}`,
+      `- bulkGovernanceCategoryCounts: ${JSON.stringify(bulkGovernanceResult?.preview?.categoryCounts ?? {})}`,
+      `- bulkGovernancePlanSource: ${bulkGovernanceResult?.plan?.source ?? "<missing>"}`,
       `- rulesetPatchDryRunApplied: ${rulesetPatchApplyResult?.structuredContent?.applied ?? "<missing>"}`,
       `- rulesetPatchDryRunAddedRules: ${rulesetPatchApplyResult?.structuredContent?.addedRuleCount ?? "<missing>"}`,
       `- governanceLedger: ${ledgerPath}`,

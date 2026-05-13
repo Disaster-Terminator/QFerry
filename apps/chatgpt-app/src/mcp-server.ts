@@ -22,6 +22,14 @@ const messageRefSchema = z.object({
   folder: z.string(),
   uid: z.string(),
   uidValidity: z.string().optional(),
+}).superRefine((ref, context) => {
+  if (ref.provider === "qqmail" && !ref.uidValidity) {
+    context.addIssue({
+      code: "custom",
+      path: ["uidValidity"],
+      message: "uidValidity is required for qqmail message refs",
+    });
+  }
 });
 
 const classificationRuleSchema = z.object({
@@ -57,6 +65,15 @@ const rulesetPatchSchema = z.object({
     match: classificationRuleSchema.shape.match,
   })),
 });
+
+const bulkGovernanceCategorySchema = z.enum([
+  "high_confidence_marketing",
+  "newsletter_or_digest",
+  "security_or_account",
+  "receipt_or_purchase",
+  "developer_community",
+  "review",
+]);
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
 
@@ -272,6 +289,28 @@ export function createQFerryMcpServer(): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => toToolResult(registerPlan(await tools.planSenderGovernance(input), planRegistry)),
+  );
+
+  server.registerTool(
+    "bulk_governance_preview",
+    {
+      title: "Bulk governance preview",
+      description: "Use this for Gmail-like large-window dry-run classification by sender/domain/content category and a bounded preview cleanup plan. Use small confirmed mutation only after review.",
+      inputSchema: {
+        runId: z.string(),
+        folder: z.string(),
+        pageSize: z.number().int().min(1).max(50),
+        maxPages: z.number().int().min(1).max(500),
+        maxMessageRefs: z.number().int().min(0).max(500),
+        action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
+        target: z.record(z.string(), z.string()).optional(),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+        selectedCategoryIds: z.array(bulkGovernanceCategorySchema),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(registerPlan(await tools.bulkGovernancePreview(input), planRegistry)),
   );
 
   server.registerTool(

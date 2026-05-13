@@ -119,7 +119,9 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 真实 mutation e2e 只用于用户明确授权的小批量验证，必须在 trace 和 summary 中记录 preview plan、`confirm_cleanup_plan`、`execute_cleanup`、目标文件夹和 `mutationsAttempted`。
 
-`get_status` 会同时暴露兼容字段 `mutationAllowed` 和更精确的 `mutationCapable` / `mutationRequiresConfirmation`。真实 QQ 邮箱可以具备 mutation 能力，但任何 mutation 都仍需要 preview plan、用户确认和 server-side `operationPlanId`。
+`get_status` 会同时暴露兼容字段 `mutationAllowed`、当前可用性字段 `authConfigured` / `providerReady` / `mutationOperationallyReady`，以及 `mutationCapable` / `mutationRequiresConfirmation`。真实 QQ 邮箱只有在凭据齐全时才报告当前 mutation 可用；任何 mutation 都仍需要 preview plan、用户确认和 server-side `operationPlanId`。
+
+Gmail-like 治理优先使用 `bulk_governance_preview` 做大窗口 dry-run：按发信人、域名和内容特征分类为高置信广告营销、newsletter/digest、安全/账号、购买/账单、开发社区和待审。真实执行只用于小范围确认后的子集，不把大范围 dry-run 等同于无人值守清理。
 
 ## 测试留痕
 

@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 export type ProviderId = "fixture" | "qqmail" | "gmail";
 export type OperationAction = "move" | "mark_read" | "mark_unread" | "create_folder";
 export type OperationPlanStatus = "preview" | "confirmed";
+export type OperationPlanSource = "rules_preview" | "client_refs" | "bulk_governance";
 
 export interface MessageRef {
   provider: ProviderId;
@@ -18,6 +19,7 @@ export interface CreateOperationPlanInput {
   action: OperationAction;
   messageRefs: MessageRef[];
   target?: Record<string, string>;
+  source?: OperationPlanSource;
 }
 
 export interface OperationPlan {
@@ -26,6 +28,7 @@ export interface OperationPlan {
   provider: ProviderId;
   action: OperationAction;
   status: OperationPlanStatus;
+  source: OperationPlanSource;
   confirmationRequired: boolean;
   messageRefs: MessageRef[];
   target?: Record<string, string>;
@@ -49,6 +52,7 @@ export function createOperationPlan(input: CreateOperationPlanInput): OperationP
     provider: input.provider,
     action: input.action,
     status: "preview",
+    source: input.source ?? "rules_preview",
     confirmationRequired: true,
     messageRefs: input.messageRefs,
     target: input.target,

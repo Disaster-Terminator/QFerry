@@ -40,6 +40,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "plan_cleanup",
       "preview_cleanup_batch",
       "plan_sender_governance",
+      "bulk_governance_preview",
       "apply_ruleset_patch",
       "confirm_cleanup_plan",
       "execute_cleanup",
@@ -53,9 +54,52 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "preview_cleanup_batch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "plan_sender_governance")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "bulk_governance_preview")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "apply_ruleset_patch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "confirm_cleanup_plan")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_cleanup")?.annotations?.destructiveHint).toBe(true);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("calls bulk governance preview through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "bulk_governance_preview",
+      arguments: {
+        runId: "mcp-bulk-governance",
+        folder: "INBOX",
+        pageSize: 2,
+        maxPages: 2,
+        maxMessageRefs: 10,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedCategoryIds: ["newsletter_or_digest"],
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      preview: {
+        scannedMessages: 2,
+        selectedMessageRefs: 1,
+        selectedCategoryIds: ["newsletter_or_digest"],
+        mutationsAttempted: 0,
+      },
+      plan: {
+        status: "preview",
+        source: "bulk_governance",
+      },
+      mutationsAttempted: 0,
+    });
 
     await client.close();
     await server.close();
@@ -108,6 +152,33 @@ describe("QFerry ChatGPT App MCP server", () => {
       ],
     });
     expect(JSON.stringify(result)).not.toContain("fixture full body");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("rejects QQ message refs without UIDVALIDITY at the MCP schema boundary", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "fetch",
+      arguments: {
+        provider: "qqmail",
+        accountAlias: "25***@qq.com",
+        folder: "INBOX",
+        uid: "123",
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("uidValidity");
 
     await client.close();
     await server.close();
