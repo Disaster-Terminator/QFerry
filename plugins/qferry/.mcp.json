@@ -4,11 +4,7 @@
       "command": "node",
       "args": ["./mcp-bootstrap.mjs"],
       "cwd": ".",
-      "startup_timeout_sec": 30,
-      "env": {
-        "QFERRY_PROVIDER": "fixture",
-        "QFERRY_MUTATION_ALLOWED": "0"
-      }
+      "startup_timeout_sec": 30
     }
   }
 }

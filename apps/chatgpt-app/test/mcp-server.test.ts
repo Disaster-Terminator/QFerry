@@ -20,16 +20,20 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.map((tool) => tool.name)).toEqual([
       "get_status",
       "list_mailboxes",
+      "get_mailbox_summary",
       "get_capability_snapshot",
       "search",
       "fetch",
       "classify_messages",
       "triage_inbox",
+      "group_spam_candidates",
       "plan_cleanup",
     ]);
     expect(tools.tools.find((tool) => tool.name === "get_status")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "get_mailbox_summary")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "search")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "triage_inbox")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "group_spam_candidates")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_capability_snapshot")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
 
@@ -89,6 +93,32 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("calls mailbox summary through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "get_mailbox_summary",
+      arguments: { folder: "INBOX" },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      mailbox: {
+        path: "INBOX",
+        exists: 2,
+      },
+    });
+
+    await client.close();
+    await server.close();
+  });
+
   it("calls capability snapshot through the MCP server", async () => {
     const server = createQFerryMcpServer();
     const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
@@ -139,6 +169,42 @@ describe("QFerry ChatGPT App MCP server", () => {
         mutationsAttempted: 0,
       },
       mutationsAttempted: 0,
+    });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("groups oldest spam candidates through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "group_spam_candidates",
+      arguments: {
+        folder: "INBOX",
+        limit: 10,
+        rules: [{ id: "newsletter", groupId: "ads_or_newsletters", match: { fromIncludes: "newsletter@" } }],
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      folder: "INBOX",
+      scanOrder: "oldest",
+      mutationsAttempted: 0,
+      groups: {
+        ads_or_newsletters: [
+          {
+            matchedRuleId: "newsletter",
+          },
+        ],
+      },
     });
 
     await client.close();

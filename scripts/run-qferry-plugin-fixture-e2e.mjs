@@ -59,7 +59,7 @@ async function main() {
     command: serverConfig.command,
     args: serverConfig.args,
     cwd: pluginDir,
-    env: { ...process.env, ...(serverConfig.env ?? {}) },
+    env: { ...process.env, ...(serverConfig.env ?? {}), QFERRY_PROVIDER: "fixture" },
     stderr: "pipe",
   });
   const client = new Client({ name: "qferry-plugin-fixture-e2e", version: "0.0.0" });
@@ -78,9 +78,18 @@ async function main() {
   const calls = [
     ["get_status", {}],
     ["list_mailboxes", {}],
+    ["get_mailbox_summary", { folder: "INBOX" }],
     ["search", { folder: "INBOX", limit: 10, query: "digest" }],
     ["classify_messages", { folder: "INBOX", limit: 10, rulesFile }],
     ["triage_inbox", { folder: "INBOX", limit: 10, rulesFile }],
+    ["group_spam_candidates", {
+      folder: "INBOX",
+      limit: 10,
+      rules: [
+        { id: "newsletter", groupId: "ads_or_newsletters", match: { fromIncludes: "newsletter@" } },
+        { id: "digest", groupId: "ads_or_newsletters", match: { subjectIncludes: "digest" } },
+      ],
+    }],
     ["plan_cleanup", {
       runId,
       folder: "INBOX",
@@ -92,15 +101,19 @@ async function main() {
     }],
   ];
   let statusResult;
+  let mailboxSummaryResult;
   let classifyResult;
   let triageResult;
+  let spamCandidatesResult;
   let planResult;
 
   for (const [name, args] of calls) {
     const result = await callToolWithStructuredContent(client, name, args);
     if (name === "get_status") statusResult = result.structuredContent;
+    if (name === "get_mailbox_summary") mailboxSummaryResult = result.structuredContent;
     if (name === "classify_messages") classifyResult = result.structuredContent;
     if (name === "triage_inbox") triageResult = result.structuredContent;
+    if (name === "group_spam_candidates") spamCandidatesResult = result.structuredContent;
     if (name === "plan_cleanup") planResult = result.structuredContent;
     await writeJsonl(tracePath, {
       ...baseEvent,
@@ -110,6 +123,8 @@ async function main() {
       statusProvider: result.structuredContent?.status?.provider,
       sampledMessages: result.structuredContent?.triage?.sampledMessages,
       triageGroupCounts: result.structuredContent?.triage?.groupCounts,
+      mailboxExists: result.structuredContent?.mailbox?.exists,
+      spamCandidateGroups: result.structuredContent?.groups,
     });
   }
 
@@ -128,6 +143,7 @@ async function main() {
       `- statusProvider: ${statusResult?.status?.provider ?? "<missing>"}`,
       `- statusConfigSource: ${statusResult?.status?.configSource ?? "<missing>"}`,
       `- statusWarnings: ${(statusResult?.status?.statusWarnings ?? []).join("; ")}`,
+      `- inboxExists: ${mailboxSummaryResult?.mailbox?.exists ?? "<missing>"}`,
       `- rulesFile: ${rulesFile}`,
       `- rulesetVersion: ${classifyResult?.ruleset?.version ?? "<missing>"}`,
       `- rulesetRuleCount: ${classifyResult?.ruleset?.ruleCount ?? "<missing>"}`,
@@ -135,6 +151,7 @@ async function main() {
       `- toolsCalled: ${calls.length}`,
       `- triageGroupCounts: ${JSON.stringify(triageResult?.triage?.groupCounts ?? {})}`,
       `- triageSampledMessages: ${triageResult?.triage?.sampledMessages ?? "<missing>"}`,
+      `- spamCandidateGroups: ${JSON.stringify(Object.keys(spamCandidatesResult?.groups ?? {}))}`,
       `- previewPlanStatus: ${planResult?.plan?.status ?? "<missing>"}`,
       `- previewPlanMessageRefs: ${planResult?.plan?.messageRefs?.length ?? "<missing>"}`,
       `- trace: ${tracePath}`,

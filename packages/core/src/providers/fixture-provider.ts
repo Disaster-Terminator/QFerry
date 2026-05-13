@@ -71,9 +71,18 @@ export class FixtureMailProvider implements MailProvider {
     };
   }
 
+  async getMailboxSummary(folder: string) {
+    return {
+      path: folder,
+      exists: this.messages.filter((message) => message.ref.folder === folder).length,
+    };
+  }
+
   async scanMailboxMetadata(input: ScanMailboxMetadataInput): Promise<MessageSummary[]> {
-    return this.messages
-      .filter((message) => message.ref.folder === input.folder)
+    const messages = this.messages
+      .filter((message) => message.ref.folder === input.folder);
+    const ordered = input.order === "oldest" ? [...messages].reverse() : messages;
+    return ordered
       .slice(0, Math.max(0, input.limit))
       .map(({ bodyText: _bodyText, ...summary }) => summary);
   }

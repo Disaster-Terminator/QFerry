@@ -61,6 +61,17 @@ export function createQFerryMcpServer(): McpServer {
   );
 
   server.registerTool(
+    "get_mailbox_summary",
+    {
+      title: "Get mailbox summary",
+      description: "Use this to get read-only mailbox counts before scanning or grouping candidates.",
+      inputSchema: { folder: z.string() },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await tools.getMailboxSummary(input)),
+  );
+
+  server.registerTool(
     "get_capability_snapshot",
     {
       title: "Get capability snapshot",
@@ -79,6 +90,7 @@ export function createQFerryMcpServer(): McpServer {
         folder: z.string(),
         limit: z.number().int().min(1).max(20),
         query: z.string().optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
@@ -128,6 +140,22 @@ export function createQFerryMcpServer(): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => toToolResult(await tools.triageInbox(input)),
+  );
+
+  server.registerTool(
+    "group_spam_candidates",
+    {
+      title: "Group spam candidates",
+      description: "Use this to scan oldest bounded metadata and group obvious spam or ads for user confirmation before any real operation.",
+      inputSchema: {
+        folder: z.string(),
+        limit: z.number().int().min(1).max(20),
+        rules: z.array(classificationRuleSchema).optional(),
+        rulesFile: z.string().optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await tools.groupSpamCandidates(input)),
   );
 
   server.registerTool(

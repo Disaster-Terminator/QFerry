@@ -103,6 +103,7 @@ async function main() {
   }
 
   const runId = createRunId();
+  const candidateLimit = 5;
   const artifactDir = resolve(repoRoot, "artifacts/e2e", runId);
   const tracePath = resolve(repoRoot, "logs/runs", `${runId}.jsonl`);
   const summaryPath = resolve(artifactDir, "summary.md");
@@ -122,6 +123,7 @@ async function main() {
     dryRun: true,
     mutationAllowed: false,
     sampleLimit: 1,
+    candidateLimit,
   };
   await mkdir(artifactDir, { recursive: true });
   await writeJsonl(tracePath, {
@@ -141,8 +143,8 @@ async function main() {
       ...(serverConfig.env ?? {}),
       QFERRY_PROVIDER: "qqmail",
       QFERRY_MUTATION_ALLOWED: "0",
-      QFERRY_METADATA_SAMPLE_LIMIT: "1",
-      QQMAIL_METADATA_SAMPLE_LIMIT: "1",
+      QFERRY_METADATA_SAMPLE_LIMIT: String(candidateLimit),
+      QQMAIL_METADATA_SAMPLE_LIMIT: String(candidateLimit),
       QQMAIL_EMAIL: qqEmail,
       QQMAIL_KEY: qqKey,
       QQMAIL_IMAP_HOST: process.env.QQMAIL_IMAP_HOST || dotenv.QQMAIL_IMAP_HOST || "imap.qq.com",
@@ -192,6 +194,14 @@ async function main() {
     mailboxCount,
   });
 
+  const mailboxSummary = await callToolWithStructuredContent(client, "get_mailbox_summary", { folder: "INBOX" });
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "get_mailbox_summary",
+    mailboxExists: mailboxSummary.structuredContent?.mailbox?.exists,
+  });
+
   const search = await callToolWithStructuredContent(client, "search", { folder: "INBOX", limit: 1 });
   const sampledMessages = Array.isArray(search.structuredContent?.messages)
     ? search.structuredContent.messages.length
@@ -201,6 +211,30 @@ async function main() {
     event: "plugin_tool_called",
     toolName: "search",
     sampledMessages,
+  });
+
+  const spamCandidates = await callToolWithStructuredContent(
+    client,
+    "group_spam_candidates",
+    {
+      folder: "INBOX",
+      limit: candidateLimit,
+      rules: [
+        { id: "ad-subject", groupId: "ads_or_spam", match: { subjectIncludes: "广告" } },
+        { id: "promo-subject", groupId: "ads_or_spam", match: { subjectIncludes: "优惠" } },
+        { id: "newsletter-subject", groupId: "ads_or_spam", match: { subjectIncludes: "newsletter" } },
+        { id: "digest-subject", groupId: "ads_or_spam", match: { subjectIncludes: "digest" } },
+      ],
+    },
+  );
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "group_spam_candidates",
+    scannedMessages: spamCandidates.structuredContent?.scannedMessages,
+    scanOrder: spamCandidates.structuredContent?.scanOrder,
+    spamCandidateGroups: spamCandidates.structuredContent?.groups,
+    mutationsAttempted: spamCandidates.structuredContent?.mutationsAttempted,
   });
 
   const triage = await callToolWithStructuredContent(
@@ -266,7 +300,10 @@ async function main() {
       `- rulesetVersion: ${previewPlan.structuredContent?.ruleset?.version ?? "<missing>"}`,
       `- rulesetRuleCount: ${previewPlan.structuredContent?.ruleset?.ruleCount ?? "<missing>"}`,
       `- folderCount: ${mailboxCount}`,
+      `- inboxExists: ${mailboxSummary.structuredContent?.mailbox?.exists ?? "<missing>"}`,
       `- sampledMessages: ${sampledMessages}`,
+      `- spamCandidateGroups: ${JSON.stringify(Object.keys(spamCandidates.structuredContent?.groups ?? {}))}`,
+      `- spamCandidateCount: ${countGroupedCandidates(spamCandidates.structuredContent?.groups)}`,
       `- triageGroupCounts: ${JSON.stringify(triage.structuredContent?.triage?.groupCounts ?? {})}`,
       `- triageSampledMessages: ${triage.structuredContent?.triage?.sampledMessages ?? "<missing>"}`,
       `- previewPlanStatus: ${previewPlan.structuredContent?.plan?.status ?? "<missing>"}`,
@@ -305,6 +342,11 @@ async function callToolWithStructuredContent(client, name, args) {
     throw new Error(`QFerry plugin tool ${name} did not return structuredContent`);
   }
   return result;
+}
+
+function countGroupedCandidates(groups) {
+  if (!groups || typeof groups !== "object") return 0;
+  return Object.values(groups).reduce((total, candidates) => total + (Array.isArray(candidates) ? candidates.length : 0), 0);
 }
 
 await main().catch(async (error) => {

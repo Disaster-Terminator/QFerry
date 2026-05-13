@@ -13,8 +13,10 @@ For real mailbox work, call tools in this order:
 
 1. `get_status` to confirm provider, config source, account alias, read-only limits, and warnings.
 2. `list_mailboxes` to discover available folders.
-3. `triage_inbox` for the default Gmail-like inbox review summary.
-4. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups.
+3. `get_mailbox_summary` to get read-only folder counts before scanning.
+4. `triage_inbox` for the default Gmail-like inbox review summary.
+5. `group_spam_candidates` when the user wants to start from oldest obvious spam or ads. Present the grouped candidates for confirmation before any real operation.
+6. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups.
 
 Use `classify_messages` when debugging rules or doing focused classification. Prefer `triage_inbox` for normal inbox organization because it returns group counts, sampled message count, recommended next action, and `mutationsAttempted`.
 
@@ -28,6 +30,7 @@ Allowed by default:
 - Scan bounded metadata.
 - Fetch a single selected message when needed.
 - Classify messages into QFerry-local groups.
+- Group oldest obvious spam or ads for confirmation.
 - Create operation plans.
 - Write trace artifacts.
 

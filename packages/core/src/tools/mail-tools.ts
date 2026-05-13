@@ -1,6 +1,6 @@
 import { classifyMessages, type ClassificationRule, type MessageClassification } from "../classification.js";
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
-import type { MailboxInfo, MailProvider, MessageDetail, MessageSummary, ProviderCapabilitySnapshot } from "../providers/types.js";
+import type { MailboxInfo, MailboxSummary, MailProvider, MessageDetail, MessageSummary, ProviderCapabilitySnapshot } from "../providers/types.js";
 import { loadClassificationRuleset, type ClassificationRulesetMetadata } from "../ruleset.js";
 import type { QFerryRuntimeConfig } from "../runtime-config.js";
 
@@ -13,6 +13,7 @@ export interface SearchMessagesInput {
   folder: string;
   limit: number;
   query?: string;
+  order?: "newest" | "oldest";
 }
 
 export interface ClassifyMessagesToolInput {
@@ -24,6 +25,24 @@ export interface ClassifyMessagesToolInput {
 }
 
 export interface TriageInboxInput extends ClassifyMessagesToolInput {}
+
+export interface GetMailboxSummaryInput {
+  folder: string;
+}
+
+export interface GroupSpamCandidatesInput {
+  folder: string;
+  limit: number;
+  rules?: ClassificationRule[];
+  rulesFile?: string;
+}
+
+export interface SpamCandidate {
+  message: MessageSummary;
+  groupId: string;
+  matchedRuleId?: string;
+  explanation: string;
+}
 
 export interface InboxTriageReport {
   provider: string;
@@ -51,6 +70,7 @@ export interface MailTools {
     status: QFerryRuntimeConfig;
   }>;
   listMailboxes(): Promise<{ mailboxes: MailboxInfo[] }>;
+  getMailboxSummary(input: GetMailboxSummaryInput): Promise<{ mailbox: MailboxSummary }>;
   getCapabilitySnapshot(): Promise<{ capability: ProviderCapabilitySnapshot }>;
   search(input: SearchMessagesInput): Promise<{ messages: MessageSummary[] }>;
   fetch(ref: MessageRef): Promise<{ message: MessageDetail }>;
@@ -62,6 +82,14 @@ export interface MailTools {
     triage: InboxTriageReport;
     classifications: MessageClassification[];
     ruleset?: ClassificationRulesetMetadata;
+    mutationsAttempted: 0;
+  }>;
+  groupSpamCandidates(input: GroupSpamCandidatesInput): Promise<{
+    folder: string;
+    scannedMessages: number;
+    scanOrder: "oldest";
+    groups: Record<string, SpamCandidate[]>;
+    classifications: MessageClassification[];
     mutationsAttempted: 0;
   }>;
   planCleanup(input: PlanCleanupInput): Promise<{
@@ -97,6 +125,13 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       return { mailboxes: await input.provider.listMailboxes() };
     },
 
+    async getMailboxSummary(summaryInput) {
+      if (!input.provider.getMailboxSummary) {
+        throw new Error("Provider does not expose mailbox summaries");
+      }
+      return { mailbox: await input.provider.getMailboxSummary(summaryInput.folder) };
+    },
+
     async getCapabilitySnapshot() {
       if (!input.provider.getCapabilitySnapshot) {
         throw new Error("Provider does not expose a capability snapshot");
@@ -108,6 +143,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const messages = await input.provider.scanMailboxMetadata({
         folder: searchInput.folder,
         limit: searchInput.limit,
+        order: searchInput.order,
       });
 
       return {
@@ -164,6 +200,32 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       };
     },
 
+    async groupSpamCandidates(candidateInput) {
+      const resolvedRules = await resolveRules({
+        ...candidateInput,
+        defaultGroupId: "review",
+      });
+      const messages = await input.provider.scanMailboxMetadata({
+        folder: candidateInput.folder,
+        limit: candidateInput.limit,
+        order: "oldest",
+      });
+      const classifications = classifyMessages({
+        messages,
+        rules: resolvedRules.rules,
+        defaultGroupId: resolvedRules.defaultGroupId,
+      });
+      const spamClassifications = classifications.filter((classification) => classification.groupId !== resolvedRules.defaultGroupId);
+      return {
+        folder: candidateInput.folder,
+        scannedMessages: messages.length,
+        scanOrder: "oldest",
+        groups: groupSpamCandidates(messages, spamClassifications),
+        classifications,
+        mutationsAttempted: 0,
+      };
+    },
+
     async planCleanup(planInput) {
       const resolvedRules = await resolveRules({
         ...planInput,
@@ -204,6 +266,23 @@ function countGroups(classifications: MessageClassification[]): Record<string, n
     counts[classification.groupId] = (counts[classification.groupId] ?? 0) + 1;
   }
   return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function groupSpamCandidates(messages: MessageSummary[], classifications: MessageClassification[]): Record<string, SpamCandidate[]> {
+  const byRef = new Map(messages.map((message) => [message.ref.uid, message]));
+  const groups: Record<string, SpamCandidate[]> = {};
+  for (const classification of classifications) {
+    const message = byRef.get(classification.messageRef.uid);
+    if (!message) continue;
+    groups[classification.groupId] = groups[classification.groupId] ?? [];
+    groups[classification.groupId].push({
+      message,
+      groupId: classification.groupId,
+      matchedRuleId: classification.matchedRuleId,
+      explanation: classification.explanation,
+    });
+  }
+  return Object.fromEntries(Object.entries(groups).sort(([left], [right]) => left.localeCompare(right)));
 }
 
 async function resolveRules(input: {

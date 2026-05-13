@@ -105,4 +105,60 @@ describe("QQ read-only provider", () => {
     ]);
     expect(JSON.stringify(messages)).not.toContain("bodyText");
   });
+
+  it("can scan oldest bounded metadata", async () => {
+    const fetchCalls: unknown[] = [];
+    const client = {
+      connect: async () => undefined,
+      logout: async () => undefined,
+      list: async () => [],
+      mailboxOpen: async () => ({ exists: 3000, uidValidity: 777n }),
+      fetch: (range: unknown, query: unknown, options: unknown) => {
+        fetchCalls.push({ range, query, options });
+        return asyncMessages([]);
+      },
+    };
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => client,
+      maxRecommendedScanLimit: 10,
+    });
+
+    await provider.scanMailboxMetadata({ folder: "INBOX", limit: 5, order: "oldest" });
+
+    expect(fetchCalls).toEqual([
+      {
+        range: "1:5",
+        query: { envelope: true, flags: true, internalDate: true, size: true, uid: true },
+        options: { uid: false },
+      },
+    ]);
+  });
+
+  it("summarizes a QQ mailbox with read-only open", async () => {
+    const opened: unknown[] = [];
+    const client = {
+      connect: async () => undefined,
+      logout: async () => undefined,
+      list: async () => [],
+      mailboxOpen: async (path: string, options: unknown) => {
+        opened.push({ path, options });
+        return { exists: 3127, uidValidity: 888n };
+      },
+      fetch: () => asyncMessages([]),
+    };
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => client,
+    });
+
+    await expect(provider.getMailboxSummary("INBOX")).resolves.toEqual({
+      path: "INBOX",
+      exists: 3127,
+      uidValidity: "888",
+    });
+    expect(opened).toEqual([{ path: "INBOX", options: { readOnly: true } }]);
+  });
 });

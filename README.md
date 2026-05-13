@@ -69,8 +69,8 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 - Codex 能看到 QFerry skill。
 - QFerry MCP server 通过插件目录里的 `./mcp-bootstrap.mjs` 启动，再加载 plugin-local `./dist/mcp.cjs`。
 - `mcp-bootstrap.mjs` 会把运行 cwd 切到用户状态目录，避免 Windows 下 MCP 进程占住插件缓存目录，导致插件详情、升级或卸载失败。
-- fixture provider 可调用 `get_status`、`list_mailboxes`、`search`、`classify_messages`、`triage_inbox`、`plan_cleanup`。
-- QQ Mail read-only provider 可调用 `get_status`、`get_capability_snapshot`、`list_mailboxes`、bounded `search` 和 `triage_inbox`。
+- fixture provider 可调用 `get_status`、`list_mailboxes`、`get_mailbox_summary`、`search`、`classify_messages`、`triage_inbox`、`group_spam_candidates`、`plan_cleanup`。
+- QQ Mail provider 可调用 `get_status`、`get_capability_snapshot`、`list_mailboxes`、`get_mailbox_summary`、bounded `search`、`triage_inbox` 和 `group_spam_candidates`。
 - 每次 e2e 留下 trace artifacts，方便验收回溯。
 
 ## 当前能力
@@ -78,9 +78,11 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 | 能力 | 说明 |
 | --- | --- |
 | 文件夹读取 | 读取 QQ 邮箱文件夹列表 |
+| 文件夹摘要 | 只读读取文件夹邮件数量，类似 Gmail label counts |
 | 小批量扫描 | 对 QQ 邮箱执行 bounded metadata search |
 | 分类规则 | 用内联规则或 `qferry.rules.json` 把邮件归入用户定义的 group |
 | 收件箱整理报告 | `triage_inbox` 汇总 groupCounts、样本数、建议下一步 |
+| 垃圾/广告候选 | `group_spam_candidates` 从最旧 metadata 开始分组明显垃圾/广告，先给用户确认 |
 | 清理计划 | 基于规则文件生成 preview-only cleanup plan，不直接修改真实邮箱 |
 | 测试留痕 | 写入 jsonl trace 和 Markdown summary |
 | 安全边界 | 默认禁止真实邮箱写操作 |

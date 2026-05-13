@@ -6,6 +6,12 @@ export interface MailboxInfo {
   flags?: string[];
 }
 
+export interface MailboxSummary {
+  path: string;
+  exists: number;
+  uidValidity?: string;
+}
+
 export interface ProviderCapabilitySnapshot {
   provider: string;
   accountAlias: string;
@@ -20,6 +26,7 @@ export interface ProviderCapabilitySnapshot {
 export interface ScanMailboxMetadataInput {
   folder: string;
   limit: number;
+  order?: "newest" | "oldest";
 }
 
 export interface MessageSummary {
@@ -40,4 +47,5 @@ export interface MailProvider {
   scanMailboxMetadata(input: ScanMailboxMetadataInput): Promise<MessageSummary[]>;
   fetchMessage(ref: MessageRef): Promise<MessageDetail>;
   getCapabilitySnapshot?(): Promise<ProviderCapabilitySnapshot>;
+  getMailboxSummary?(folder: string): Promise<MailboxSummary>;
 }

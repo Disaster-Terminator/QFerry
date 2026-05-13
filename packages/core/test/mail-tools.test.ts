@@ -26,6 +26,66 @@ describe("mail tools", () => {
     });
   });
 
+  it("returns read-only mailbox summaries", async () => {
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    await expect(tools.getMailboxSummary({ folder: "INBOX" })).resolves.toEqual({
+      mailbox: {
+        path: "INBOX",
+        exists: 2,
+      },
+    });
+  });
+
+  it("groups oldest spam and ad candidates for confirmation", async () => {
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    const result = await tools.groupSpamCandidates({
+      folder: "INBOX",
+      limit: 10,
+      rules: [
+        { id: "newsletter", groupId: "ads_or_newsletters", match: { fromIncludes: "newsletter@" } },
+        { id: "security", groupId: "attention", match: { subjectIncludes: "Security" } },
+      ],
+    });
+
+    expect(result.scanOrder).toBe("oldest");
+    expect(result.scannedMessages).toBe(2);
+    expect(result.groups).toEqual({
+      ads_or_newsletters: [
+        {
+          message: {
+            ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+            from: "newsletter@example.com",
+            subject: "Weekly digest",
+            date: "2026-05-11T00:00:00.000Z",
+            snippet: "A low priority newsletter.",
+            flags: ["\\Seen"],
+          },
+          groupId: "ads_or_newsletters",
+          matchedRuleId: "newsletter",
+          explanation: "from includes newsletter@",
+        },
+      ],
+      attention: [
+        {
+          message: {
+            ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+            from: "security@example.com",
+            subject: "Security alert",
+            date: "2026-05-12T00:00:00.000Z",
+            snippet: "A security notification that should be reviewed.",
+            flags: [],
+          },
+          groupId: "attention",
+          matchedRuleId: "security",
+          explanation: "subject includes Security",
+        },
+      ],
+    });
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
   it("returns runtime status without auth secrets", async () => {
     const tools = createMailTools({
       provider: FixtureMailProvider.demo(),

@@ -11,6 +11,15 @@ describe("FixtureMailProvider", () => {
     expect(mailboxes.map((mailbox) => mailbox.path)).toEqual(["INBOX", "Archive"]);
   });
 
+  it("summarizes fixture mailbox counts", async () => {
+    const provider = FixtureMailProvider.demo();
+
+    await expect(provider.getMailboxSummary("INBOX")).resolves.toEqual({
+      path: "INBOX",
+      exists: 2,
+    });
+  });
+
   it("scans mailbox metadata without exposing message body", async () => {
     const provider = FixtureMailProvider.demo();
 

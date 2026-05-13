@@ -70,14 +70,26 @@ export class QqReadOnlyProvider implements MailProvider {
     });
   }
 
+  async getMailboxSummary(folder: string) {
+    return this.withClient(async (client) => {
+      const mailbox = await client.mailboxOpen(folder, { readOnly: true });
+      return {
+        path: folder,
+        exists: mailbox.exists,
+        uidValidity: mailbox.uidValidity === undefined ? undefined : String(mailbox.uidValidity),
+      };
+    });
+  }
+
   async scanMailboxMetadata(input: ScanMailboxMetadataInput): Promise<MessageSummary[]> {
     const limit = Math.min(Math.max(input.limit, 0), this.maxRecommendedScanLimit);
     if (limit === 0) return [];
 
     return this.withClient(async (client) => {
       const mailbox = await client.mailboxOpen(input.folder, { readOnly: true });
-      const end = Math.max(mailbox.exists, 1);
-      const start = Math.max(end - limit + 1, 1);
+      const newest = input.order !== "oldest";
+      const end = newest ? Math.max(mailbox.exists, 1) : Math.min(limit, Math.max(mailbox.exists, 1));
+      const start = newest ? Math.max(end - limit + 1, 1) : 1;
       const messages: MessageSummary[] = [];
 
       for await (const message of client.fetch(
