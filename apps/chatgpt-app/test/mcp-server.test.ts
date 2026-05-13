@@ -40,6 +40,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "plan_cleanup",
       "preview_cleanup_batch",
       "plan_sender_governance",
+      "apply_ruleset_patch",
       "execute_cleanup",
     ]);
     expect(tools.tools.find((tool) => tool.name === "get_status")?.annotations?.readOnlyHint).toBe(true);
@@ -51,6 +52,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "preview_cleanup_batch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "plan_sender_governance")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "apply_ruleset_patch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_cleanup")?.annotations?.destructiveHint).toBe(true);
 
     await client.close();
@@ -524,6 +526,55 @@ describe("QFerry ChatGPT App MCP server", () => {
       },
       mutationsAttempted: 0,
     });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("dry-runs ruleset patch application through the MCP server", async () => {
+    const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mcp-rules-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, `${JSON.stringify({
+      version: "existing",
+      defaultGroupId: "review",
+      groups: [{ id: "review", label: "Needs review" }],
+      rules: [{ id: "keep", groupId: "review", match: { subjectIncludes: "keep" } }],
+    }, null, 2)}\n`, "utf8");
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "apply_ruleset_patch",
+      arguments: {
+        rulesFile,
+        apply: false,
+        patch: {
+          groupToEnsure: { id: "sender_governance", label: "Sender governance" },
+          candidateRuleCount: 1,
+          rulesToAdd: [
+            { id: "sender-domain-example-com", groupId: "sender_governance", match: { fromDomainIncludes: "example.com" } },
+          ],
+          skippedDuplicateRules: [],
+        },
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      applied: false,
+      beforeRuleCount: 1,
+      afterRuleCount: 2,
+      addedRuleCount: 1,
+    });
+    expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toHaveLength(1);
 
     await client.close();
     await server.close();

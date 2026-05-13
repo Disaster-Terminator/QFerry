@@ -1,5 +1,6 @@
 import type { ClassificationRule } from "./classification.js";
-import type { ClassificationGroup, ClassificationRuleset, ClassificationRulesetMetadata } from "./ruleset.js";
+import { loadClassificationRuleset, type ClassificationGroup, type ClassificationRuleset, type ClassificationRulesetMetadata } from "./ruleset.js";
+import { writeFile } from "node:fs/promises";
 
 export interface RulesetPatchDraft {
   groupToEnsure: { id: "sender_governance"; label: "Sender governance" };
@@ -20,6 +21,23 @@ export interface ClassificationRulesetJsonDraft {
   defaultGroupId: string;
   groups: ClassificationGroup[];
   rules: ClassificationRule[];
+}
+
+export interface ApplyRulesetPatchDraftInput {
+  rulesFile: string;
+  patch: RulesetPatchDraft;
+  apply: boolean;
+}
+
+export interface ApplyRulesetPatchDraftResult {
+  applied: boolean;
+  rulesFile: string;
+  beforeRuleCount: number;
+  afterRuleCount: number;
+  addedRuleCount: number;
+  skippedDuplicateRuleCount: number;
+  renderedDraft: ClassificationRulesetJsonDraft;
+  changelog: string;
 }
 
 const DEFAULT_RULESET_DRAFT: ClassificationRulesetJsonDraft = {
@@ -63,6 +81,29 @@ export function formatRulesetPatchChangelog(patch: RulesetPatchDraft): string {
     ...patch.skippedDuplicateRules.map((duplicate) =>
       `skipped ${duplicate.ruleId}: ${duplicate.reason} (${formatMatch(duplicate.match)})`),
   ].join("\n");
+}
+
+export async function applyRulesetPatchDraft(
+  input: ApplyRulesetPatchDraftInput,
+): Promise<ApplyRulesetPatchDraftResult> {
+  const existing = await loadClassificationRuleset(input.rulesFile);
+  const renderedDraft = renderRulesetPatchDraft(input.patch, existing);
+  const changelog = formatRulesetPatchChangelog(input.patch);
+
+  if (input.apply) {
+    await writeFile(input.rulesFile, `${JSON.stringify(renderedDraft, null, 2)}\n`, "utf8");
+  }
+
+  return {
+    applied: input.apply,
+    rulesFile: input.rulesFile,
+    beforeRuleCount: existing.rules.length,
+    afterRuleCount: renderedDraft.rules.length,
+    addedRuleCount: input.patch.rulesToAdd.length,
+    skippedDuplicateRuleCount: input.patch.skippedDuplicateRules.length,
+    renderedDraft,
+    changelog,
+  };
 }
 
 function formatMatch(match: ClassificationRule["match"]): string {

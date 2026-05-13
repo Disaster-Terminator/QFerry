@@ -167,3 +167,21 @@ Findings:
 
 - `rulesetPatch.renderedDraft` and `rulesetPatch.changelog` were added as in-memory artifacts. They are not written to disk and do not mutate QQ Mail.
 - Fixture and QQ readonly e2e summaries now record rendered draft rule counts and changelog line counts alongside sender governance candidate counts.
+
+## 2026-05-13 Governance control layer audit
+
+Context:
+
+- Retinue was used for two concurrent read-only audits while the main thread implemented local ruleset patch dry-run/apply and governance ledger evidence.
+- The main thread kept implementation, verification, and real QQ readonly e2e control.
+
+Observed jobs:
+
+- `job_5f71f8f1-5929-4e62-8313-19baeacfd5bf` completed the ledger/e2e audit. It recommended treating the first ledger as a resumable governance record, not only a flat scan offset log.
+- `job_b180e2e8-00d1-46ec-9770-82565c783bd5` was still running after the wait window and was closed as a Retinue pressure signal.
+
+Findings:
+
+- The governance ledger now records `resumeToken`, `completedRefsCount`, and `errorCount` in addition to scan/candidate counts and mutation count.
+- Fixture and QQ readonly plugin e2e write `governance-ledger.jsonl` under each run artifact directory and link it from the summary.
+- UID-based resume is still future work; this slice persists an offset-based resume token so long-running mailbox governance has an auditable starting point without touching QQ Mail.

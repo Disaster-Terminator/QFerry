@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { parseClassificationRuleset } from "../src/ruleset.js";
-import { formatRulesetPatchChangelog, renderRulesetPatchDraft } from "../src/ruleset-patch.js";
+import {
+  applyRulesetPatchDraft,
+  formatRulesetPatchChangelog,
+  renderRulesetPatchDraft,
+} from "../src/ruleset-patch.js";
 
 describe("ruleset patch rendering", () => {
   it("renders a selected sender governance patch as a complete ruleset draft", () => {
@@ -85,5 +92,43 @@ describe("ruleset patch rendering", () => {
     expect(changelog).toContain("rulesToAdd: 1");
     expect(changelog).toContain("+ rule sender-domain-example-com");
     expect(changelog).toContain("skipped existing-example-domain");
+  });
+
+  it("dry-runs and applies a ruleset patch to a local rules file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-apply-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, `${JSON.stringify({
+      version: "existing",
+      defaultGroupId: "review",
+      groups: [{ id: "review", label: "Needs review" }],
+      rules: [{ id: "keep", groupId: "review", match: { subjectIncludes: "keep" } }],
+    }, null, 2)}\n`, "utf8");
+    const patch = {
+      groupToEnsure: { id: "sender_governance", label: "Sender governance" } as const,
+      candidateRuleCount: 1,
+      rulesToAdd: [
+        { id: "sender-domain-example-com", groupId: "sender_governance", match: { fromDomainIncludes: "example.com" } },
+      ],
+      skippedDuplicateRules: [],
+    };
+
+    const dryRun = await applyRulesetPatchDraft({ rulesFile, patch, apply: false });
+
+    expect(dryRun).toMatchObject({
+      applied: false,
+      rulesFile,
+      beforeRuleCount: 1,
+      afterRuleCount: 2,
+      addedRuleCount: 1,
+      skippedDuplicateRuleCount: 0,
+    });
+    expect(dryRun.changelog).toContain("+ rule sender-domain-example-com");
+    expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toHaveLength(1);
+
+    const applied = await applyRulesetPatchDraft({ rulesFile, patch, apply: true });
+
+    expect(applied.applied).toBe(true);
+    expect(applied.renderedDraft.rules).toHaveLength(2);
+    expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toHaveLength(2);
   });
 });

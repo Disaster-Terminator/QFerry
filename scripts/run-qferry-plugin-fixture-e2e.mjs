@@ -31,6 +31,7 @@ async function main() {
   const artifactDir = resolve(repoRoot, "artifacts/e2e", runId);
   const tracePath = resolve(repoRoot, "logs/runs", `${runId}.jsonl`);
   const summaryPath = resolve(artifactDir, "summary.md");
+  const ledgerPath = resolve(artifactDir, "governance-ledger.jsonl");
   const rulesFile = resolve(repoRoot, "examples/qferry.rules.json");
   const mcpConfigPath = resolve(pluginDir, ".mcp.json");
   const mcpConfig = JSON.parse(await readFile(mcpConfigPath, "utf8"));
@@ -132,6 +133,7 @@ async function main() {
   let planResult;
   let batchPreviewResult;
   let senderGovernanceResult;
+  let rulesetPatchApplyResult;
   let blockedExecuteResult;
 
   for (const [name, args] of calls) {
@@ -175,6 +177,47 @@ async function main() {
       senderGovernanceChangelogLines: countLines(result.structuredContent?.rulesetPatch?.changelog),
     });
   }
+
+  rulesetPatchApplyResult = await callToolWithStructuredContent(client, "apply_ruleset_patch", {
+    rulesFile,
+    apply: false,
+    patch: senderGovernanceResult.rulesetPatch,
+  });
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "apply_ruleset_patch",
+    applied: rulesetPatchApplyResult.structuredContent?.applied,
+    beforeRuleCount: rulesetPatchApplyResult.structuredContent?.beforeRuleCount,
+    afterRuleCount: rulesetPatchApplyResult.structuredContent?.afterRuleCount,
+    addedRuleCount: rulesetPatchApplyResult.structuredContent?.addedRuleCount,
+    skippedDuplicateRuleCount: rulesetPatchApplyResult.structuredContent?.skippedDuplicateRuleCount,
+  });
+  await writeJsonl(ledgerPath, {
+    ...baseEvent,
+    event: "governance_batch_recorded",
+    batchId: "fixture-batch-0001",
+    status: "rules_drafted",
+    folder: "INBOX",
+    scanOffset: 0,
+    pageSize: 1,
+    maxPages: 2,
+    resumeToken: {
+      folder: "INBOX",
+      offset: senderGovernanceResult?.governance?.pagesScanned ?? 0,
+      batchConfig: { pageSize: 1, maxPages: 2 },
+    },
+    scannedMessages: senderGovernanceResult?.governance?.scannedMessages,
+    candidateCount: senderGovernanceResult?.governance?.domainCandidates?.length,
+    selectedMessageRefs: senderGovernanceResult?.governance?.selectedMessageRefs,
+    rulesToAdd: rulesetPatchApplyResult.structuredContent?.addedRuleCount,
+    skippedDuplicateRules: rulesetPatchApplyResult.structuredContent?.skippedDuplicateRuleCount,
+    mutationsAttempted: 0,
+    completedRefsCount: 0,
+    errorCount: 0,
+    tracePath,
+    summaryPath,
+  });
 
   blockedExecuteResult = await client.callTool({
     name: "execute_cleanup",
@@ -232,6 +275,9 @@ async function main() {
       `- senderGovernanceSkippedDuplicates: ${senderGovernanceResult?.rulesetPatch?.skippedDuplicateRules?.length ?? "<missing>"}`,
       `- senderGovernanceRenderedDraftRules: ${senderGovernanceResult?.rulesetPatch?.renderedDraft?.rules?.length ?? "<missing>"}`,
       `- senderGovernanceChangelogLines: ${countLines(senderGovernanceResult?.rulesetPatch?.changelog)}`,
+      `- rulesetPatchDryRunApplied: ${rulesetPatchApplyResult?.structuredContent?.applied ?? "<missing>"}`,
+      `- rulesetPatchDryRunAddedRules: ${rulesetPatchApplyResult?.structuredContent?.addedRuleCount ?? "<missing>"}`,
+      `- governanceLedger: ${ledgerPath}`,
       `- trace: ${tracePath}`,
       `- mcpConfig: ${mcpConfigPath}`,
       `- stderrBytes: ${stderrChunks.join("").length}`,

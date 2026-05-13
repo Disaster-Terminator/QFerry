@@ -152,6 +152,8 @@ QQ 邮箱产品层面有“设置 / 反垃圾 / 黑名单或黑白名单”能�
 
 当用户选定 sender/domain 时，验收还要记录 `rulesetPatch.rulesToAdd.length`、`rulesetPatch.skippedDuplicateRules.length`、`rulesetPatch.renderedDraft.rules.length`、`rulesetPatch.changelog` 行数和 `rulesetPatch.groupToEnsure`。这只是规则草案，不会直接写入真实邮箱或服务器侧黑名单。
 
+`apply_ruleset_patch` 只允许作用于本地 QFerry rules 文件。验收默认使用 `apply: false` dry-run，并记录 `rulesetPatchDryRunApplied`、`rulesetPatchDryRunAddedRules` 和 `governanceLedger`。只有用户明确要求持久化规则时，才允许 `apply: true`，且这仍然不等于 QQ 邮箱服务器侧黑名单或邮件 mutation。
+
 QFerry 当前支持的是规则层 blocklist：
 
 - 在规则文件或 e2e 脚本中按发件人、域名、主题等 metadata 匹配。

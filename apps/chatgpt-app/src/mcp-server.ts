@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import {
   createMailTools,
+  applyRulesetPatchDraft,
   FixtureMailProvider,
   loadQFerryRuntimeConfigSync,
   loadQFerryRuntimeSecretsSync,
@@ -50,6 +51,20 @@ const operationPlanSchema = z.object({
   confirmationRequired: z.boolean(),
   messageRefs: z.array(messageRefSchema),
   target: z.record(z.string(), z.string()).optional(),
+});
+
+const rulesetPatchSchema = z.object({
+  groupToEnsure: z.object({
+    id: z.literal("sender_governance"),
+    label: z.literal("Sender governance"),
+  }),
+  candidateRuleCount: z.number().int().min(0),
+  rulesToAdd: z.array(classificationRuleSchema),
+  skippedDuplicateRules: z.array(z.object({
+    ruleId: z.string(),
+    reason: z.literal("match already covered by existing rule"),
+    match: classificationRuleSchema.shape.match,
+  })),
 });
 
 export function createQFerryMcpServer(): McpServer {
@@ -260,6 +275,21 @@ export function createQFerryMcpServer(): McpServer {
   );
 
   server.registerTool(
+    "apply_ruleset_patch",
+    {
+      title: "Apply ruleset patch",
+      description: "Use this to dry-run or explicitly apply a local QFerry ruleset patch. This only writes the local rules file when apply is true and never mutates the mailbox.",
+      inputSchema: {
+        rulesFile: z.string(),
+        apply: z.boolean().default(false),
+        patch: rulesetPatchSchema,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async (input) => toToolResult(await applyRulesetPatchDraft(input)),
+  );
+
+  server.registerTool(
     "execute_cleanup",
     {
       title: "Execute cleanup",
@@ -328,13 +358,14 @@ class UnavailableMailProvider implements MailProvider {
   }
 }
 
-function toToolResult(structuredContent: Record<string, unknown>) {
+function toToolResult<T extends object>(structuredContent: T) {
+  const content = structuredContent as Record<string, unknown>;
   return {
-    structuredContent,
+    structuredContent: content,
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify(structuredContent),
+        text: JSON.stringify(content),
       },
     ],
   };
