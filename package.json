@@ -12,6 +12,8 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "sync:qferry-plugin": "node scripts/sync-qferry-plugin-runtime.mjs",
+    "dev:sync-plugin-cache": "node scripts/sync-installed-plugin-cache.mjs",
+    "dev:sync-plugin-cache:all": "node scripts/sync-installed-plugin-cache.mjs --include-windows --include-wsl",
     "verify:qferry-plugin": "node scripts/verify-qferry-plugin.mjs",
     "check": "pnpm run sync:qferry-plugin && pnpm run verify:qferry-plugin && pnpm test && pnpm run typecheck",
     "qferry:e2e:fixture": "pnpm --filter @qferry/core fixture:e2e",
