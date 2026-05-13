@@ -161,4 +161,67 @@ describe("QQ read-only provider", () => {
     });
     expect(opened).toEqual([{ path: "INBOX", options: { readOnly: true } }]);
   });
+
+  it("wraps QQ IMAP command failures with operation context", async () => {
+    const client = {
+      connect: async () => undefined,
+      logout: async () => undefined,
+      list: async () => [],
+      mailboxOpen: async () => {
+        throw new Error("Command failed");
+      },
+      fetch: () => asyncMessages([]),
+    };
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => client,
+    });
+
+    await expect(provider.getMailboxSummary("INBOX")).rejects.toMatchObject({
+      name: "QqProviderError",
+      provider: "qqmail",
+      operation: "get_mailbox_summary",
+      stage: "command",
+      originalMessage: "Command failed",
+    });
+    await expect(provider.getMailboxSummary("INBOX")).rejects.toThrow(
+      /QQ IMAP get_mailbox_summary failed during command/,
+    );
+  });
+
+  it("serializes concurrent QQ IMAP operations through one provider", async () => {
+    let activeConnections = 0;
+    let maxActiveConnections = 0;
+    const clientFactory = () => ({
+      connect: async () => {
+        activeConnections += 1;
+        maxActiveConnections = Math.max(maxActiveConnections, activeConnections);
+      },
+      logout: async () => {
+        activeConnections -= 1;
+      },
+      list: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return [{ path: "INBOX", delimiter: "/", flags: new Set<string>() }];
+      },
+      mailboxOpen: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return { exists: 1, uidValidity: 1n };
+      },
+      fetch: () => asyncMessages([]),
+    });
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory,
+    });
+
+    await Promise.all([
+      provider.listMailboxes(),
+      provider.getMailboxSummary("INBOX"),
+    ]);
+
+    expect(maxActiveConnections).toBe(1);
+  });
 });

@@ -24,7 +24,7 @@ export class QqMutableProvider extends QqReadOnlyProvider {
       throw new Error("Move target folder is empty");
     }
 
-    return this.withClient(async (client) => {
+    return this.withClient("move_messages", async (client) => {
       if (!client.messageMove) {
         throw new Error("QQ IMAP client does not expose messageMove");
       }

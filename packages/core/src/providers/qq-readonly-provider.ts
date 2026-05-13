@@ -40,8 +40,33 @@ export interface QqReadOnlyProviderInput {
   clientFactory?: () => QqReadOnlyClient;
 }
 
+export class QqProviderError extends Error {
+  readonly provider = "qqmail";
+  readonly operation: string;
+  readonly stage: "connect" | "command";
+  readonly originalMessage: string;
+  readonly originalName?: string;
+  readonly originalCode?: string;
+
+  constructor(input: {
+    operation: string;
+    stage: "connect" | "command";
+    cause: unknown;
+  }) {
+    const details = describeCause(input.cause);
+    super(`QQ IMAP ${input.operation} failed during ${input.stage}: ${details.message}`);
+    this.name = "QqProviderError";
+    this.operation = input.operation;
+    this.stage = input.stage;
+    this.originalMessage = details.message;
+    this.originalName = details.name;
+    this.originalCode = details.code;
+  }
+}
+
 export class QqReadOnlyProvider implements MailProvider {
   private readonly maxRecommendedScanLimit: number;
+  private operationQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly input: QqReadOnlyProviderInput) {
     this.maxRecommendedScanLimit = Math.min(Math.max(input.maxRecommendedScanLimit ?? 10, 1), 10);
@@ -61,7 +86,7 @@ export class QqReadOnlyProvider implements MailProvider {
   }
 
   async listMailboxes(): Promise<MailboxInfo[]> {
-    return this.withClient(async (client) => {
+    return this.withClient("list_mailboxes", async (client) => {
       const mailboxes = await client.list();
       return mailboxes.map((mailbox) => ({
         path: mailbox.path,
@@ -72,7 +97,7 @@ export class QqReadOnlyProvider implements MailProvider {
   }
 
   async getMailboxSummary(folder: string) {
-    return this.withClient(async (client) => {
+    return this.withClient("get_mailbox_summary", async (client) => {
       const mailbox = await client.mailboxOpen(folder, { readOnly: true });
       return {
         path: folder,
@@ -86,7 +111,7 @@ export class QqReadOnlyProvider implements MailProvider {
     const limit = Math.min(Math.max(input.limit, 0), this.maxRecommendedScanLimit);
     if (limit === 0) return [];
 
-    return this.withClient(async (client) => {
+    return this.withClient("scan_mailbox_metadata", async (client) => {
       const mailbox = await client.mailboxOpen(input.folder, { readOnly: true });
       const newest = input.order !== "oldest";
       const end = newest ? Math.max(mailbox.exists, 1) : Math.min(limit, Math.max(mailbox.exists, 1));
@@ -139,15 +164,51 @@ export class QqReadOnlyProvider implements MailProvider {
     }) as unknown as QqReadOnlyClient;
   }
 
-  protected async withClient<T>(fn: (client: QqReadOnlyClient) => Promise<T>): Promise<T> {
+  protected async withClient<T>(operation: string, fn: (client: QqReadOnlyClient) => Promise<T>): Promise<T> {
+    return this.enqueueOperation(() => this.withConnectedClient(operation, fn));
+  }
+
+  private async enqueueOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.operationQueue;
+    let release: () => void = () => undefined;
+    this.operationQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => undefined);
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  private async withConnectedClient<T>(operation: string, fn: (client: QqReadOnlyClient) => Promise<T>): Promise<T> {
     const client = this.createClient();
-    await client.connect();
+    try {
+      await client.connect();
+    } catch (error) {
+      throw new QqProviderError({ operation, stage: "connect", cause: error });
+    }
     try {
       return await fn(client);
+    } catch (error) {
+      throw new QqProviderError({ operation, stage: "command", cause: error });
     } finally {
       await client.logout().catch(() => undefined);
     }
   }
+}
+
+function describeCause(cause: unknown): { message: string; name?: string; code?: string } {
+  if (cause instanceof Error) {
+    const withCode = cause as Error & { code?: unknown };
+    return {
+      message: cause.message || cause.name,
+      name: cause.name,
+      code: typeof withCode.code === "string" ? withCode.code : undefined,
+    };
+  }
+  return { message: String(cause) };
 }
 
 function toMessageSummary(input: {

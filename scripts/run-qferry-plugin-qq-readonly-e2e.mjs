@@ -162,7 +162,7 @@ async function main() {
   };
 
   await client.connect(transport);
-  const status = await callToolWithStructuredContent(client, "get_status", {});
+  const status = await callToolWithTrace(client, "get_status", {}, tracePath, baseEvent);
   await writeJsonl(tracePath, {
     ...baseEvent,
     event: "plugin_tool_called",
@@ -172,7 +172,7 @@ async function main() {
     statusWarnings: status.structuredContent?.status?.statusWarnings,
   });
 
-  const capability = await callToolWithStructuredContent(client, "get_capability_snapshot", {});
+  const capability = await callToolWithTrace(client, "get_capability_snapshot", {}, tracePath, baseEvent);
   await writeJsonl(tracePath, {
     ...baseEvent,
     event: "plugin_tool_called",
@@ -180,7 +180,7 @@ async function main() {
     structuredContentKeys: Object.keys(capability.structuredContent ?? {}),
   });
 
-  const mailboxes = await callToolWithStructuredContent(client, "list_mailboxes", {});
+  const mailboxes = await callToolWithTrace(client, "list_mailboxes", {}, tracePath, baseEvent);
   const mailboxCount = Array.isArray(mailboxes.structuredContent?.mailboxes)
     ? mailboxes.structuredContent.mailboxes.length
     : 0;
@@ -191,7 +191,7 @@ async function main() {
     mailboxCount,
   });
 
-  const mailboxSummary = await callToolWithStructuredContent(client, "get_mailbox_summary", { folder: "INBOX" });
+  const mailboxSummary = await callToolWithTrace(client, "get_mailbox_summary", { folder: "INBOX" }, tracePath, baseEvent);
   await writeJsonl(tracePath, {
     ...baseEvent,
     event: "plugin_tool_called",
@@ -199,7 +199,7 @@ async function main() {
     mailboxExists: mailboxSummary.structuredContent?.mailbox?.exists,
   });
 
-  const search = await callToolWithStructuredContent(client, "search", { folder: "INBOX", limit: 1 });
+  const search = await callToolWithTrace(client, "search", { folder: "INBOX", limit: 1 }, tracePath, baseEvent);
   const sampledMessages = Array.isArray(search.structuredContent?.messages)
     ? search.structuredContent.messages.length
     : 0;
@@ -210,7 +210,7 @@ async function main() {
     sampledMessages,
   });
 
-  const spamCandidates = await callToolWithStructuredContent(
+  const spamCandidates = await callToolWithTrace(
     client,
     "group_spam_candidates",
     {
@@ -223,6 +223,8 @@ async function main() {
         { id: "digest-subject", groupId: "ads_or_spam", match: { subjectIncludes: "digest" } },
       ],
     },
+    tracePath,
+    baseEvent,
   );
   await writeJsonl(tracePath, {
     ...baseEvent,
@@ -234,7 +236,7 @@ async function main() {
     mutationsAttempted: spamCandidates.structuredContent?.mutationsAttempted,
   });
 
-  const triage = await callToolWithStructuredContent(
+  const triage = await callToolWithTrace(
     client,
     "triage_inbox",
     {
@@ -242,6 +244,8 @@ async function main() {
       limit: 1,
       rulesFile,
     },
+    tracePath,
+    baseEvent,
   );
   await writeJsonl(tracePath, {
     ...baseEvent,
@@ -252,7 +256,7 @@ async function main() {
     mutationsAttempted: triage.structuredContent?.mutationsAttempted,
   });
 
-  const previewPlan = await callToolWithStructuredContent(
+  const previewPlan = await callToolWithTrace(
     client,
     "plan_cleanup",
     {
@@ -264,6 +268,8 @@ async function main() {
       rulesFile,
       selectedGroupIds: ["archive"],
     },
+    tracePath,
+    baseEvent,
   );
   await writeJsonl(tracePath, {
     ...baseEvent,
@@ -354,6 +360,52 @@ async function callToolWithStructuredContent(client, name, args) {
     throw new Error(`QFerry plugin tool ${name} did not return structuredContent`);
   }
   return result;
+}
+
+async function callToolWithTrace(client, name, args, tracePath, baseEvent) {
+  const result = await client.callTool({ name, arguments: args });
+  if (result.isError) {
+    await writeJsonl(tracePath, {
+      ...baseEvent,
+      event: "plugin_tool_failed",
+      toolName: name,
+      errorText: extractToolErrorText(result),
+      content: summarizeToolContent(result.content),
+      mutationsAttempted: 0,
+    });
+    throw new Error(`QFerry plugin tool ${name} returned an error: ${JSON.stringify(result.content)}`);
+  }
+  if (!result.structuredContent || Object.keys(result.structuredContent).length === 0) {
+    await writeJsonl(tracePath, {
+      ...baseEvent,
+      event: "plugin_tool_failed",
+      toolName: name,
+      errorText: "missing structuredContent",
+      content: summarizeToolContent(result.content),
+      mutationsAttempted: 0,
+    });
+    throw new Error(`QFerry plugin tool ${name} did not return structuredContent`);
+  }
+  return result;
+}
+
+function extractToolErrorText(result) {
+  const textParts = Array.isArray(result.content)
+    ? result.content
+      .filter((part) => part?.type === "text")
+      .map((part) => String(part.text ?? ""))
+    : [];
+  return textParts.join("\n").slice(0, 1000);
+}
+
+function summarizeToolContent(content) {
+  if (!Array.isArray(content)) return [];
+  return content.map((part) => {
+    if (part?.type === "text") {
+      return { type: "text", text: String(part.text ?? "").slice(0, 1000) };
+    }
+    return { type: part?.type ?? "unknown" };
+  });
 }
 
 function countGroupedCandidates(groups) {
