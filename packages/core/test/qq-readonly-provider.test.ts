@@ -224,4 +224,32 @@ describe("QQ read-only provider", () => {
 
     expect(maxActiveConnections).toBe(1);
   });
+
+  it("waits between sequential QQ IMAP connections to avoid rapid reconnects", async () => {
+    const sleeps: number[] = [];
+    let connectCount = 0;
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      connectionCooldownMs: 250,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+      clientFactory: () => ({
+        connect: async () => {
+          connectCount += 1;
+        },
+        logout: async () => undefined,
+        list: async () => [{ path: "INBOX", delimiter: "/", flags: new Set<string>() }],
+        mailboxOpen: async () => ({ exists: 1, uidValidity: 1n }),
+        fetch: () => asyncMessages([]),
+      }),
+    });
+
+    await provider.listMailboxes();
+    await provider.getMailboxSummary("INBOX");
+
+    expect(connectCount).toBe(2);
+    expect(sleeps).toEqual([250]);
+  });
 });

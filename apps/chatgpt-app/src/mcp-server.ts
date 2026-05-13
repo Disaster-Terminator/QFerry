@@ -181,6 +181,7 @@ export function createQFerryMcpServer(): McpServer {
         limit: z.number().int().min(1).max(20),
         action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
         target: z.record(z.string(), z.string()).optional(),
+        messageRefs: z.array(messageRefSchema).optional(),
         defaultGroupId: z.string().optional(),
         rules: z.array(classificationRuleSchema).optional(),
         rulesFile: z.string().optional(),

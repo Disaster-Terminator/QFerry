@@ -259,6 +259,42 @@ describe("mail tools", () => {
     ]);
   });
 
+  it("creates preview cleanup plans from already reviewed message refs without rescanning", async () => {
+    const provider = FixtureMailProvider.demo();
+    let scanCalls = 0;
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        scanMailboxMetadata: async () => {
+          scanCalls += 1;
+          throw new Error("plan should not rescan selected refs");
+        },
+      },
+    });
+
+    const result = await tools.planCleanup({
+      runId: "run-selected-refs",
+      folder: "INBOX",
+      limit: 10,
+      action: "move",
+      target: { folder: "Junk" },
+      selectedGroupIds: [],
+      messageRefs: [
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+      ],
+    });
+
+    expect(result.plan.status).toBe("preview");
+    expect(result.plan.messageRefs).toEqual([
+      { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+    ]);
+    expect(result.classifications).toEqual([]);
+    expect(result.mutationsAttempted).toBe(0);
+    expect(scanCalls).toBe(0);
+  });
+
   it("rejects execute cleanup for unconfirmed preview plans", async () => {
     const provider = FixtureMailProvider.demo();
     const tools = createMailTools({

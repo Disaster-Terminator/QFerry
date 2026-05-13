@@ -37,6 +37,8 @@ export interface QqReadOnlyProviderInput {
   host?: string;
   port?: number;
   maxRecommendedScanLimit?: number;
+  connectionCooldownMs?: number;
+  sleep?: (ms: number) => Promise<void>;
   clientFactory?: () => QqReadOnlyClient;
 }
 
@@ -66,10 +68,15 @@ export class QqProviderError extends Error {
 
 export class QqReadOnlyProvider implements MailProvider {
   private readonly maxRecommendedScanLimit: number;
+  private readonly connectionCooldownMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
   private operationQueue: Promise<void> = Promise.resolve();
+  private hasConnected = false;
 
   constructor(private readonly input: QqReadOnlyProviderInput) {
     this.maxRecommendedScanLimit = Math.min(Math.max(input.maxRecommendedScanLimit ?? 10, 1), 10);
+    this.connectionCooldownMs = Math.max(input.connectionCooldownMs ?? 750, 0);
+    this.sleep = input.sleep ?? defaultSleep;
   }
 
   async getCapabilitySnapshot(): Promise<ProviderCapabilitySnapshot> {
@@ -185,7 +192,11 @@ export class QqReadOnlyProvider implements MailProvider {
   private async withConnectedClient<T>(operation: string, fn: (client: QqReadOnlyClient) => Promise<T>): Promise<T> {
     const client = this.createClient();
     try {
+      if (this.hasConnected && this.connectionCooldownMs > 0) {
+        await this.sleep(this.connectionCooldownMs);
+      }
       await client.connect();
+      this.hasConnected = true;
     } catch (error) {
       throw new QqProviderError({ operation, stage: "connect", cause: error });
     }
@@ -197,6 +208,10 @@ export class QqReadOnlyProvider implements MailProvider {
       await client.logout().catch(() => undefined);
     }
   }
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function describeCause(cause: unknown): { message: string; name?: string; code?: string } {

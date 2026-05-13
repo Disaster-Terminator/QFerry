@@ -72,6 +72,7 @@ export interface PlanCleanupInput {
   limit: number;
   action: OperationAction;
   target?: Record<string, string>;
+  messageRefs?: MessageRef[];
   rules?: ClassificationRule[];
   rulesFile?: string;
   defaultGroupId?: string;
@@ -276,6 +277,20 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async planCleanup(planInput) {
+      if (planInput.messageRefs && planInput.messageRefs.length > 0) {
+        return {
+          plan: createOperationPlan({
+            runId: planInput.runId,
+            provider: planInput.messageRefs[0]?.provider ?? input.runtimeConfig?.provider ?? "fixture",
+            action: planInput.action,
+            messageRefs: planInput.messageRefs,
+            target: planInput.target,
+          }),
+          classifications: [],
+          mutationsAttempted: 0,
+        };
+      }
+
       const resolvedRules = await resolveRules({
         ...planInput,
         defaultGroupId: planInput.defaultGroupId ?? "review",

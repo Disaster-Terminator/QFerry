@@ -235,6 +235,37 @@ async function main() {
     spamCandidateGroups: spamCandidates.structuredContent?.groups,
     mutationsAttempted: spamCandidates.structuredContent?.mutationsAttempted,
   });
+  const spamCandidateRefs = extractCandidateRefs(spamCandidates.structuredContent?.groups);
+  const spamPreviewPlan = spamCandidateRefs.length > 0
+    ? await callToolWithTrace(
+      client,
+      "plan_cleanup",
+      {
+        runId,
+        folder: "INBOX",
+        limit: candidateLimit,
+        action: "move",
+        target: { folder: "Junk" },
+        selectedGroupIds: [],
+        messageRefs: spamCandidateRefs,
+      },
+      tracePath,
+      baseEvent,
+    )
+    : undefined;
+  if (spamPreviewPlan) {
+    await writeJsonl(tracePath, {
+      ...baseEvent,
+      event: "plugin_tool_called",
+      toolName: "plan_cleanup_selected_refs",
+      planStatus: spamPreviewPlan.structuredContent?.plan?.status,
+      plannedMessageRefs: Array.isArray(spamPreviewPlan.structuredContent?.plan?.messageRefs)
+        ? spamPreviewPlan.structuredContent.plan.messageRefs.length
+        : 0,
+      targetFolder: spamPreviewPlan.structuredContent?.plan?.target?.folder,
+      mutationsAttempted: spamPreviewPlan.structuredContent?.mutationsAttempted,
+    });
+  }
 
   const triage = await callToolWithTrace(
     client,
@@ -321,6 +352,9 @@ async function main() {
       `- sampledMessages: ${sampledMessages}`,
       `- spamCandidateGroups: ${JSON.stringify(Object.keys(spamCandidates.structuredContent?.groups ?? {}))}`,
       `- spamCandidateCount: ${countGroupedCandidates(spamCandidates.structuredContent?.groups)}`,
+      `- spamPreviewPlanStatus: ${spamPreviewPlan?.structuredContent?.plan?.status ?? "<none>"}`,
+      `- spamPreviewPlanMessageRefs: ${spamPreviewPlan?.structuredContent?.plan?.messageRefs?.length ?? 0}`,
+      `- spamPreviewPlanTarget: ${spamPreviewPlan?.structuredContent?.plan?.target?.folder ?? "<none>"}`,
       `- triageGroupCounts: ${JSON.stringify(triage.structuredContent?.triage?.groupCounts ?? {})}`,
       `- triageSampledMessages: ${triage.structuredContent?.triage?.sampledMessages ?? "<missing>"}`,
       `- previewPlanStatus: ${previewPlan.structuredContent?.plan?.status ?? "<missing>"}`,
@@ -411,6 +445,14 @@ function summarizeToolContent(content) {
 function countGroupedCandidates(groups) {
   if (!groups || typeof groups !== "object") return 0;
   return Object.values(groups).reduce((total, candidates) => total + (Array.isArray(candidates) ? candidates.length : 0), 0);
+}
+
+function extractCandidateRefs(groups) {
+  if (!groups || typeof groups !== "object") return [];
+  return Object.values(groups)
+    .flatMap((candidates) => Array.isArray(candidates) ? candidates : [])
+    .map((candidate) => candidate?.message?.ref)
+    .filter((ref) => ref && typeof ref === "object");
 }
 
 await main().catch(async (error) => {
