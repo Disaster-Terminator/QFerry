@@ -36,14 +36,19 @@ interface LocalConfigFile {
 }
 
 export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInput = {}): Promise<QFerryRuntimeConfig> {
-  const env = input.env ?? process.env;
+  const processEnv = input.env ?? process.env;
   const readFile = input.readFile ?? readConfigFile;
+  const envFilePath = processEnv.QFERRY_ENV_FILE?.trim() || defaultEnvFilePath();
+  const envFile = await loadEnvFile(envFilePath, readFile);
+  const env = { ...envFile.values, ...processEnv };
   const localConfigPath = env.QFERRY_CONFIG_FILE?.trim() || defaultConfigPath();
   const localConfig = await loadLocalConfig(localConfigPath, readFile);
   const envProvider = parseProvider(env.QFERRY_PROVIDER);
   const fileProvider = parseProvider(localConfig.config?.provider);
   const provider = envProvider ?? fileProvider ?? "fixture";
-  const configSource = envProvider ? "env" : localConfig.loaded ? `file:${localConfig.path}` : "defaults";
+  const configSource = envProvider
+    ? processEnv.QFERRY_PROVIDER ? "env" : `env-file:${envFile.path}`
+    : localConfig.loaded ? `file:${localConfig.path}` : "defaults";
 
   if (provider === "fixture") {
     return {
@@ -87,9 +92,12 @@ export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInpu
 }
 
 export function loadQFerryRuntimeConfigSync(env: Record<string, string | undefined> = process.env): QFerryRuntimeConfig {
-  const localConfigPath = env.QFERRY_CONFIG_FILE?.trim() || defaultConfigPath();
+  const envFilePath = env.QFERRY_ENV_FILE?.trim() || defaultEnvFilePath();
+  const envFile = loadEnvFileSync(envFilePath);
+  const mergedEnv = { ...envFile.values, ...env };
+  const localConfigPath = mergedEnv.QFERRY_CONFIG_FILE?.trim() || defaultConfigPath();
   const localConfig = loadLocalConfigSync(localConfigPath);
-  return buildRuntimeConfig(env, localConfig);
+  return buildRuntimeConfig(mergedEnv, localConfig, env.QFERRY_PROVIDER ? "env" : envFile.loaded ? `env-file:${envFile.path}` : undefined);
 }
 
 async function readConfigFile(filePath: string): Promise<string | undefined> {
@@ -119,14 +127,31 @@ function loadLocalConfigSync(configPath: string): { loaded: boolean; path: strin
   }
 }
 
+async function loadEnvFile(
+  envFilePath: string,
+  readFile: (path: string) => Promise<string | undefined>,
+): Promise<{ loaded: boolean; path: string; values: Record<string, string> }> {
+  const text = await readFile(envFilePath);
+  return { loaded: Boolean(text), path: envFilePath, values: text ? parseDotenv(text) : {} };
+}
+
+function loadEnvFileSync(envFilePath: string): { loaded: boolean; path: string; values: Record<string, string> } {
+  try {
+    return { loaded: true, path: envFilePath, values: parseDotenv(readFileSync(envFilePath, "utf8")) };
+  } catch {
+    return { loaded: false, path: envFilePath, values: {} };
+  }
+}
+
 function buildRuntimeConfig(
   env: Record<string, string | undefined>,
   localConfig: { loaded: boolean; path: string; config?: LocalConfigFile },
+  envConfigSource?: string,
 ): QFerryRuntimeConfig {
   const envProvider = parseProvider(env.QFERRY_PROVIDER);
   const fileProvider = parseProvider(localConfig.config?.provider);
   const provider = envProvider ?? fileProvider ?? "fixture";
-  const configSource = envProvider ? "env" : localConfig.loaded ? `file:${localConfig.path}` : "defaults";
+  const configSource = envProvider ? envConfigSource ?? "env" : localConfig.loaded ? `file:${localConfig.path}` : "defaults";
 
   if (provider === "fixture") {
     return {
@@ -174,6 +199,26 @@ function defaultConfigPath(): string {
     return path.join(process.env.LOCALAPPDATA || os.homedir(), "qferry", "config.json");
   }
   return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "qferry", "config.json");
+}
+
+function defaultEnvFilePath(): string {
+  if (process.platform === "win32") {
+    return path.join(process.env.LOCALAPPDATA || os.homedir(), "qferry", ".env");
+  }
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "qferry", ".env");
+}
+
+function parseDotenv(text: string): Record<string, string> {
+  const values: Record<string, string> = {};
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || !line.includes("=")) continue;
+    const delimiter = line.indexOf("=");
+    const key = line.slice(0, delimiter).trim();
+    const value = line.slice(delimiter + 1).trim().replace(/^['"]|['"]$/g, "");
+    if (key) values[key] = value;
+  }
+  return values;
 }
 
 function parseProvider(value: string | undefined): QFerryProviderName | undefined {

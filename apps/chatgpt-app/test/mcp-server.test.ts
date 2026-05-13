@@ -1,10 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { createQFerryMcpServer } from "../src/mcp-server.js";
 
 describe("QFerry ChatGPT App MCP server", () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    process.env = { ...originalEnv, QFERRY_PROVIDER: "fixture", QFERRY_ENV_FILE: "G:\\missing\\qferry.env" };
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
   it("exposes Gmail-like read-only and preview-first tools", async () => {
     const server = createQFerryMcpServer();
     const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
@@ -58,7 +68,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(result.structuredContent).toMatchObject({
       status: {
         provider: "fixture",
-        configSource: "defaults",
+        configSource: "env",
         mutationAllowed: false,
       },
     });

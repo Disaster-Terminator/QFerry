@@ -53,10 +53,35 @@ describe("runtime config", () => {
     expect(JSON.stringify(config)).not.toContain("secret");
   });
 
+  it("loads QQ settings from the local app env file when process env is missing", async () => {
+    const config = await loadQFerryRuntimeConfig({
+      env: { QFERRY_ENV_FILE: "C:\\Users\\me\\AppData\\Local\\qferry\\.env" },
+      readFile: async (path) => {
+        if (path.endsWith(".env")) {
+          return [
+            "QFERRY_PROVIDER=qqmail",
+            "QQMAIL_EMAIL=25abc@qq.com",
+            "QQMAIL_KEY=secret-auth-code",
+            "QQMAIL_METADATA_SAMPLE_LIMIT=5",
+          ].join("\n");
+        }
+        return undefined;
+      },
+    });
+
+    expect(config.provider).toBe("qqmail");
+    expect(config.configSource).toBe("env-file:C:\\Users\\me\\AppData\\Local\\qferry\\.env");
+    expect(config.accountAlias).toBe("25***@qq.com");
+    expect(config.metadataSampleLimit).toBe(5);
+    expect(config.qqmail?.authCodePresent).toBe(true);
+    expect(JSON.stringify(config)).not.toContain("secret-auth-code");
+  });
+
   it("loads local JSON config when env provider is not set", async () => {
     const config = await loadQFerryRuntimeConfig({
       env: { QFERRY_CONFIG_FILE: "G:\\local\\qferry-config.json" },
       readFile: async (path) => {
+        if (path.endsWith(".env")) return undefined;
         expect(path).toBe("G:\\local\\qferry-config.json");
         return JSON.stringify({
           provider: "qqmail",
@@ -83,10 +108,13 @@ describe("runtime config", () => {
         QFERRY_CONFIG_FILE: "G:\\local\\qferry-config.json",
         QFERRY_PROVIDER: "fixture",
       },
-      readFile: async () => JSON.stringify({
+      readFile: async (path) => {
+        if (path.endsWith(".env")) return undefined;
+        return JSON.stringify({
         provider: "qqmail",
         qqmail: { email: "local@qq.com", metadataSampleLimit: 7 },
-      }),
+        });
+      },
     });
 
     expect(config.provider).toBe("fixture");

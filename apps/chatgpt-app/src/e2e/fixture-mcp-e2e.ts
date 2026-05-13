@@ -38,7 +38,12 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
   await mkdir(artifactDir, { recursive: true });
   await trace.write({ ...baseEvent, event: "mcp_fixture_e2e_started" });
 
+  const previousProvider = process.env.QFERRY_PROVIDER;
+  const previousEnvFile = process.env.QFERRY_ENV_FILE;
+  process.env.QFERRY_PROVIDER = "fixture";
+  process.env.QFERRY_ENV_FILE = join(input.projectRoot, "missing-qferry.env");
   const server = createQFerryMcpServer();
+  restoreFixtureEnv(previousProvider, previousEnvFile);
   const client = new Client({ name: "qferry-fixture-e2e", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
@@ -100,6 +105,19 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
     mutationsAttempted: 0,
     artifacts: { tracePath, summaryPath },
   };
+}
+
+function restoreFixtureEnv(previousProvider: string | undefined, previousEnvFile: string | undefined): void {
+  if (previousProvider === undefined) {
+    delete process.env.QFERRY_PROVIDER;
+  } else {
+    process.env.QFERRY_PROVIDER = previousProvider;
+  }
+  if (previousEnvFile === undefined) {
+    delete process.env.QFERRY_ENV_FILE;
+  } else {
+    process.env.QFERRY_ENV_FILE = previousEnvFile;
+  }
 }
 
 async function callToolWithTrace(
