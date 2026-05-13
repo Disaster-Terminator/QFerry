@@ -6,7 +6,7 @@
   <img alt="package manager pnpm" src="https://img.shields.io/badge/package%20manager-pnpm-F69220">
   <img alt="interface MCP + CLI" src="https://img.shields.io/badge/interface-MCP%20%2B%20CLI-4B5563">
   <img alt="mail QQ Mail" src="https://img.shields.io/badge/mail-QQ%20Mail-2563EB">
-  <img alt="safety read-only preview-first" src="https://img.shields.io/badge/safety-read--only%20%2B%20preview--first-0F766E">
+  <img alt="safety preview-first approval-required" src="https://img.shields.io/badge/safety-preview--first%20%2B%20approval--required-0F766E">
   <img alt="license Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-0F766E">
 </p>
 
@@ -18,7 +18,7 @@
 Codex
   -> QFerry Codex Plugin
     -> plugin-local MCP runtime
-      -> fixture provider 或 QQ Mail read-only provider
+      -> fixture provider 或 QQ Mail provider
     -> trace logs + e2e artifacts
 ```
 
@@ -60,7 +60,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 }
 ```
 
-`QQMAIL_KEY` 是 QQ 邮箱 IMAP/SMTP 授权码，不是 QQ 登录密码。它只通过环境变量提供，不写入本机 JSON、仓库、trace 或 summary。真实 QQ 邮箱路径默认只读，必须保持 `mutationsAttempted: 0`。
+`QQMAIL_KEY` 是 QQ 邮箱 IMAP/SMTP 授权码，不是 QQ 登录密码。它只通过环境变量提供，不写入本机 JSON、仓库、trace 或 summary。真实 QQ 邮箱默认走 read-only / preview-first 工作流；任何真实移动邮件都必须先生成 preview plan，经用户明确授权后调用 `confirm_cleanup_plan`，再用同一个 `operationPlanId` 调用 `execute_cleanup`。
 
 说明：Codex CLI 的 `codex plugin marketplace add` 只添加插件市场；插件安装在 Codex TUI 的 `/plugins` 里完成。
 
@@ -85,7 +85,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 | 垃圾/广告候选 | `group_spam_candidates` 从最旧 metadata 开始分组明显垃圾/广告，先给用户确认 |
 | 清理计划 | 基于规则文件生成 preview-only cleanup plan，不直接修改真实邮箱 |
 | 测试留痕 | 写入 jsonl trace 和 Markdown summary |
-| 安全边界 | 默认禁止真实邮箱写操作 |
+| 安全边界 | 默认 read-only / preview-first；真实写操作需要用户授权和服务端确认 plan |
 
 规则文件示例见 [examples/qferry.rules.json](examples/qferry.rules.json)。规则文件包含 `version`、`defaultGroupId`、`groups` 和 `rules`，e2e summary 会记录规则版本和规则数量。
 
@@ -101,7 +101,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 默认禁止：
 
-- 移动真实 QQ 邮件
+- 未经明确授权和服务端确认 plan 就移动真实 QQ 邮件
 - 标记已读/未读
 - 创建或删除 QQ 文件夹
 - 删除邮件
@@ -109,13 +109,14 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 - 下载附件
 - 全量扫描邮箱
 
-所有真实 QQ 邮箱测试都必须保持：
+真实 QQ read-only 测试必须保持：
 
 ```text
-mutationAllowed: false
 mutationsAttempted: 0
 QQMAIL_METADATA_SAMPLE_LIMIT=1
 ```
+
+真实 mutation e2e 只用于用户明确授权的小批量验证，必须在 trace 和 summary 中记录 preview plan、`confirm_cleanup_plan`、`execute_cleanup`、目标文件夹和 `mutationsAttempted`。
 
 ## 测试留痕
 

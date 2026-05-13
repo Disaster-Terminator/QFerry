@@ -68,13 +68,13 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
     ],
     selectedGroupIds: ["archive"],
   });
-  const plan = (planResult.structuredContent as { plan?: unknown } | undefined)?.plan;
-  if (!plan) {
+  const plan = (planResult.structuredContent as { plan?: { operationPlanId?: string } } | undefined)?.plan;
+  if (!plan?.operationPlanId) {
     throw new Error("plan_cleanup did not return a plan");
   }
   const blockedExecute = await client.callTool({
     name: "execute_cleanup",
-    arguments: { plan },
+    arguments: { operationPlanId: plan.operationPlanId },
   });
   if (!blockedExecute.isError) {
     throw new Error("execute_cleanup should be blocked in fixture e2e until the plan is confirmed");

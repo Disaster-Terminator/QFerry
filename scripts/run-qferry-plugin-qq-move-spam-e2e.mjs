@@ -255,12 +255,29 @@ async function main() {
       mutationsAttempted: previewPlan.structuredContent?.mutationsAttempted,
     });
 
-    const confirmedPlan = {
-      ...plan,
-      status: "confirmed",
-      confirmationRequired: false,
-    };
-    const execution = await callToolWithTrace(client, "execute_cleanup", { plan: confirmedPlan }, tracePath, baseEvent);
+    const confirmation = await callToolWithTrace(
+      client,
+      "confirm_cleanup_plan",
+      { operationPlanId: plan?.operationPlanId },
+      tracePath,
+      baseEvent,
+    );
+    await writeJsonl(tracePath, {
+      ...baseEvent,
+      event: "plugin_move_plan_confirmed",
+      moveIndex,
+      operationPlanId: confirmation.structuredContent?.plan?.operationPlanId,
+      planStatus: confirmation.structuredContent?.plan?.status,
+      mutationsAttempted: confirmation.structuredContent?.mutationsAttempted,
+    });
+
+    const execution = await callToolWithTrace(
+      client,
+      "execute_cleanup",
+      { operationPlanId: plan?.operationPlanId },
+      tracePath,
+      baseEvent,
+    );
     const mutationsAttempted = execution.structuredContent?.result?.mutationsAttempted ?? 0;
     const moved = execution.structuredContent?.result?.moved ?? 0;
     state.mutationsAttempted += mutationsAttempted;

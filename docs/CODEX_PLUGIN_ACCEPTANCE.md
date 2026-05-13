@@ -43,8 +43,7 @@ plugins/qferry/skills/qferry/SKILL.md
       "cwd": ".",
       "startup_timeout_sec": 30,
       "env": {
-        "QFERRY_PROVIDER": "fixture",
-        "QFERRY_MUTATION_ALLOWED": "0"
+        "QFERRY_PROVIDER": "fixture"
       }
     }
   }
@@ -114,7 +113,7 @@ examples/qferry.rules.json
 - `plan.messageRefs.length`
 - `mutationsAttempted`
 
-真实 QQ read-only e2e 调用该工具时仍必须保持 `mutationsAttempted: 0`。只有用户明确授权某个 plan 后，才能把 plan 标记为 `confirmed` 并调用 `execute_cleanup`。
+真实 QQ read-only e2e 调用该工具时仍必须保持 `mutationsAttempted: 0`。只有用户明确授权某个 plan 后，才允许调用 `confirm_cleanup_plan({ operationPlanId })`；真实执行必须再调用 `execute_cleanup({ operationPlanId })`，不能由客户端手写或修改 `status: "confirmed"` 的 plan JSON。
 
 ## 结构化搜索与优先级分桶
 
@@ -158,7 +157,7 @@ QFerry 当前支持的是规则层 blocklist：
 
 - 在规则文件或 e2e 脚本中按发件人、域名、主题等 metadata 匹配。
 - 生成可审计 preview plan。
-- 在用户授权的真实 mutation e2e 中将匹配邮件移动到 `Junk`。
+- 在用户授权的真实 mutation e2e 中，经 `confirm_cleanup_plan` 确认后将匹配邮件移动到 `Junk`。
 
 这能清理当前邮箱和持续识别同源垃圾邮件，但还不等于 QQ 邮箱服务器侧拒收。服务器侧拉黑需要后续 QQ Web 自动化或已验证接口支持。
 
@@ -185,9 +184,9 @@ QFerry 当前支持的是规则层 blocklist：
 - 使用 `triage_inbox` 验证 priority buckets。
 - 使用 `preview_cleanup_batch` 验证跨页规则预览和 preview operation plan。
 
-禁止：
+默认禁止：
 
-- 真实 QQ 邮件移动。
+- 未经明确授权和服务端确认 plan 的真实 QQ 邮件移动。
 - 标记已读/未读。
 - 创建/删除 QQ 文件夹。
 - 删除邮件。
@@ -195,13 +194,14 @@ QFerry 当前支持的是规则层 blocklist：
 - 下载附件。
 - 全量扫描邮箱。
 
-真实 QQ 验收必须保持：
+真实 QQ read-only 验收必须保持：
 
 ```text
-mutationAllowed: false
 mutationsAttempted: 0
 QQMAIL_METADATA_SAMPLE_LIMIT=1
 ```
+
+真实 mutation 验收必须是单独、显式授权的小批量测试，并在 trace/summary 中记录 preview plan、`confirm_cleanup_plan`、`execute_cleanup`、目标文件夹和 `mutationsAttempted`。
 
 ## 部署后验收
 

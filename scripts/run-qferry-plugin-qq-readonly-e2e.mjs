@@ -457,7 +457,7 @@ async function main() {
 
   const blockedExecute = await client.callTool({
     name: "execute_cleanup",
-    arguments: { plan: previewPlan.structuredContent?.plan },
+    arguments: { operationPlanId: previewPlan.structuredContent?.plan?.operationPlanId },
   });
   if (!blockedExecute.isError) {
     throw new Error("QFerry plugin execute_cleanup was expected to be blocked until the plan is confirmed");

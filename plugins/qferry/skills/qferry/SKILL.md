@@ -19,12 +19,14 @@ For real mailbox work, call tools in this order:
 6. `group_spam_candidates` when the user wants to start from oldest obvious spam or ads. Present the grouped candidates for confirmation before any real operation.
 7. `preview_cleanup_batch` when the user wants a cross-page rules preview and a bounded operation plan.
 8. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups or already reviewed message refs.
+9. `confirm_cleanup_plan` only after the user explicitly approves one specific preview plan.
+10. `execute_cleanup` only with the confirmed `operationPlanId`; never pass or fabricate a `status: "confirmed"` plan object.
 
 Use `classify_messages` when debugging rules or doing focused classification. Prefer `triage_inbox` for normal inbox organization because it returns group counts, priority buckets (`urgent`, `needs_review`, `waiting`, `fyi`, `bulk`), sampled message count, recommended next action, and `mutationsAttempted`.
 
 ## Safety Boundary
 
-Do not request real QQ Mail mutation through QFerry unless the user explicitly authorizes that specific operation. The current product milestone is read-only and preview-first.
+Do not request real QQ Mail mutation through QFerry unless the user explicitly authorizes that specific operation. The default product workflow is read-only and preview-first; mutation requires a server-side plan generated in this MCP session, `confirm_cleanup_plan`, and then `execute_cleanup`.
 
 Allowed by default:
 
@@ -38,6 +40,7 @@ Allowed by default:
 - Preview bounded cross-page cleanup batches.
 - Plan sender/domain governance candidates and local rule suggestions.
 - Write trace artifacts.
+- Confirm an operation plan after explicit user approval.
 
 ## Rules
 
@@ -55,7 +58,7 @@ When a tool response includes `ruleset`, keep `ruleset.version`, `ruleset.ruleCo
 
 Not allowed by default:
 
-- Move messages.
+- Move messages without an approved and server-confirmed plan.
 - Mark messages read or unread.
 - Create QQ folders.
 - Delete messages.

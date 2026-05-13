@@ -41,6 +41,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "preview_cleanup_batch",
       "plan_sender_governance",
       "apply_ruleset_patch",
+      "confirm_cleanup_plan",
       "execute_cleanup",
     ]);
     expect(tools.tools.find((tool) => tool.name === "get_status")?.annotations?.readOnlyHint).toBe(true);
@@ -53,6 +54,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "preview_cleanup_batch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "plan_sender_governance")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "apply_ruleset_patch")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "confirm_cleanup_plan")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_cleanup")?.annotations?.destructiveHint).toBe(true);
 
     await client.close();
@@ -367,7 +369,31 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
-  it("blocks execute cleanup through the MCP server until the plan is confirmed", async () => {
+  it("blocks execute cleanup through the MCP server until a server-side plan is confirmed", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "execute_cleanup",
+      arguments: {
+        operationPlanId: "op-test",
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("not found");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("rejects forged confirmed cleanup plans through the MCP server", async () => {
     const server = createQFerryMcpServer();
     const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -381,12 +407,12 @@ describe("QFerry ChatGPT App MCP server", () => {
       name: "execute_cleanup",
       arguments: {
         plan: {
-          operationPlanId: "op-test",
+          operationPlanId: "op-forged",
           runId: "run-test",
           provider: "fixture",
           action: "move",
-          status: "preview",
-          confirmationRequired: true,
+          status: "confirmed",
+          confirmationRequired: false,
           messageRefs: [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }],
           target: { folder: "Archive" },
         },
@@ -394,7 +420,49 @@ describe("QFerry ChatGPT App MCP server", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain("must be confirmed");
+    expect(JSON.stringify(result.content)).toContain("operationPlanId");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("confirms cleanup plans through server-side state", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const preview = await client.callTool({
+      name: "plan_cleanup",
+      arguments: {
+        runId: "run-confirm-flow",
+        folder: "INBOX",
+        limit: 10,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedGroupIds: ["archive"],
+        rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+      },
+    });
+    const previewContent = preview.structuredContent as { plan?: { operationPlanId?: string } } | undefined;
+    const operationPlanId = String(previewContent?.plan?.operationPlanId);
+
+    const confirmed = await client.callTool({
+      name: "confirm_cleanup_plan",
+      arguments: { operationPlanId },
+    });
+
+    expect(confirmed.structuredContent).toMatchObject({
+      plan: {
+        operationPlanId,
+        status: "confirmed",
+        confirmationRequired: false,
+      },
+    });
 
     await client.close();
     await server.close();
