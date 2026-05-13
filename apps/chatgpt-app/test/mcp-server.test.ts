@@ -223,6 +223,43 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("passes spam candidate offsets through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "group_spam_candidates",
+      arguments: {
+        folder: "INBOX",
+        limit: 1,
+        offset: 1,
+        rules: [{ id: "security", groupId: "attention", match: { subjectIncludes: "Security" } }],
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      folder: "INBOX",
+      scanOrder: "oldest",
+      scanOffset: 1,
+      groups: {
+        attention: [
+          {
+            matchedRuleId: "security",
+          },
+        ],
+      },
+    });
+
+    await client.close();
+    await server.close();
+  });
+
   it("blocks execute cleanup through the MCP server until the plan is confirmed", async () => {
     const server = createQFerryMcpServer();
     const client = new Client({ name: "qferry-test-client", version: "0.0.0" });

@@ -87,6 +87,52 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("groups spam candidates after an offset", async () => {
+    const provider = FixtureMailProvider.demo();
+    const scanInputs: unknown[] = [];
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        scanMailboxMetadata: async (input) => {
+          scanInputs.push(input);
+          return provider.scanMailboxMetadata(input);
+        },
+      },
+    });
+
+    const result = await tools.groupSpamCandidates({
+      folder: "INBOX",
+      limit: 1,
+      offset: 1,
+      rules: [
+        { id: "security", groupId: "attention", match: { subjectIncludes: "Security" } },
+      ],
+    });
+
+    expect(scanInputs).toEqual([{ folder: "INBOX", limit: 1, order: "oldest", offset: 1 }]);
+    expect(result.scannedMessages).toBe(1);
+    expect(result.scanOffset).toBe(1);
+    expect(result.groups).toEqual({
+      attention: [
+        {
+          message: {
+            ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+            from: "security@example.com",
+            subject: "Security alert",
+            date: "2026-05-12T00:00:00.000Z",
+            snippet: "A security notification that should be reviewed.",
+            flags: [],
+          },
+          groupId: "attention",
+          matchedRuleId: "security",
+          explanation: "subject includes Security",
+        },
+      ],
+    });
+  });
+
   it("returns runtime status without auth secrets", async () => {
     const tools = createMailTools({
       provider: FixtureMailProvider.demo(),

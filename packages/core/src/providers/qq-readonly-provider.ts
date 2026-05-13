@@ -38,6 +38,7 @@ export interface QqReadOnlyProviderInput {
   port?: number;
   maxRecommendedScanLimit?: number;
   connectionCooldownMs?: number;
+  connectRetryDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
   clientFactory?: () => QqReadOnlyClient;
 }
@@ -69,6 +70,7 @@ export class QqProviderError extends Error {
 export class QqReadOnlyProvider implements MailProvider {
   private readonly maxRecommendedScanLimit: number;
   private readonly connectionCooldownMs: number;
+  private readonly connectRetryDelayMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private operationQueue: Promise<void> = Promise.resolve();
   private hasConnected = false;
@@ -76,6 +78,7 @@ export class QqReadOnlyProvider implements MailProvider {
   constructor(private readonly input: QqReadOnlyProviderInput) {
     this.maxRecommendedScanLimit = Math.min(Math.max(input.maxRecommendedScanLimit ?? 10, 1), 10);
     this.connectionCooldownMs = Math.max(input.connectionCooldownMs ?? 750, 0);
+    this.connectRetryDelayMs = Math.max(input.connectRetryDelayMs ?? 1_500, 0);
     this.sleep = input.sleep ?? defaultSleep;
   }
 
@@ -121,12 +124,16 @@ export class QqReadOnlyProvider implements MailProvider {
     return this.withClient("scan_mailbox_metadata", async (client) => {
       const mailbox = await client.mailboxOpen(input.folder, { readOnly: true });
       const newest = input.order !== "oldest";
-      const end = newest ? Math.max(mailbox.exists, 1) : Math.min(limit, Math.max(mailbox.exists, 1));
+      const offset = Math.max(input.offset ?? 0, 0);
+      const maxSequence = Math.max(mailbox.exists, 1);
+      if (offset >= mailbox.exists) return [];
+      const end = newest ? Math.max(maxSequence - offset, 1) : Math.min(offset + limit, maxSequence);
       const start = newest ? Math.max(end - limit + 1, 1) : 1;
+      const oldestStart = newest ? start : Math.min(offset + 1, maxSequence);
       const messages: MessageSummary[] = [];
 
       for await (const message of client.fetch(
-        `${start}:${end}`,
+        `${oldestStart}:${end}`,
         { envelope: true, flags: true, internalDate: true, size: true, uid: true },
         { uid: false },
       )) {
@@ -195,7 +202,7 @@ export class QqReadOnlyProvider implements MailProvider {
       if (this.hasConnected && this.connectionCooldownMs > 0) {
         await this.sleep(this.connectionCooldownMs);
       }
-      await client.connect();
+      await this.connectClient(client);
       this.hasConnected = true;
     } catch (error) {
       throw new QqProviderError({ operation, stage: "connect", cause: error });
@@ -206,6 +213,18 @@ export class QqReadOnlyProvider implements MailProvider {
       throw new QqProviderError({ operation, stage: "command", cause: error });
     } finally {
       await client.logout().catch(() => undefined);
+    }
+  }
+
+  private async connectClient(client: QqReadOnlyClient): Promise<void> {
+    try {
+      await client.connect();
+    } catch (error) {
+      if (this.connectRetryDelayMs <= 0) {
+        throw error;
+      }
+      await this.sleep(this.connectRetryDelayMs);
+      await client.connect();
     }
   }
 }

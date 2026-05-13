@@ -136,6 +136,36 @@ describe("QQ read-only provider", () => {
     ]);
   });
 
+  it("can scan oldest metadata after an offset", async () => {
+    const fetchCalls: unknown[] = [];
+    const client = {
+      connect: async () => undefined,
+      logout: async () => undefined,
+      list: async () => [],
+      mailboxOpen: async () => ({ exists: 3000, uidValidity: 777n }),
+      fetch: (range: unknown, query: unknown, options: unknown) => {
+        fetchCalls.push({ range, query, options });
+        return asyncMessages([]);
+      },
+    };
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => client,
+      maxRecommendedScanLimit: 10,
+    });
+
+    await provider.scanMailboxMetadata({ folder: "INBOX", limit: 5, order: "oldest", offset: 10 });
+
+    expect(fetchCalls).toEqual([
+      {
+        range: "11:15",
+        query: { envelope: true, flags: true, internalDate: true, size: true, uid: true },
+        options: { uid: false },
+      },
+    ]);
+  });
+
   it("summarizes a QQ mailbox with read-only open", async () => {
     const opened: unknown[] = [];
     const client = {
@@ -251,5 +281,36 @@ describe("QQ read-only provider", () => {
 
     expect(connectCount).toBe(2);
     expect(sleeps).toEqual([250]);
+  });
+
+  it("retries transient QQ IMAP connection failures once", async () => {
+    const sleeps: number[] = [];
+    let connectAttempts = 0;
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      connectRetryDelayMs: 500,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+      clientFactory: () => ({
+        connect: async () => {
+          connectAttempts += 1;
+          if (connectAttempts === 1) {
+            throw new Error("Failed to establish connection in required time");
+          }
+        },
+        logout: async () => undefined,
+        list: async () => [{ path: "INBOX", delimiter: "/", flags: new Set<string>() }],
+        mailboxOpen: async () => ({ exists: 1, uidValidity: 1n }),
+        fetch: () => asyncMessages([]),
+      }),
+    });
+
+    await expect(provider.listMailboxes()).resolves.toEqual([
+      { path: "INBOX", delimiter: "/", flags: [] },
+    ]);
+    expect(connectAttempts).toBe(2);
+    expect(sleeps).toEqual([500]);
   });
 });

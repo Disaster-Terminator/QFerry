@@ -33,6 +33,7 @@ export interface GetMailboxSummaryInput {
 export interface GroupSpamCandidatesInput {
   folder: string;
   limit: number;
+  offset?: number;
   rules?: ClassificationRule[];
   rulesFile?: string;
 }
@@ -102,6 +103,7 @@ export interface MailTools {
     folder: string;
     scannedMessages: number;
     scanOrder: "oldest";
+    scanOffset: number;
     groups: Record<string, SpamCandidate[]>;
     classifications: MessageClassification[];
     mutationsAttempted: 0;
@@ -224,6 +226,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         folder: candidateInput.folder,
         limit: candidateInput.limit,
         order: "oldest",
+        offset: candidateInput.offset,
       });
       const classifications = classifyMessages({
         messages,
@@ -235,6 +238,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         folder: candidateInput.folder,
         scannedMessages: messages.length,
         scanOrder: "oldest",
+        scanOffset: Math.max(candidateInput.offset ?? 0, 0),
         groups: groupSpamCandidates(messages, spamClassifications),
         classifications,
         mutationsAttempted: 0,

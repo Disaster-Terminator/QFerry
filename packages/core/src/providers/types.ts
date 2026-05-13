@@ -27,6 +27,7 @@ export interface ScanMailboxMetadataInput {
   folder: string;
   limit: number;
   order?: "newest" | "oldest";
+  offset?: number;
 }
 
 export interface MessageSummary {

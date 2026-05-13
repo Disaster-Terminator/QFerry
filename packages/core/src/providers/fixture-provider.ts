@@ -83,7 +83,7 @@ export class FixtureMailProvider implements MailProvider {
       .filter((message) => message.ref.folder === input.folder);
     const ordered = input.order === "oldest" ? [...messages].reverse() : messages;
     return ordered
-      .slice(0, Math.max(0, input.limit))
+      .slice(Math.max(0, input.offset ?? 0), Math.max(0, input.offset ?? 0) + Math.max(0, input.limit))
       .map(({ bodyText: _bodyText, ...summary }) => summary);
   }
 

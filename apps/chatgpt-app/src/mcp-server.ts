@@ -162,6 +162,7 @@ export function createQFerryMcpServer(): McpServer {
       inputSchema: {
         folder: z.string(),
         limit: z.number().int().min(1).max(20),
+        offset: z.number().int().min(0).optional(),
         rules: z.array(classificationRuleSchema).optional(),
         rulesFile: z.string().optional(),
       },
