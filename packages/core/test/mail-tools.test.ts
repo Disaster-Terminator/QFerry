@@ -717,6 +717,14 @@ describe("mail tools", () => {
         snippet: "size=100",
         flags: [],
       },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "7", uidValidity: "999" },
+        from: "no-reply <no-reply@wargaming.net>",
+        subject: "您购买了“17,500达布隆”",
+        date: "2023-01-07T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
     ];
     const scanInputs: unknown[] = [];
     const tools = createMailTools({
@@ -748,7 +756,7 @@ describe("mail tools", () => {
       runId: "run-bulk-governance",
       folder: "INBOX",
       pageSize: 2,
-      maxPages: 3,
+      maxPages: 4,
       maxMessageRefs: 50,
       action: "move",
       target: { folder: "Junk" },
@@ -760,14 +768,15 @@ describe("mail tools", () => {
       { folder: "INBOX", limit: 2, order: "oldest", offset: 0 },
       { folder: "INBOX", limit: 2, order: "oldest", offset: 2 },
       { folder: "INBOX", limit: 2, order: "oldest", offset: 4 },
+      { folder: "INBOX", limit: 2, order: "oldest", offset: 6 },
     ]);
     expect(result.preview).toMatchObject({
       provider: "qqmail",
-      scannedMessages: 6,
+      scannedMessages: 7,
       selectedMessageRefs: 2,
       categoryCounts: {
         high_confidence_marketing: 2,
-        receipt_or_purchase: 1,
+        receipt_or_purchase: 2,
         review: 1,
         security_or_account: 2,
       },

@@ -1018,17 +1018,17 @@ function classifyBulkGovernanceMessage(message: MessageSummary): {
   const domain = extractSenderDomain(message.from);
   const text = `${message.from}\n${message.subject}\n${message.snippet}`.toLocaleLowerCase();
 
-  if (hasAny(domain, ["wargaming.net", "postermaster.sony.com.cn"])
-    || hasAny(text, ["广告", "(ad)", "优惠", "促销", "特卖", "礼物已到位", "登录游戏即可", "promotion", "promo"])) {
-    return { categoryId: "high_confidence_marketing", confidence: "high", reason: "metadata matches known marketing sender or promotion subject pattern" };
-  }
-
-  if (hasAny(text, ["安全代码", "security code", "异常登录", "new sign-in", "验证码", "验证", "account", "帐户", "账号"])) {
+  if (hasAny(text, ["安全代码", "security code", "异常登录", "new sign-in", "验证码", "验证", "account", "帐户"])) {
     return { categoryId: "security_or_account", confidence: "high", reason: "metadata indicates account, login, verification, or security mail" };
   }
 
   if (hasAny(text, ["购买", "receipt", "invoice", "账单", "订单", "payment", "支付", "subscription"])) {
     return { categoryId: "receipt_or_purchase", confidence: "high", reason: "metadata indicates a receipt, purchase, payment, or subscription" };
+  }
+
+  if (hasAny(domain, ["wargaming.net", "postermaster.sony.com.cn"])
+    || hasAny(text, ["广告", "(ad)", "优惠", "促销", "特卖", "礼物已到位", "登录游戏即可", "promotion", "promo"])) {
+    return { categoryId: "high_confidence_marketing", confidence: "high", reason: "metadata matches known marketing sender or promotion subject pattern" };
   }
 
   if (hasAny(text, ["newsletter", "digest", "unsubscribe", "退订", "周报", "月报"])) {
