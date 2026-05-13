@@ -251,6 +251,8 @@ export function createQFerryMcpServer(): McpServer {
         order: z.enum(["newest", "oldest"]).optional(),
         selectedSenderDomains: z.array(z.string()).optional(),
         selectedFromIncludes: z.array(z.string()).optional(),
+        rules: z.array(classificationRuleSchema).optional(),
+        rulesFile: z.string().optional(),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },

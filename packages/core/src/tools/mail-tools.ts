@@ -2,6 +2,7 @@ import { classifyMessages, type ClassificationRule, type MessageClassification, 
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
 import type { MailboxInfo, MailboxSummary, MailProvider, MessageDetail, MessageSummary, ProviderCapabilitySnapshot } from "../providers/types.js";
 import { loadClassificationRuleset, type ClassificationRulesetMetadata } from "../ruleset.js";
+import { formatRulesetPatchChangelog, renderRulesetPatchDraft, type RulesetPatchDraft } from "../ruleset-patch.js";
 import type { QFerryRuntimeConfig } from "../runtime-config.js";
 
 export interface CreateMailToolsInput {
@@ -131,6 +132,8 @@ export interface PlanSenderGovernanceInput {
   order?: "newest" | "oldest";
   selectedSenderDomains?: string[];
   selectedFromIncludes?: string[];
+  rules?: ClassificationRule[];
+  rulesFile?: string;
 }
 
 export interface SenderGovernanceCandidate {
@@ -231,6 +234,7 @@ export interface MailTools {
   }>;
   planSenderGovernance(input: PlanSenderGovernanceInput): Promise<{
     governance: SenderGovernanceReport;
+    rulesetPatch: RulesetPatchDraft;
     plan: OperationPlan;
     mutationsAttempted: 0;
   }>;
@@ -524,6 +528,10 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async planSenderGovernance(governanceInput) {
+      const existingRuleset = governanceInput.rulesFile
+        ? await loadClassificationRuleset(governanceInput.rulesFile)
+        : undefined;
+      const existingRules = existingRuleset?.rules ?? governanceInput.rules ?? [];
       const pageSize = Math.max(governanceInput.pageSize, 0);
       const maxPages = Math.max(governanceInput.maxPages, 0);
       const maxMessageRefs = Math.max(governanceInput.maxMessageRefs, 0);
@@ -553,6 +561,17 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         .slice(0, maxMessageRefs);
       const provider = selectedRefs[0]?.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
 
+      const domainCandidates = buildSenderGovernanceCandidates(messages);
+      const rulesetPatch = buildRulesetPatchDraft({
+        candidates: domainCandidates,
+        selectedSenderDomains,
+        selectedFromIncludes,
+        existingRules,
+        ruleset: existingRuleset?.metadata,
+      });
+      const renderedDraft = renderRulesetPatchDraft(rulesetPatch, existingRuleset);
+      const changelog = formatRulesetPatchChangelog(rulesetPatch);
+
       return {
         governance: {
           provider,
@@ -565,7 +584,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           scannedMessages: messages.length,
           selectedMessageRefs: selectedRefs.length,
           maxMessageRefs,
-          domainCandidates: buildSenderGovernanceCandidates(messages),
+          domainCandidates,
           selectedSenderDomains,
           selectedFromIncludes,
           serverBlocklistCapability: {
@@ -573,6 +592,11 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
             reason: "Provider capability exposes move only; server-side blocklist or filter mutation is not available through QFerry.",
           },
           mutationsAttempted: 0,
+        },
+        rulesetPatch: {
+          ...rulesetPatch,
+          renderedDraft,
+          changelog,
         },
         plan: createOperationPlan({
           runId: governanceInput.runId,
@@ -826,6 +850,73 @@ function buildSenderGovernanceCandidates(messages: MessageSummary[]): SenderGove
       };
     })
     .sort((left, right) => right.messageCount - left.messageCount || left.domain.localeCompare(right.domain));
+}
+
+function buildRulesetPatchDraft(input: {
+  candidates: SenderGovernanceCandidate[];
+  selectedSenderDomains: string[];
+  selectedFromIncludes: string[];
+  existingRules: ClassificationRule[];
+  ruleset?: ClassificationRulesetMetadata;
+}): RulesetPatchDraft {
+  const selectedRules = [
+    ...input.candidates
+      .filter((candidate) => input.selectedSenderDomains
+        .some((selectedDomain) => includesIgnoreCase(candidate.domain, selectedDomain)))
+      .map((candidate) => candidate.suggestedRule),
+    ...input.selectedFromIncludes.map((fromNeedle) => buildSenderRule(fromNeedle)),
+  ];
+  const rulesToAdd: ClassificationRule[] = [];
+  const skippedDuplicateRules: RulesetPatchDraft["skippedDuplicateRules"] = [];
+
+  for (const rule of selectedRules) {
+    const duplicate = input.existingRules.find((existingRule) => sameRuleMatch(existingRule.match, rule.match));
+    if (duplicate) {
+      skippedDuplicateRules.push({
+        ruleId: duplicate.id,
+        reason: "match already covered by existing rule",
+        match: duplicate.match,
+      });
+    } else if (!rulesToAdd.some((existingRule) => sameRuleMatch(existingRule.match, rule.match))) {
+      rulesToAdd.push(rule);
+    }
+  }
+
+  return {
+    groupToEnsure: { id: "sender_governance", label: "Sender governance" },
+    candidateRuleCount: selectedRules.length,
+    rulesToAdd,
+    skippedDuplicateRules,
+    ruleset: input.ruleset,
+  };
+}
+
+function buildSenderRule(fromNeedle: string): ClassificationRule {
+  return {
+    id: `sender-from-${slugifyRuleId(fromNeedle)}`,
+    groupId: "sender_governance",
+    match: { fromIncludes: fromNeedle },
+    priority: {
+      bucketId: "bulk",
+      reason: `Messages matching sender ${fromNeedle} were selected for governance`,
+      confidence: "medium",
+      weight: 60,
+      nextAction: "Review sender samples, then preview a move plan or keep as a local rule",
+    },
+  };
+}
+
+function sameRuleMatch(left: ClassificationRule["match"], right: ClassificationRule["match"]): boolean {
+  return normalizeOptional(left.fromIncludes) === normalizeOptional(right.fromIncludes)
+    && normalizeOptional(left.fromDomainIncludes) === normalizeOptional(right.fromDomainIncludes)
+    && normalizeOptional(left.subjectIncludes) === normalizeOptional(right.subjectIncludes)
+    && normalizeOptional(left.snippetIncludes) === normalizeOptional(right.snippetIncludes)
+    && normalizeOptional(left.folderEquals) === normalizeOptional(right.folderEquals)
+    && normalizeOptional(left.hasFlag) === normalizeOptional(right.hasFlag);
+}
+
+function normalizeOptional(value: string | undefined): string | undefined {
+  return value?.toLocaleLowerCase();
 }
 
 function matchesSenderGovernanceSelection(

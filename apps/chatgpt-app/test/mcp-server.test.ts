@@ -490,6 +490,31 @@ describe("QFerry ChatGPT App MCP server", () => {
         ],
         mutationsAttempted: 0,
       },
+      rulesetPatch: {
+        groupToEnsure: { id: "sender_governance", label: "Sender governance" },
+        candidateRuleCount: 1,
+        rulesToAdd: [
+          {
+            id: "sender-domain-example-com",
+            groupId: "sender_governance",
+            match: { fromDomainIncludes: "example.com" },
+          },
+        ],
+        renderedDraft: {
+          groups: [
+            { id: "review", label: "Needs review" },
+            { id: "sender_governance", label: "Sender governance" },
+          ],
+          rules: [
+            {
+              id: "sender-domain-example-com",
+              groupId: "sender_governance",
+              match: { fromDomainIncludes: "example.com" },
+            },
+          ],
+        },
+        changelog: "groupToEnsure: sender_governance\ncandidateRuleCount: 1\nrulesToAdd: 1\n+ rule sender-domain-example-com (fromDomainIncludes: example.com)\nskippedDuplicateRules: 0",
+      },
       plan: {
         status: "preview",
         confirmationRequired: true,

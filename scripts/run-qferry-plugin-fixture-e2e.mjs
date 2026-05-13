@@ -169,6 +169,10 @@ async function main() {
       senderGovernanceDomainCandidates: result.structuredContent?.governance?.domainCandidates?.length,
       senderGovernanceSelectedRefs: result.structuredContent?.governance?.selectedMessageRefs,
       senderGovernanceBlocklistSupported: result.structuredContent?.governance?.serverBlocklistCapability?.supported,
+      senderGovernanceRulesToAdd: result.structuredContent?.rulesetPatch?.rulesToAdd?.length,
+      senderGovernanceSkippedDuplicates: result.structuredContent?.rulesetPatch?.skippedDuplicateRules?.length,
+      senderGovernanceRenderedDraftRules: result.structuredContent?.rulesetPatch?.renderedDraft?.rules?.length,
+      senderGovernanceChangelogLines: countLines(result.structuredContent?.rulesetPatch?.changelog),
     });
   }
 
@@ -224,6 +228,10 @@ async function main() {
       `- senderGovernanceDomainCandidates: ${senderGovernanceResult?.governance?.domainCandidates?.length ?? "<missing>"}`,
       `- senderGovernanceSelectedRefs: ${senderGovernanceResult?.governance?.selectedMessageRefs ?? "<missing>"}`,
       `- senderGovernanceBlocklistSupported: ${senderGovernanceResult?.governance?.serverBlocklistCapability?.supported ?? "<missing>"}`,
+      `- senderGovernanceRulesToAdd: ${senderGovernanceResult?.rulesetPatch?.rulesToAdd?.length ?? "<missing>"}`,
+      `- senderGovernanceSkippedDuplicates: ${senderGovernanceResult?.rulesetPatch?.skippedDuplicateRules?.length ?? "<missing>"}`,
+      `- senderGovernanceRenderedDraftRules: ${senderGovernanceResult?.rulesetPatch?.renderedDraft?.rules?.length ?? "<missing>"}`,
+      `- senderGovernanceChangelogLines: ${countLines(senderGovernanceResult?.rulesetPatch?.changelog)}`,
       `- trace: ${tracePath}`,
       `- mcpConfig: ${mcpConfigPath}`,
       `- stderrBytes: ${stderrChunks.join("").length}`,
@@ -267,6 +275,10 @@ function summarizePriorityBucketWeights(priorityBuckets) {
       ? bucket.candidates.map((candidate) => candidate?.weight).filter((weight) => typeof weight === "number")
       : [],
   ]).filter(([id]) => typeof id === "string"));
+}
+
+function countLines(value) {
+  return typeof value === "string" && value.length > 0 ? value.split("\n").length : 0;
 }
 
 await main();

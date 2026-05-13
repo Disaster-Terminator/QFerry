@@ -395,6 +395,10 @@ async function main() {
     domainCandidates: senderGovernance.structuredContent?.governance?.domainCandidates?.length,
     selectedMessageRefs: senderGovernance.structuredContent?.governance?.selectedMessageRefs,
     blocklistSupported: senderGovernance.structuredContent?.governance?.serverBlocklistCapability?.supported,
+    rulesToAdd: senderGovernance.structuredContent?.rulesetPatch?.rulesToAdd?.length,
+    skippedDuplicateRules: senderGovernance.structuredContent?.rulesetPatch?.skippedDuplicateRules?.length,
+    renderedDraftRules: senderGovernance.structuredContent?.rulesetPatch?.renderedDraft?.rules?.length,
+    changelogLines: countLines(senderGovernance.structuredContent?.rulesetPatch?.changelog),
     planStatus: senderGovernance.structuredContent?.plan?.status,
     plannedMessageRefs: Array.isArray(senderGovernance.structuredContent?.plan?.messageRefs)
       ? senderGovernance.structuredContent.plan.messageRefs.length
@@ -457,6 +461,10 @@ async function main() {
       `- senderGovernanceDomainCandidates: ${senderGovernance.structuredContent?.governance?.domainCandidates?.length ?? "<missing>"}`,
       `- senderGovernanceSelectedRefs: ${senderGovernance.structuredContent?.governance?.selectedMessageRefs ?? "<missing>"}`,
       `- senderGovernanceBlocklistSupported: ${senderGovernance.structuredContent?.governance?.serverBlocklistCapability?.supported ?? "<missing>"}`,
+      `- senderGovernanceRulesToAdd: ${senderGovernance.structuredContent?.rulesetPatch?.rulesToAdd?.length ?? "<missing>"}`,
+      `- senderGovernanceSkippedDuplicates: ${senderGovernance.structuredContent?.rulesetPatch?.skippedDuplicateRules?.length ?? "<missing>"}`,
+      `- senderGovernanceRenderedDraftRules: ${senderGovernance.structuredContent?.rulesetPatch?.renderedDraft?.rules?.length ?? "<missing>"}`,
+      `- senderGovernanceChangelogLines: ${countLines(senderGovernance.structuredContent?.rulesetPatch?.changelog)}`,
       `- executeCleanupBlocked: ${blockedExecute.isError === true}`,
       `- trace: ${tracePath}`,
       `- mcpConfig: ${mcpConfigPath}`,
@@ -561,6 +569,10 @@ function summarizePriorityBucketWeights(priorityBuckets) {
       ? bucket.candidates.map((candidate) => candidate?.weight).filter((weight) => typeof weight === "number")
       : [],
   ]).filter(([id]) => typeof id === "string"));
+}
+
+function countLines(value) {
+  return typeof value === "string" && value.length > 0 ? value.split("\n").length : 0;
 }
 
 await main().catch(async (error) => {

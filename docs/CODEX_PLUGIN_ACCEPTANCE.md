@@ -150,6 +150,8 @@ QQ 邮箱产品层面有“设置 / 反垃圾 / 黑名单或黑白名单”能�
 
 `plan_sender_governance` 是当前替代路径：它只扫描 bounded metadata，聚合发件人域名候选，生成本地规则建议，并在选定 sender/domain 后生成 `status: "preview"` 的 move plan。工具输出必须保留 `serverBlocklistCapability.supported: false`，直到上游 provider 明确暴露可审计的服务器侧黑名单接口。
 
+当用户选定 sender/domain 时，验收还要记录 `rulesetPatch.rulesToAdd.length`、`rulesetPatch.skippedDuplicateRules.length`、`rulesetPatch.renderedDraft.rules.length`、`rulesetPatch.changelog` 行数和 `rulesetPatch.groupToEnsure`。这只是规则草案，不会直接写入真实邮箱或服务器侧黑名单。
+
 QFerry 当前支持的是规则层 blocklist：
 
 - 在规则文件或 e2e 脚本中按发件人、域名、主题等 metadata 匹配。

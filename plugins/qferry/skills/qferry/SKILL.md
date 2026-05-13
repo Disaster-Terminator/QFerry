@@ -47,7 +47,7 @@ Rules can match `fromIncludes`, `fromDomainIncludes`, `subjectIncludes`, `snippe
 
 Rules may include optional `priority` metadata with `bucketId`, `reason`, `confidence`, `weight`, and `nextAction`. Use it to make user-specific senders/domains consistently land in `urgent`, `needs_review`, `waiting`, `fyi`, or `bulk` without changing QQ server state. `weight` is a 0-100 candidate ordering signal inside the selected bucket.
 
-Use `plan_sender_governance` when the user wants Gmail-like sender/domain cleanup. It returns domain candidates, suggested local rules, a preview-only operation plan for explicitly selected sender/domain filters, and `serverBlocklistCapability.supported: false` when the current provider exposes no QQ server-side blocklist mutation API.
+Use `plan_sender_governance` when the user wants Gmail-like sender/domain cleanup. It returns domain candidates, suggested local rules, `rulesetPatch.rulesToAdd` for explicitly selected sender/domain filters, duplicate-rule skips, `rulesetPatch.renderedDraft`, `rulesetPatch.changelog`, a preview-only operation plan, and `serverBlocklistCapability.supported: false` when the current provider exposes no QQ server-side blocklist mutation API.
 
 When a tool response includes `ruleset`, keep `ruleset.version`, `ruleset.ruleCount`, and `ruleset.source` in the acceptance summary. Inline rules are still acceptable for one-off classification.
 

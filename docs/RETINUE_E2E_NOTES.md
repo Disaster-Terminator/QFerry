@@ -150,3 +150,20 @@ Findings:
 
 - Sender/domain governance should remain preview-first: bounded metadata scan, local rule suggestions, and operation plans only for explicitly selected sender/domain filters.
 - `serverBlocklistCapability.supported` remains `false` until a provider exposes a real, auditable QQ server-side blocklist API.
+
+## 2026-05-13 Sender ruleset patch audit
+
+Context:
+
+- Retinue was used for two concurrent read-only audits while the main thread extended sender governance from raw suggested rules to an auditable ruleset patch draft.
+- The main thread kept implementation, verification, and real QQ e2e control.
+
+Observed jobs:
+
+- `job_bc372713-33f8-40d2-82a9-6b9f0dd78d41` completed the implementation audit. It recommended rendering a complete ruleset draft and changelog from the raw `rulesetPatch` instead of only returning individual rules.
+- `job_7ce31331-66ab-46e9-92d2-51c93b12aa20` completed the Gmail-alignment audit. It confirmed the current two-call model, duplicate-rule skip behavior, preview plan boundary, and the explicit QQ server blocklist gap.
+
+Findings:
+
+- `rulesetPatch.renderedDraft` and `rulesetPatch.changelog` were added as in-memory artifacts. They are not written to disk and do not mutate QQ Mail.
+- Fixture and QQ readonly e2e summaries now record rendered draft rule counts and changelog line counts alongside sender governance candidate counts.

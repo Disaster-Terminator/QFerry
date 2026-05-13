@@ -611,9 +611,53 @@ describe("mail tools", () => {
         },
       },
     });
+    expect(result.rulesetPatch).toMatchObject({
+      groupToEnsure: { id: "sender_governance", label: "Sender governance" },
+      candidateRuleCount: 1,
+      skippedDuplicateRules: [],
+      rulesToAdd: [
+        {
+          id: "sender-domain-example-com",
+          groupId: "sender_governance",
+          match: { fromDomainIncludes: "example.com" },
+        },
+      ],
+    });
     expect(result.plan.status).toBe("preview");
     expect(result.plan.messageRefs).toEqual([
       { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+    ]);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
+  it("deduplicates sender governance rule drafts against existing rules", async () => {
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    const result = await tools.planSenderGovernance({
+      runId: "run-sender-governance-dedupe",
+      folder: "INBOX",
+      pageSize: 2,
+      maxPages: 1,
+      maxMessageRefs: 0,
+      action: "move",
+      target: { folder: "Archive" },
+      selectedSenderDomains: ["example.com"],
+      rules: [
+        {
+          id: "existing-example-domain",
+          groupId: "archive",
+          match: { fromDomainIncludes: "example.com" },
+        },
+      ],
+    });
+
+    expect(result.rulesetPatch.rulesToAdd).toEqual([]);
+    expect(result.rulesetPatch.skippedDuplicateRules).toEqual([
+      {
+        ruleId: "existing-example-domain",
+        reason: "match already covered by existing rule",
+        match: { fromDomainIncludes: "example.com" },
+      },
     ]);
     expect(result.mutationsAttempted).toBe(0);
   });
