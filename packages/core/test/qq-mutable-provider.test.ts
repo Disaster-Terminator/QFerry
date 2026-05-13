@@ -52,7 +52,7 @@ describe("QQ mutable provider", () => {
     ], "垃圾箱")).resolves.toEqual({ moved: 2 });
 
     expect(opened).toEqual([{ path: "INBOX", options: { readOnly: false } }]);
-    expect(moved).toEqual([{ range: [1, 2], destination: "垃圾箱", options: { uid: true } }]);
+    expect(moved).toEqual([{ range: "1,2", destination: "垃圾箱", options: { uid: true } }]);
   });
 
   it("rejects stale refs when UIDVALIDITY no longer matches the opened mailbox", async () => {
