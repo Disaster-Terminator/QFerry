@@ -17,6 +17,13 @@
       "groupId": "archive",
       "match": {
         "fromIncludes": "newsletter@"
+      },
+      "priority": {
+        "bucketId": "bulk",
+        "reason": "Configured newsletter sender rule",
+        "confidence": "medium",
+        "weight": 40,
+        "nextAction": "Review sample, then archive or move with a confirmed plan"
       }
     },
     {
@@ -24,6 +31,13 @@
       "groupId": "archive",
       "match": {
         "subjectIncludes": "digest"
+      },
+      "priority": {
+        "bucketId": "bulk",
+        "reason": "Configured digest subject rule",
+        "confidence": "medium",
+        "weight": 35,
+        "nextAction": "Review recurrence and archive if expected"
       }
     },
     {
@@ -31,6 +45,13 @@
       "groupId": "archive",
       "match": {
         "fromIncludes": "known-junk.example"
+      },
+      "priority": {
+        "bucketId": "bulk",
+        "reason": "Configured known junk sender rule",
+        "confidence": "high",
+        "weight": 85,
+        "nextAction": "Move to Junk only after explicit confirmation"
       }
     }
   ]

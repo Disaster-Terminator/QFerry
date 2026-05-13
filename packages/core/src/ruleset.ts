@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import type { ClassificationRule } from "./classification.js";
+import type { ClassificationRule, ClassificationRulePriority } from "./classification.js";
 
 export interface ClassificationGroup {
   id: string;
@@ -108,8 +108,40 @@ function readRules(value: unknown): ClassificationRule[] {
       id: readString(rule, "id"),
       groupId: readString(rule, "groupId"),
       match: normalizedMatch,
+      priority: readPriority(rule.priority, index),
     };
   });
+}
+
+function readPriority(value: unknown, ruleIndex: number): ClassificationRulePriority | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw new Error(`QFerry ruleset rule at index ${ruleIndex} priority must be an object`);
+  }
+  const bucketId = readString(value, "bucketId");
+  if (!["urgent", "needs_review", "waiting", "fyi", "bulk"].includes(bucketId)) {
+    throw new Error(`QFerry ruleset rule at index ${ruleIndex} priority bucketId is unsupported: ${bucketId}`);
+  }
+  const confidence = readString(value, "confidence");
+  if (!["high", "medium", "low"].includes(confidence)) {
+    throw new Error(`QFerry ruleset rule at index ${ruleIndex} priority confidence is unsupported: ${confidence}`);
+  }
+  return {
+    bucketId: bucketId as ClassificationRulePriority["bucketId"],
+    reason: readString(value, "reason"),
+    confidence: confidence as ClassificationRulePriority["confidence"],
+    weight: readOptionalWeight(value, ruleIndex),
+    nextAction: readString(value, "nextAction"),
+  };
+}
+
+function readOptionalWeight(record: Record<string, unknown>, ruleIndex: number): number | undefined {
+  const value = record.weight;
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) {
+    throw new Error(`QFerry ruleset rule at index ${ruleIndex} priority weight must be a number from 0 to 100`);
+  }
+  return value;
 }
 
 function readString(record: Record<string, unknown>, key: string): string {

@@ -9,10 +9,22 @@ export interface ClassificationRuleMatch {
   hasFlag?: string;
 }
 
+export type PriorityBucketId = "urgent" | "needs_review" | "waiting" | "fyi" | "bulk";
+export type PriorityConfidence = "high" | "medium" | "low";
+
+export interface ClassificationRulePriority {
+  bucketId: PriorityBucketId;
+  reason: string;
+  confidence: PriorityConfidence;
+  nextAction: string;
+  weight?: number;
+}
+
 export interface ClassificationRule {
   id: string;
   groupId: string;
   match: ClassificationRuleMatch;
+  priority?: ClassificationRulePriority;
 }
 
 export interface ClassifyMessagesInput {

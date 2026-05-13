@@ -31,6 +31,13 @@ const classificationRuleSchema = z.object({
     folderEquals: z.string().optional(),
     hasFlag: z.string().optional(),
   }),
+  priority: z.object({
+    bucketId: z.enum(["urgent", "needs_review", "waiting", "fyi", "bulk"]),
+    reason: z.string(),
+    confidence: z.enum(["high", "medium", "low"]),
+    weight: z.number().min(0).max(100).optional(),
+    nextAction: z.string(),
+  }).optional(),
 });
 
 const operationPlanSchema = z.object({

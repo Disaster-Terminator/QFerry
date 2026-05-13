@@ -98,3 +98,38 @@ Findings:
 - Structured metadata filters and priority buckets are a valid next Gmail-alignment step.
 - The implementation should remain metadata-only and backward-compatible.
 - Provider-level filter pushdown can be revisited later after QQ IMAP behavior is better characterized.
+
+## 2026-05-13 Configurable priority rules audit
+
+Context:
+
+- Retinue was used for two concurrent read-only audits before implementing configurable priority metadata on QFerry classification rules.
+- The main thread kept implementation and verification control.
+
+Observed jobs:
+
+- `job_94ecf6c2-e535-42e6-bf32-60ce2c6af260` completed a vision audit. It confirmed configurable priority rules align with Gmail-like organization, metadata-first classification, and traceable testing, while noting schema drift and semantic ambiguity risks.
+- `job_8a697bfb-7489-4f9e-8687-046349c36448` completed an implementation audit. It identified the existing hard-coded priority path in `packages/core/src/tools/mail-tools.ts` and recommended backward-compatible ruleset/schema/test updates.
+
+Findings:
+
+- The implementation keeps first-match classification semantics and adds optional per-rule `priority` metadata instead of introducing a separate scoring engine.
+- Existing rules without `priority` continue to use built-in metadata heuristics.
+- The status privacy bug discovered during installed-plugin smoke was fixed by redacting raw `qqmail.email` from `get_status` output.
+
+## 2026-05-13 Priority weight cross-check
+
+Context:
+
+- Retinue was used for two concurrent read-only audits after the main thread noticed the active goal explicitly included configurable priority rules/weights.
+- The main thread used the audit results as a checklist and kept implementation, real QQ e2e, and commit control.
+
+Observed jobs:
+
+- `job_58460975-31cd-4e34-9af9-47b30fedb0cc` completed the vision audit. It confirmed `priority.weight` fits the Gmail-like organization model as an in-bucket ordering signal rather than a separate scoring engine.
+- `job_249f5134-cd0b-420c-9ea1-98d7c51899bf` completed the implementation audit. It identified parser, MCP schema, triage passthrough, example config, tests, docs, and e2e trace expectations for `weight`.
+
+Findings:
+
+- `priority.weight` should remain optional, bounded, and local to ordering candidates inside the configured bucket.
+- E2E trace summaries now record `priorityBucketWeights` alongside `priorityCounts`, so weight behavior leaves an auditable artifact without logging message bodies or secrets.

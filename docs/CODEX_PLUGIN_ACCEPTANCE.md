@@ -95,6 +95,7 @@ examples/qferry.rules.json
 - `defaultGroupId`：没有命中规则时使用的 group。
 - `groups`：用户定义的分类组。
 - `rules`：按顺序匹配的 metadata 规则。
+- `rules[].priority`：可选优先级分桶配置，包含 `bucketId`、`reason`、`confidence`、`weight`、`nextAction`。`weight` 为 0-100，用于同一 bucket 内候选排序。
 
 工具仍兼容直接传入内联 `rules`。真实 QQ 路径使用规则文件时仍然只生成 preview plan，不执行邮箱写操作。
 
@@ -139,6 +140,8 @@ examples/qferry.rules.json
 - `bulk`
 
 验收时记录 `priorityCounts`，并把它当作候选排序信号，不把 metadata 启发式当成绝对判断。
+
+当命中的规则带有 `priority` 配置时，`triage_inbox` 优先采用规则配置的分桶、原因、置信度、权重和下一步，并按 bucket 内权重降序输出候选；否则回退到内置 metadata 启发式。
 
 ## 黑名单边界
 

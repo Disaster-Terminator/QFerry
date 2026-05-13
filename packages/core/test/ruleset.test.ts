@@ -15,7 +15,18 @@ describe("classification ruleset", () => {
         { id: "review", label: "Needs review" },
       ],
       rules: [
-        { id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } },
+        {
+          id: "newsletter",
+          groupId: "archive",
+          match: { fromIncludes: "newsletter@" },
+          priority: {
+            bucketId: "bulk",
+            reason: "Configured newsletter sender rule",
+            confidence: "medium",
+            weight: 40,
+            nextAction: "Archive after review",
+          },
+        },
       ],
     }, "memory");
 
@@ -27,6 +38,13 @@ describe("classification ruleset", () => {
       ruleCount: 1,
     });
     expect(ruleset.rules[0]?.groupId).toBe("archive");
+    expect(ruleset.rules[0]?.priority).toEqual({
+      bucketId: "bulk",
+      reason: "Configured newsletter sender rule",
+      confidence: "medium",
+      weight: 40,
+      nextAction: "Archive after review",
+    });
   });
 
   it("loads a ruleset from disk", async () => {

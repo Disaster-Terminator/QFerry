@@ -302,6 +302,7 @@ async function main() {
     sampledMessages: triage.structuredContent?.triage?.sampledMessages,
     triageGroupCounts: triage.structuredContent?.triage?.groupCounts,
     priorityCounts: triage.structuredContent?.priorityCounts,
+    priorityBucketWeights: summarizePriorityBucketWeights(triage.structuredContent?.priorityBuckets),
     mutationsAttempted: triage.structuredContent?.mutationsAttempted,
   });
 
@@ -413,6 +414,7 @@ async function main() {
       `- spamPreviewPlanTarget: ${spamPreviewPlan?.structuredContent?.plan?.target?.folder ?? "<none>"}`,
       `- triageGroupCounts: ${JSON.stringify(triage.structuredContent?.triage?.groupCounts ?? {})}`,
       `- priorityCounts: ${JSON.stringify(triage.structuredContent?.priorityCounts ?? {})}`,
+      `- priorityBucketWeights: ${JSON.stringify(summarizePriorityBucketWeights(triage.structuredContent?.priorityBuckets))}`,
       `- triageSampledMessages: ${triage.structuredContent?.triage?.sampledMessages ?? "<missing>"}`,
       `- previewPlanStatus: ${previewPlan.structuredContent?.plan?.status ?? "<missing>"}`,
       `- previewPlanMessageRefs: ${previewPlan.structuredContent?.plan?.messageRefs?.length ?? "<missing>"}`,
@@ -514,6 +516,16 @@ function extractCandidateRefs(groups) {
     .flatMap((candidates) => Array.isArray(candidates) ? candidates : [])
     .map((candidate) => candidate?.message?.ref)
     .filter((ref) => ref && typeof ref === "object");
+}
+
+function summarizePriorityBucketWeights(priorityBuckets) {
+  if (!Array.isArray(priorityBuckets)) return {};
+  return Object.fromEntries(priorityBuckets.map((bucket) => [
+    bucket?.id,
+    Array.isArray(bucket?.candidates)
+      ? bucket.candidates.map((candidate) => candidate?.weight).filter((weight) => typeof weight === "number")
+      : [],
+  ]).filter(([id]) => typeof id === "string"));
 }
 
 await main().catch(async (error) => {

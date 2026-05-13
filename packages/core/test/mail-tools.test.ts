@@ -166,6 +166,8 @@ describe("mail tools", () => {
       metadataSampleLimit: 1,
     });
     expect(JSON.stringify(result)).not.toContain("secret");
+    expect(JSON.stringify(result)).not.toContain("25abc@qq.com");
+    expect(result.status.qqmail?.email).toBeUndefined();
   });
 
   it("searches bounded metadata without returning message bodies", async () => {
@@ -312,7 +314,18 @@ describe("mail tools", () => {
       limit: 10,
       defaultGroupId: "review",
       rules: [
-        { id: "newsletter", groupId: "newsletter", match: { fromIncludes: "newsletter@" } },
+        {
+          id: "newsletter",
+          groupId: "newsletter",
+          match: { fromIncludes: "newsletter@" },
+          priority: {
+            bucketId: "bulk",
+            reason: "Configured newsletter sender rule",
+            confidence: "high",
+            weight: 42,
+            nextAction: "Archive after confirming this sender is expected",
+          },
+        },
       ],
     });
 
@@ -331,8 +344,56 @@ describe("mail tools", () => {
     expect(result.priorityBuckets.find((bucket) => bucket.id === "bulk")?.candidates[0]).toMatchObject({
       bucketId: "bulk",
       message: { subject: "Weekly digest" },
+      reason: "Configured newsletter sender rule",
+      confidence: "high",
+      weight: 42,
+      nextAction: "Archive after confirming this sender is expected",
     });
     expect(result.mutationsAttempted).toBe(0);
+  });
+
+  it("sorts configured priority candidates by weight within a bucket", async () => {
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    const result = await tools.triageInbox({
+      folder: "INBOX",
+      limit: 10,
+      defaultGroupId: "review",
+      rules: [
+        {
+          id: "security",
+          groupId: "review",
+          match: { fromIncludes: "security@" },
+          priority: {
+            bucketId: "bulk",
+            reason: "Low-weight configured test rule",
+            confidence: "low",
+            weight: 10,
+            nextAction: "Review later",
+          },
+        },
+        {
+          id: "newsletter",
+          groupId: "newsletter",
+          match: { fromIncludes: "newsletter@" },
+          priority: {
+            bucketId: "bulk",
+            reason: "High-weight configured test rule",
+            confidence: "high",
+            weight: 90,
+            nextAction: "Review first",
+          },
+        },
+      ],
+    });
+
+    expect(result.priorityBuckets.find((bucket) => bucket.id === "bulk")?.candidates.map((candidate) => ({
+      subject: candidate.message.subject,
+      weight: candidate.weight,
+    }))).toEqual([
+      { subject: "Weekly digest", weight: 90 },
+      { subject: "Security alert", weight: 10 },
+    ]);
   });
 
   it("classifies messages with rules loaded from a rules file", async () => {

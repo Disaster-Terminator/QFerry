@@ -1,4 +1,4 @@
-import { classifyMessages, type ClassificationRule, type MessageClassification } from "../classification.js";
+import { classifyMessages, type ClassificationRule, type MessageClassification, type PriorityBucketId, type PriorityConfidence } from "../classification.js";
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
 import type { MailboxInfo, MailboxSummary, MailProvider, MessageDetail, MessageSummary, ProviderCapabilitySnapshot } from "../providers/types.js";
 import { loadClassificationRuleset, type ClassificationRulesetMetadata } from "../ruleset.js";
@@ -75,13 +75,12 @@ export interface InboxTriageReport {
   mutationsAttempted: 0;
 }
 
-export type PriorityBucketId = "urgent" | "needs_review" | "waiting" | "fyi" | "bulk";
-
 export interface PriorityCandidate {
   message: MessageSummary;
   bucketId: PriorityBucketId;
   reason: string;
-  confidence: "high" | "medium" | "low";
+  confidence: PriorityConfidence;
+  weight: number;
   nextAction: string;
 }
 
@@ -189,7 +188,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
   return {
     async getStatus() {
       if (input.runtimeConfig) {
-        return { status: input.runtimeConfig };
+        return { status: redactRuntimeConfig(input.runtimeConfig) };
       }
       const capability = input.provider.getCapabilitySnapshot
         ? await input.provider.getCapabilitySnapshot()
@@ -268,7 +267,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         rules: resolvedRules.rules,
         defaultGroupId: resolvedRules.defaultGroupId,
       });
-      const priorityBuckets = buildPriorityBuckets(messages);
+      const priorityBuckets = buildPriorityBuckets(messages, classifications, resolvedRules.rules);
 
       return {
         triage: {
@@ -474,6 +473,15 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
   };
 }
 
+function redactRuntimeConfig(config: QFerryRuntimeConfig): QFerryRuntimeConfig {
+  if (!config.qqmail) return config;
+  const { email: _email, ...qqmail } = config.qqmail;
+  return {
+    ...config,
+    qqmail,
+  };
+}
+
 function countGroups(classifications: MessageClassification[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const classification of classifications) {
@@ -482,7 +490,11 @@ function countGroups(classifications: MessageClassification[]): Record<string, n
   return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
 }
 
-function buildPriorityBuckets(messages: MessageSummary[]): PriorityBucket[] {
+function buildPriorityBuckets(
+  messages: MessageSummary[],
+  classifications: MessageClassification[],
+  rules: ClassificationRule[],
+): PriorityBucket[] {
   const buckets: PriorityBucket[] = [
     { id: "urgent", label: "Urgent", candidates: [] },
     { id: "needs_review", label: "Needs Review", candidates: [] },
@@ -491,13 +503,49 @@ function buildPriorityBuckets(messages: MessageSummary[]): PriorityBucket[] {
     { id: "bulk", label: "Bulk", candidates: [] },
   ];
   const byId = new Map(buckets.map((bucket) => [bucket.id, bucket]));
+  const classificationsByRef = new Map(classifications.map((classification) => [
+    messageRefKey(classification.messageRef),
+    classification,
+  ]));
+  const rulePrioritiesById = new Map(rules
+    .filter((rule) => rule.priority)
+    .map((rule) => [rule.id, rule.priority]));
 
   for (const message of messages) {
-    const candidate = classifyPriority(message);
+    const classification = classificationsByRef.get(messageRefKey(message.ref));
+    const rulePriority = classification?.matchedRuleId
+      ? rulePrioritiesById.get(classification.matchedRuleId)
+      : undefined;
+    const candidate = rulePriority
+      ? classifyPriorityFromRule(message, rulePriority)
+      : classifyPriority(message);
     byId.get(candidate.bucketId)?.candidates.push(candidate);
   }
 
-  return buckets;
+  return buckets.map((bucket) => ({
+    ...bucket,
+    candidates: bucket.candidates.sort((left, right) => right.weight - left.weight),
+  }));
+}
+
+function classifyPriorityFromRule(
+  message: MessageSummary,
+  priority: NonNullable<ClassificationRule["priority"]>,
+): PriorityCandidate {
+  return {
+    message,
+    bucketId: priority.bucketId,
+    reason: priority.reason,
+    confidence: priority.confidence,
+    weight: priority.weight ?? confidenceWeight(priority.confidence),
+    nextAction: priority.nextAction,
+  };
+}
+
+function confidenceWeight(confidence: PriorityConfidence): number {
+  if (confidence === "high") return 80;
+  if (confidence === "medium") return 50;
+  return 20;
 }
 
 function countPriorityBuckets(buckets: PriorityBucket[]): Record<PriorityBucketId, number> {
@@ -530,6 +578,7 @@ function classifyPriority(message: MessageSummary): PriorityCandidate {
       bucketId: "urgent",
       reason: "metadata indicates security, risk, deadline, or time pressure",
       confidence: "medium",
+      weight: 75,
       nextAction: "review first and decide whether a response or cleanup is needed",
     };
   }
@@ -551,6 +600,7 @@ function classifyPriority(message: MessageSummary): PriorityCandidate {
       bucketId: "needs_review",
       reason: "metadata looks like a direct ask or follow-up",
       confidence: "low",
+      weight: 60,
       nextAction: "inspect the message or thread before acting",
     };
   }
@@ -561,6 +611,7 @@ function classifyPriority(message: MessageSummary): PriorityCandidate {
       bucketId: "waiting",
       reason: "metadata suggests the next blocker may be external",
       confidence: "low",
+      weight: 45,
       nextAction: "keep for tracking unless it is stale",
     };
   }
@@ -580,6 +631,7 @@ function classifyPriority(message: MessageSummary): PriorityCandidate {
       bucketId: "bulk",
       reason: "metadata looks like newsletter, digest, promotion, or other bulk mail",
       confidence: "medium",
+      weight: 40,
       nextAction: "archive, move to Junk, or add a rule after review",
     };
   }
@@ -590,6 +642,7 @@ function classifyPriority(message: MessageSummary): PriorityCandidate {
       bucketId: "fyi",
       reason: "message is already seen and has no action-oriented metadata",
       confidence: "low",
+      weight: 15,
       nextAction: "leave, archive, or use rules if this sender recurs",
     };
   }
@@ -599,6 +652,7 @@ function classifyPriority(message: MessageSummary): PriorityCandidate {
     bucketId: "fyi",
     reason: "no action-oriented metadata detected",
     confidence: "low",
+    weight: 10,
     nextAction: "review only if the sender or subject matters",
   };
 }

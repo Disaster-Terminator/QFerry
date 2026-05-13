@@ -143,6 +143,7 @@ async function main() {
       sampledMessages: result.structuredContent?.triage?.sampledMessages,
       triageGroupCounts: result.structuredContent?.triage?.groupCounts,
       priorityCounts: result.structuredContent?.priorityCounts,
+      priorityBucketWeights: summarizePriorityBucketWeights(result.structuredContent?.priorityBuckets),
       mailboxExists: result.structuredContent?.mailbox?.exists,
       searchResultCount: Array.isArray(result.structuredContent?.messages)
         ? result.structuredContent.messages.length
@@ -196,6 +197,7 @@ async function main() {
       `- executeCleanupBlocked: ${blockedExecuteResult?.isError === true}`,
       `- triageGroupCounts: ${JSON.stringify(triageResult?.triage?.groupCounts ?? {})}`,
       `- priorityCounts: ${JSON.stringify(triageResult?.priorityCounts ?? {})}`,
+      `- priorityBucketWeights: ${JSON.stringify(summarizePriorityBucketWeights(triageResult?.priorityBuckets))}`,
       `- triageSampledMessages: ${triageResult?.triage?.sampledMessages ?? "<missing>"}`,
       `- spamCandidateGroups: ${JSON.stringify(Object.keys(spamCandidatesResult?.groups ?? {}))}`,
       `- previewPlanStatus: ${planResult?.plan?.status ?? "<missing>"}`,
@@ -237,6 +239,16 @@ async function callToolWithStructuredContent(client, name, args) {
     throw new Error(`QFerry plugin tool ${name} did not return structuredContent`);
   }
   return result;
+}
+
+function summarizePriorityBucketWeights(priorityBuckets) {
+  if (!Array.isArray(priorityBuckets)) return {};
+  return Object.fromEntries(priorityBuckets.map((bucket) => [
+    bucket?.id,
+    Array.isArray(bucket?.candidates)
+      ? bucket.candidates.map((candidate) => candidate?.weight).filter((weight) => typeof weight === "number")
+      : [],
+  ]).filter(([id]) => typeof id === "string"));
 }
 
 await main();

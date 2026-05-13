@@ -233,7 +233,18 @@ describe("QFerry ChatGPT App MCP server", () => {
         folder: "INBOX",
         limit: 10,
         defaultGroupId: "review",
-        rules: [{ id: "newsletter", groupId: "newsletter", match: { fromIncludes: "newsletter@" } }],
+        rules: [{
+          id: "newsletter",
+          groupId: "newsletter",
+          match: { fromIncludes: "newsletter@" },
+          priority: {
+            bucketId: "bulk",
+            reason: "Configured newsletter sender rule",
+            confidence: "high",
+            weight: 42,
+            nextAction: "Archive after confirming this sender is expected",
+          },
+        }],
       },
     });
 
@@ -247,6 +258,23 @@ describe("QFerry ChatGPT App MCP server", () => {
         urgent: 1,
         bulk: 1,
       },
+      priorityBuckets: [
+        { id: "urgent" },
+        { id: "needs_review" },
+        { id: "waiting" },
+        { id: "fyi" },
+        {
+          id: "bulk",
+          candidates: [
+            {
+              reason: "Configured newsletter sender rule",
+              confidence: "high",
+              weight: 42,
+              nextAction: "Archive after confirming this sender is expected",
+            },
+          ],
+        },
+      ],
       mutationsAttempted: 0,
     });
 
