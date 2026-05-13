@@ -73,6 +73,7 @@ export function createQFerryMcpServer(): McpServer {
   const runtimeConfig = loadQFerryRuntimeConfigSync();
   const tools = createMailTools({ provider: createProviderFromConfig(runtimeConfig), runtimeConfig });
   const planRegistry = new Map<string, StoredPlan>();
+  const consumedPlanIds = new Set<string>();
 
   server.registerTool(
     "get_status",
@@ -299,7 +300,7 @@ export function createQFerryMcpServer(): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (input) => {
-      const stored = getStoredPlan(planRegistry, input.operationPlanId);
+      const stored = getStoredPlan(planRegistry, consumedPlanIds, input.operationPlanId);
       const confirmed = {
         ...confirmOperationPlan(stored.plan, input.operationPlanId),
         confirmationRequired: false,
@@ -327,10 +328,12 @@ export function createQFerryMcpServer(): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
     async (input) => {
-      const stored = getStoredPlan(planRegistry, input.operationPlanId);
+      const stored = getStoredPlan(planRegistry, consumedPlanIds, input.operationPlanId);
       if (stored.plan.status !== "confirmed") {
         throw new Error(`Operation plan is not confirmed: ${input.operationPlanId}`);
       }
+      planRegistry.delete(input.operationPlanId);
+      consumedPlanIds.add(input.operationPlanId);
       return toToolResult(await tools.executeCleanup({ plan: stored.plan }));
     },
   );
@@ -349,7 +352,14 @@ function registerPlan<T extends { plan: OperationPlan }>(
   return result;
 }
 
-function getStoredPlan(registry: Map<string, StoredPlan>, operationPlanId: string): StoredPlan {
+function getStoredPlan(
+  registry: Map<string, StoredPlan>,
+  consumedPlanIds: Set<string>,
+  operationPlanId: string,
+): StoredPlan {
+  if (consumedPlanIds.has(operationPlanId)) {
+    throw new Error(`Operation plan already consumed: ${operationPlanId}`);
+  }
   const stored = registry.get(operationPlanId);
   if (!stored) {
     throw new Error(`Operation plan not found in this QFerry session: ${operationPlanId}`);

@@ -468,6 +468,54 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("consumes confirmed cleanup plans after one execute attempt", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const preview = await client.callTool({
+      name: "plan_cleanup",
+      arguments: {
+        runId: "run-single-consume",
+        folder: "INBOX",
+        limit: 10,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedGroupIds: ["archive"],
+        rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+      },
+    });
+    const previewContent = preview.structuredContent as { plan?: { operationPlanId?: string } } | undefined;
+    const operationPlanId = String(previewContent?.plan?.operationPlanId);
+
+    await client.callTool({
+      name: "confirm_cleanup_plan",
+      arguments: { operationPlanId },
+    });
+
+    const firstExecute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId },
+    });
+    expect(firstExecute.isError).toBe(true);
+    expect(JSON.stringify(firstExecute.content)).toContain("does not support mailbox mutation");
+
+    const secondExecute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId },
+    });
+    expect(secondExecute.isError).toBe(true);
+    expect(JSON.stringify(secondExecute.content)).toContain("already consumed");
+
+    await client.close();
+    await server.close();
+  });
+
   it("previews cleanup batches through the MCP server", async () => {
     const server = createQFerryMcpServer();
     const client = new Client({ name: "qferry-test-client", version: "0.0.0" });

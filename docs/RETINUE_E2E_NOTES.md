@@ -185,3 +185,20 @@ Findings:
 - The governance ledger now records `resumeToken`, `completedRefsCount`, and `errorCount` in addition to scan/candidate counts and mutation count.
 - Fixture and QQ readonly plugin e2e write `governance-ledger.jsonl` under each run artifact directory and link it from the summary.
 - UID-based resume is still future work; this slice persists an offset-based resume token so long-running mailbox governance has an auditable starting point without touching QQ Mail.
+
+## 2026-05-13 Cleanup plan consumption audit
+
+Context:
+
+- Retinue was used for concurrent read-only audits after external GPT-5.5 review identified remaining safety-model risks.
+- The main thread kept implementation, verification, and product decisions.
+
+Observed jobs:
+
+- `job_d899b69e-9673-4beb-85ae-9b2e703b76ef` completed the documentation drift audit. It found `docs/ARCHITECTURE.md` still conflated confirmation and execution through a single `confirmOperation` contract.
+- `job_ab84ebc0-2511-48c3-bfc3-01ce30f27878` did not complete within the wait window and showed read-only patch intent diagnostics, so it was closed as a Retinue pressure/safety signal.
+
+Findings:
+
+- The MCP server now consumes a confirmed `operationPlanId` before calling the provider, so a second `execute_cleanup` attempt for the same id fails as already consumed.
+- `docs/ARCHITECTURE.md` now describes `confirmCleanupPlan` and `executeCleanup` as separate steps and records the single-use execution requirement.
