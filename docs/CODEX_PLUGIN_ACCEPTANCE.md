@@ -203,6 +203,14 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 真实 mutation 验收必须是单独、显式授权的小批量测试，并在 trace/summary 中记录 preview plan、`confirm_cleanup_plan`、`execute_cleanup`、目标文件夹和 `mutationsAttempted`。
 
+状态字段验收时要区分：
+
+- `mutationAllowed`：兼容字段，表示当前 provider 路径具备执行 mutation 的产品能力。
+- `mutationCapable`：provider 是否具备 mutation capability。
+- `mutationRequiresConfirmation`：真实 mutation 是否必须通过 preview plan、`confirm_cleanup_plan` 和 `execute_cleanup`。
+
+QQ provider 的 `fetch` 必须按 `folder + uid + uidValidity` 精确读取选中邮件 metadata，不能依赖最新 bounded scan 回查 UID。
+
 ## 部署后验收
 
 用户把插件部署到本机 Codex 后，下一轮测试目标是：

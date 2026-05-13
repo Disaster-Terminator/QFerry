@@ -202,3 +202,36 @@ Findings:
 
 - The MCP server now consumes a confirmed `operationPlanId` before calling the provider, so a second `execute_cleanup` attempt for the same id fails as already consumed.
 - `docs/ARCHITECTURE.md` now describes `confirmCleanupPlan` and `executeCleanup` as separate steps and records the single-use execution requirement.
+
+## 2026-05-13 Fetch/status and real spam e2e audit attempt
+
+Context:
+
+- Retinue was used for two read-only audits while the main thread fixed QQ `fetchMessage`, status semantics, and prepared a small real spam/ad治理 e2e.
+- The main thread kept implementation and real mailbox decisions.
+
+Observed jobs:
+
+- `job_293e8282-f6e1-4ada-83f3-748c9c7900a5` stalled after repeated tool-call rounds without completed assistant text.
+- `job_87ad15b4-9e6c-4a21-b925-69b408357a9f` was still running after the wait window and showed read-only patch intent/timeout diagnostics, so it was closed.
+
+Findings:
+
+- Retinue did not return usable review content in this slice; the main thread proceeded from Serena/code evidence.
+- The stalled/running behavior remains useful as Retinue pressure-test evidence, but broad audit prompts should be shortened further.
+
+## 2026-05-13 Spam rule review attempt
+
+Context:
+
+- Retinue was used for a narrow read-only review of conservative QQ ad/spam rules before rerunning real move-spam e2e.
+- The main thread kept all implementation and mailbox execution control.
+
+Observed jobs:
+
+- `job_51c5ecf0-212a-4329-b96c-ea3b929345d5` timed out with `readOnlyWriteIntent: true` and patch parts instead of a usable textual review.
+
+Findings:
+
+- This is Retinue pressure-test evidence, not QFerry review evidence.
+- QFerry proceeded with TDD coverage for importing `scripts/run-qferry-plugin-qq-move-spam-e2e.mjs` without starting a live mailbox run and for the conservative rule set used by real QQ move-spam e2e.

@@ -11,7 +11,7 @@ QFerry is a Gmail-like QQ Mail organization plugin for Codex. Use it for mailbox
 
 For real mailbox work, call tools in this order:
 
-1. `get_status` to confirm provider, config source, account alias, read-only limits, and warnings.
+1. `get_status` to confirm provider, config source, account alias, read-only limits, mutation capability, confirmation requirement, and warnings.
 2. `list_mailboxes` to discover available folders.
 3. `get_mailbox_summary` to get read-only folder counts before scanning.
 4. `search` with structured filters when the task can be narrowed by sender, domain, subject, snippet, flag, date, order, or offset.

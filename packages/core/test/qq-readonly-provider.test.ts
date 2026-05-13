@@ -192,6 +192,62 @@ describe("QQ read-only provider", () => {
     expect(opened).toEqual([{ path: "INBOX", options: { readOnly: true } }]);
   });
 
+  it("fetches a QQ message by UID instead of bounded rescanning", async () => {
+    const fetchCalls: unknown[] = [];
+    const client = {
+      connect: async () => undefined,
+      logout: async () => undefined,
+      list: async () => [],
+      mailboxOpen: async () => ({ exists: 3000, uidValidity: 999n }),
+      fetch: (range: unknown, query: unknown, options: unknown) => {
+        fetchCalls.push({ range, query, options });
+        return asyncMessages([{
+          uid: 2048,
+          flags: new Set(["\\Seen"]),
+          size: 512,
+          internalDate: new Date("2026-05-01T00:00:00.000Z"),
+          envelope: {
+            from: [{ name: "Promo", address: "promo@example.com" }],
+            subject: "Old promotion",
+            date: new Date("2026-05-01T00:00:00.000Z"),
+          },
+        }]);
+      },
+    };
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => client,
+      maxRecommendedScanLimit: 1,
+    });
+
+    const message = await provider.fetchMessage({
+      provider: "qqmail",
+      accountAlias: "masked@qq.com",
+      folder: "INBOX",
+      uid: "2048",
+      uidValidity: "999",
+    });
+
+    expect(fetchCalls).toEqual([{
+      range: "2048",
+      query: { envelope: true, flags: true, internalDate: true, size: true, uid: true },
+      options: { uid: true },
+    }]);
+    expect(message).toMatchObject({
+      ref: {
+        provider: "qqmail",
+        accountAlias: "masked@qq.com",
+        folder: "INBOX",
+        uid: "2048",
+        uidValidity: "999",
+      },
+      from: "Promo <promo@example.com>",
+      subject: "Old promotion",
+      bodyText: "",
+    });
+  });
+
   it("wraps QQ IMAP command failures with operation context", async () => {
     const client = {
       connect: async () => undefined,

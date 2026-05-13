@@ -255,6 +255,8 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           accountAlias: capability?.accountAlias ?? "demo",
           configSource: "provider",
           mutationAllowed: false,
+          mutationCapable: capability?.supportsMutation ?? false,
+          mutationRequiresConfirmation: capability?.supportsMutation ?? false,
           metadataSampleLimit: capability?.maxRecommendedScanLimit ?? 1,
           statusWarnings: [],
         },

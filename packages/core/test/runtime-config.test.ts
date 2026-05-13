@@ -16,6 +16,8 @@ describe("runtime config", () => {
       accountAlias: "demo",
       configSource: "defaults",
       mutationAllowed: false,
+      mutationCapable: false,
+      mutationRequiresConfirmation: false,
       metadataSampleLimit: 1,
       statusWarnings: [],
     });
@@ -36,6 +38,8 @@ describe("runtime config", () => {
     expect(config.accountAlias).toBe("25***@qq.com");
     expect(config.configSource).toBe("env");
     expect(config.mutationAllowed).toBe(true);
+    expect(config.mutationCapable).toBe(true);
+    expect(config.mutationRequiresConfirmation).toBe(true);
     expect(config.metadataSampleLimit).toBe(3);
     expect(config.qqmail).toMatchObject({
       email: "25abc@qq.com",
@@ -53,6 +57,8 @@ describe("runtime config", () => {
     });
 
     expect(config.mutationAllowed).toBe(true);
+    expect(config.mutationCapable).toBe(true);
+    expect(config.mutationRequiresConfirmation).toBe(true);
     expect(JSON.stringify(config)).not.toContain("secret");
   });
 

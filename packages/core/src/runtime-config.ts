@@ -10,6 +10,8 @@ export interface QFerryRuntimeConfig {
   accountAlias: string;
   configSource: string;
   mutationAllowed: boolean;
+  mutationCapable: boolean;
+  mutationRequiresConfirmation: boolean;
   metadataSampleLimit: number;
   statusWarnings: string[];
   qqmail?: {
@@ -60,6 +62,8 @@ export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInpu
       accountAlias: "demo",
       configSource,
       mutationAllowed: false,
+      mutationCapable: false,
+      mutationRequiresConfirmation: false,
       metadataSampleLimit: 1,
       statusWarnings: [],
     };
@@ -84,6 +88,8 @@ export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInpu
     accountAlias: email ? maskEmail(email) : "<account-missing>",
     configSource,
     mutationAllowed: true,
+    mutationCapable: true,
+    mutationRequiresConfirmation: true,
     metadataSampleLimit,
     statusWarnings,
     qqmail: {
@@ -172,6 +178,8 @@ function buildRuntimeConfig(
       accountAlias: "demo",
       configSource,
       mutationAllowed: false,
+      mutationCapable: false,
+      mutationRequiresConfirmation: false,
       metadataSampleLimit: 1,
       statusWarnings: [],
     };
@@ -196,6 +204,8 @@ function buildRuntimeConfig(
     accountAlias: email ? maskEmail(email) : "<account-missing>",
     configSource,
     mutationAllowed: true,
+    mutationCapable: true,
+    mutationRequiresConfirmation: true,
     metadataSampleLimit,
     statusWarnings,
     qqmail: {

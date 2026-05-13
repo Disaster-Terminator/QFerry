@@ -153,12 +153,28 @@ export class QqReadOnlyProvider implements MailProvider {
     if (ref.provider !== "qqmail") {
       throw new Error(`QQ provider cannot fetch ${ref.provider} message refs`);
     }
-    const messages = await this.scanMailboxMetadata({ folder: ref.folder, limit: this.maxRecommendedScanLimit });
-    const found = messages.find((message) => message.ref.uid === ref.uid);
-    if (!found) {
-      throw new Error(`QQ message not found in bounded read-only scan: ${ref.folder}/${ref.uid}`);
-    }
-    return { ...found, bodyText: "" };
+    const uid = parseUid(ref.uid);
+
+    return this.withClient("fetch_message", async (client) => {
+      const mailbox = await client.mailboxOpen(ref.folder, { readOnly: true });
+      assertUidValidity(ref, mailbox.uidValidity);
+      for await (const message of client.fetch(
+        String(uid),
+        { envelope: true, flags: true, internalDate: true, size: true, uid: true },
+        { uid: true },
+      )) {
+        return {
+          ...toMessageSummary({
+            accountAlias: this.input.accountAlias,
+            folder: ref.folder,
+            uidValidity: mailbox.uidValidity,
+            message,
+          }),
+          bodyText: "",
+        };
+      }
+      throw new Error(`QQ message not found by UID: ${ref.folder}/${ref.uid}`);
+    });
   }
 
   protected createClient(): QqReadOnlyClient {
@@ -280,6 +296,22 @@ function toMessageSummary(input: {
     snippet: input.message.size === undefined ? "" : `size=${input.message.size}`,
     flags: input.message.flags ? [...input.message.flags] : [],
   };
+}
+
+function assertUidValidity(ref: MessageRef, mailboxUidValidity: bigint | number | string | undefined): void {
+  if (ref.uidValidity === undefined || mailboxUidValidity === undefined) return;
+  const current = String(mailboxUidValidity);
+  if (ref.uidValidity !== current) {
+    throw new Error(`UIDVALIDITY mismatch for ${ref.folder}: expected ${ref.uidValidity}, got ${current}`);
+  }
+}
+
+function parseUid(uid: string): number {
+  const value = Number(uid);
+  if (!Number.isSafeInteger(value) || value <= 0 || String(value) !== uid) {
+    throw new Error(`Invalid QQ message UID: ${uid}`);
+  }
+  return value;
 }
 
 function formatAddress(address?: { name?: string; address?: string }): string {

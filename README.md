@@ -70,7 +70,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 - QFerry MCP server 通过插件目录里的 `./mcp-bootstrap.mjs` 启动，再加载 plugin-local `./dist/mcp.cjs`。
 - `mcp-bootstrap.mjs` 会把运行 cwd 切到用户状态目录，避免 Windows 下 MCP 进程占住插件缓存目录，导致插件详情、升级或卸载失败。
 - fixture provider 可调用 `get_status`、`list_mailboxes`、`get_mailbox_summary`、`search`、`classify_messages`、`triage_inbox`、`group_spam_candidates`、`plan_cleanup`。
-- QQ Mail provider 可调用 `get_status`、`get_capability_snapshot`、`list_mailboxes`、`get_mailbox_summary`、bounded `search`、`triage_inbox` 和 `group_spam_candidates`。
+- QQ Mail provider 可调用 `get_status`、`get_capability_snapshot`、`list_mailboxes`、`get_mailbox_summary`、bounded `search`、按 UID `fetch`、`triage_inbox` 和 `group_spam_candidates`。
 - 每次 e2e 留下 trace artifacts，方便验收回溯。
 
 ## 当前能力
@@ -80,6 +80,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 | 文件夹读取 | 读取 QQ 邮箱文件夹列表 |
 | 文件夹摘要 | 只读读取文件夹邮件数量，类似 Gmail label counts |
 | 小批量扫描 | 对 QQ 邮箱执行 bounded metadata search |
+| 单封读取 | 按 `folder + uid + uidValidity` 精确读取选中邮件 metadata，不靠 bounded scan 回查 |
 | 分类规则 | 用内联规则或 `qferry.rules.json` 把邮件归入用户定义的 group |
 | 收件箱整理报告 | `triage_inbox` 汇总 groupCounts、样本数、建议下一步 |
 | 垃圾/广告候选 | `group_spam_candidates` 从最旧 metadata 开始分组明显垃圾/广告，先给用户确认 |
@@ -117,6 +118,8 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 ```
 
 真实 mutation e2e 只用于用户明确授权的小批量验证，必须在 trace 和 summary 中记录 preview plan、`confirm_cleanup_plan`、`execute_cleanup`、目标文件夹和 `mutationsAttempted`。
+
+`get_status` 会同时暴露兼容字段 `mutationAllowed` 和更精确的 `mutationCapable` / `mutationRequiresConfirmation`。真实 QQ 邮箱可以具备 mutation 能力，但任何 mutation 都仍需要 preview plan、用户确认和 server-side `operationPlanId`。
 
 ## 测试留痕
 

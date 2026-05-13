@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -128,6 +129,8 @@ async function main() {
     afterTargetExists: undefined,
     candidateOffset: undefined,
     planStatus: undefined,
+    statusMutationCapable: undefined,
+    statusMutationRequiresConfirmation: undefined,
     operationPlanIds: [],
     moved: 0,
     mutationsAttempted: 0,
@@ -174,8 +177,12 @@ async function main() {
     toolName: "get_status",
     statusProvider: status.structuredContent?.status?.provider,
     statusConfigSource: status.structuredContent?.status?.configSource,
+    statusMutationCapable: status.structuredContent?.status?.mutationCapable,
+    statusMutationRequiresConfirmation: status.structuredContent?.status?.mutationRequiresConfirmation,
     statusWarnings: status.structuredContent?.status?.statusWarnings,
   });
+  state.statusMutationCapable = status.structuredContent?.status?.mutationCapable;
+  state.statusMutationRequiresConfirmation = status.structuredContent?.status?.mutationRequiresConfirmation;
 
   const beforeInbox = await callToolWithTrace(client, "get_mailbox_summary", { folder: "INBOX" }, tracePath, baseEvent);
   state.beforeInboxExists = beforeInbox.structuredContent?.mailbox?.exists;
@@ -388,22 +395,36 @@ function extractCandidateRefs(groups) {
     .filter((ref) => ref && typeof ref === "object");
 }
 
-function summarizeSampledMessages(messages) {
+export function summarizeSampledMessages(messages) {
   if (!Array.isArray(messages)) return [];
   return messages.slice(0, 10).map((message) => ({
     uid: message?.ref?.uid,
-    from: message?.from,
-    subject: message?.subject,
+    fromDomain: extractEmailDomain(message?.from),
+    subjectHash: hashText(message?.subject),
+    subjectLength: String(message?.subject ?? "").length,
     date: message?.date,
     flags: message?.flags,
   }));
 }
 
-function spamRules() {
+function extractEmailDomain(value) {
+  const match = String(value ?? "").match(/@([^>\s]+)/);
+  return match ? match[1].toLocaleLowerCase() : "<unknown>";
+}
+
+function hashText(value) {
+  return createHash("sha256").update(String(value ?? "")).digest("hex").slice(0, 12);
+}
+
+export function spamRules() {
   const rules = [
     { id: "ad-subject", groupId: "ads_or_spam", match: { subjectIncludes: "广告" } },
+    { id: "ad-tag-subject", groupId: "ads_or_spam", match: { subjectIncludes: "(AD)" } },
     { id: "promo-subject", groupId: "ads_or_spam", match: { subjectIncludes: "优惠" } },
     { id: "unsubscribe-subject", groupId: "ads_or_spam", match: { subjectIncludes: "退订" } },
+    { id: "wargaming-promo-from", groupId: "ads_or_spam", match: { fromIncludes: "@prm.wargaming.net" } },
+    { id: "epic-games-store-from", groupId: "ads_or_spam", match: { fromIncludes: "store@mail.epicgames.com" } },
+    { id: "sony-crm-promo-from", groupId: "ads_or_spam", match: { fromIncludes: "sony_crm@postermaster.sony.com.cn" } },
     { id: "windows-engage", groupId: "ads_or_spam", match: { fromIncludes: "engage.windows.com" } },
     { id: "newsletter-from", groupId: "ads_or_spam", match: { fromIncludes: "newsletter" } },
     { id: "digest-subject", groupId: "ads_or_spam", match: { subjectIncludes: "digest" } },
@@ -438,6 +459,8 @@ async function writeSummary(state) {
       `- selectedRef: ${JSON.stringify(state.candidate ?? null)}`,
       `- movedRefs: ${JSON.stringify(state.movedRefs)}`,
       `- planStatus: ${state.planStatus ?? "<none>"}`,
+      `- statusMutationCapable: ${state.statusMutationCapable ?? "<missing>"}`,
+      `- statusMutationRequiresConfirmation: ${state.statusMutationRequiresConfirmation ?? "<missing>"}`,
       `- operationPlanIds: ${JSON.stringify(state.operationPlanIds)}`,
       `- mutationsAttempted: ${state.mutationsAttempted}`,
       `- moved: ${state.moved}`,
@@ -466,7 +489,9 @@ function printResult(runId, mutationsAttempted, tracePath, summaryPath, noCandid
   }, null, 2)}\n`);
 }
 
-await main().catch(async (error) => {
-  await recordFailure(error);
-  throw error;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main().catch(async (error) => {
+    await recordFailure(error);
+    throw error;
+  });
+}

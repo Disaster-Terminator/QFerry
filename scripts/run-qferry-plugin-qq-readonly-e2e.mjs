@@ -170,6 +170,8 @@ async function main() {
     toolName: "get_status",
     statusProvider: status.structuredContent?.status?.provider,
     statusConfigSource: status.structuredContent?.status?.configSource,
+    statusMutationCapable: status.structuredContent?.status?.mutationCapable,
+    statusMutationRequiresConfirmation: status.structuredContent?.status?.mutationRequiresConfirmation,
     statusWarnings: status.structuredContent?.status?.statusWarnings,
   });
 
@@ -484,6 +486,8 @@ async function main() {
       "- mutationsAttempted: 0",
       `- statusProvider: ${status.structuredContent?.status?.provider ?? "<missing>"}`,
       `- statusConfigSource: ${status.structuredContent?.status?.configSource ?? "<missing>"}`,
+      `- statusMutationCapable: ${status.structuredContent?.status?.mutationCapable ?? "<missing>"}`,
+      `- statusMutationRequiresConfirmation: ${status.structuredContent?.status?.mutationRequiresConfirmation ?? "<missing>"}`,
       `- statusWarnings: ${(status.structuredContent?.status?.statusWarnings ?? []).join("; ")}`,
       `- rulesFile: ${rulesFile}`,
       `- rulesetVersion: ${previewPlan.structuredContent?.ruleset?.version ?? "<missing>"}`,
