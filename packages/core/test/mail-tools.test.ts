@@ -701,6 +701,22 @@ describe("mail tools", () => {
         snippet: "size=100",
         flags: [],
       },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "5", uidValidity: "999" },
+        from: "Epic Games <help@acct.epicgames.com>",
+        subject: "您的 Epic Games 账号安全代码",
+        date: "2023-01-05T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "6", uidValidity: "999" },
+        from: "Epic Games <help@email.epicgames.com>",
+        subject: "Epic游戏商城协议更新",
+        date: "2023-01-06T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
     ];
     const scanInputs: unknown[] = [];
     const tools = createMailTools({
@@ -747,12 +763,13 @@ describe("mail tools", () => {
     ]);
     expect(result.preview).toMatchObject({
       provider: "qqmail",
-      scannedMessages: 4,
+      scannedMessages: 6,
       selectedMessageRefs: 2,
       categoryCounts: {
         high_confidence_marketing: 2,
         receipt_or_purchase: 1,
-        security_or_account: 1,
+        review: 1,
+        security_or_account: 2,
       },
       mutationsAttempted: 0,
     });

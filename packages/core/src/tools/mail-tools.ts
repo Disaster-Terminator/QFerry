@@ -1018,7 +1018,7 @@ function classifyBulkGovernanceMessage(message: MessageSummary): {
   const domain = extractSenderDomain(message.from);
   const text = `${message.from}\n${message.subject}\n${message.snippet}`.toLocaleLowerCase();
 
-  if (hasAny(domain, ["wargaming.net", "epicgames.com", "postermaster.sony.com.cn"])
+  if (hasAny(domain, ["wargaming.net", "postermaster.sony.com.cn"])
     || hasAny(text, ["广告", "(ad)", "优惠", "促销", "特卖", "礼物已到位", "登录游戏即可", "promotion", "promo"])) {
     return { categoryId: "high_confidence_marketing", confidence: "high", reason: "metadata matches known marketing sender or promotion subject pattern" };
   }
