@@ -197,12 +197,12 @@ export class QqReadOnlyProvider implements MailProvider {
   }
 
   private async withConnectedClient<T>(operation: string, fn: (client: QqReadOnlyClient) => Promise<T>): Promise<T> {
-    const client = this.createClient();
+    let client = this.createClient();
     try {
       if (this.hasConnected && this.connectionCooldownMs > 0) {
         await this.sleep(this.connectionCooldownMs);
       }
-      await this.connectClient(client);
+      client = await this.connectClient(client);
       this.hasConnected = true;
     } catch (error) {
       throw new QqProviderError({ operation, stage: "connect", cause: error });
@@ -216,15 +216,19 @@ export class QqReadOnlyProvider implements MailProvider {
     }
   }
 
-  private async connectClient(client: QqReadOnlyClient): Promise<void> {
+  private async connectClient(client: QqReadOnlyClient): Promise<QqReadOnlyClient> {
     try {
       await client.connect();
+      return client;
     } catch (error) {
       if (this.connectRetryDelayMs <= 0) {
         throw error;
       }
+      await client.logout().catch(() => undefined);
       await this.sleep(this.connectRetryDelayMs);
-      await client.connect();
+      const retryClient = this.createClient();
+      await retryClient.connect();
+      return retryClient;
     }
   }
 }

@@ -286,6 +286,7 @@ describe("QQ read-only provider", () => {
   it("retries transient QQ IMAP connection failures once", async () => {
     const sleeps: number[] = [];
     let connectAttempts = 0;
+    let clientCount = 0;
     const provider = new QqReadOnlyProvider({
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
@@ -293,24 +294,29 @@ describe("QQ read-only provider", () => {
       sleep: async (ms) => {
         sleeps.push(ms);
       },
-      clientFactory: () => ({
-        connect: async () => {
-          connectAttempts += 1;
-          if (connectAttempts === 1) {
-            throw new Error("Failed to establish connection in required time");
-          }
-        },
-        logout: async () => undefined,
-        list: async () => [{ path: "INBOX", delimiter: "/", flags: new Set<string>() }],
-        mailboxOpen: async () => ({ exists: 1, uidValidity: 1n }),
-        fetch: () => asyncMessages([]),
-      }),
+      clientFactory: () => {
+        clientCount += 1;
+        const clientNumber = clientCount;
+        return {
+          connect: async () => {
+            connectAttempts += 1;
+            if (clientNumber === 1) {
+              throw new Error("Failed to establish connection in required time");
+            }
+          },
+          logout: async () => undefined,
+          list: async () => [{ path: "INBOX", delimiter: "/", flags: new Set<string>() }],
+          mailboxOpen: async () => ({ exists: 1, uidValidity: 1n }),
+          fetch: () => asyncMessages([]),
+        };
+      },
     });
 
     await expect(provider.listMailboxes()).resolves.toEqual([
       { path: "INBOX", delimiter: "/", flags: [] },
     ]);
     expect(connectAttempts).toBe(2);
+    expect(clientCount).toBe(2);
     expect(sleeps).toEqual([500]);
   });
 });
