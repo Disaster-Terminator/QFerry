@@ -48,4 +48,5 @@ export interface MailProvider {
   fetchMessage(ref: MessageRef): Promise<MessageDetail>;
   getCapabilitySnapshot?(): Promise<ProviderCapabilitySnapshot>;
   getMailboxSummary?(folder: string): Promise<MailboxSummary>;
+  moveMessages?(refs: MessageRef[], targetFolder: string): Promise<{ moved: number }>;
 }

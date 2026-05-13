@@ -33,7 +33,6 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
     provider: "fixture",
     surface: "chatgpt-app-mcp",
     dryRun: true,
-    mutationAllowed: false,
   };
 
   await mkdir(artifactDir, { recursive: true });
@@ -53,7 +52,7 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
 
   await callToolWithTrace(trace, baseEvent, client, "list_mailboxes", {});
   await callToolWithTrace(trace, baseEvent, client, "search", { folder: "INBOX", limit: 10, query: "digest" });
-  await callToolWithTrace(trace, baseEvent, client, "plan_cleanup", {
+  const planResult = await callToolWithTrace(trace, baseEvent, client, "plan_cleanup", {
     runId,
     folder: "INBOX",
     limit: 10,
@@ -64,6 +63,18 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
     ],
     selectedGroupIds: ["archive"],
   });
+  const plan = (planResult.structuredContent as { plan?: unknown } | undefined)?.plan;
+  if (!plan) {
+    throw new Error("plan_cleanup did not return a plan");
+  }
+  const blockedExecute = await client.callTool({
+    name: "execute_cleanup",
+    arguments: { plan },
+  });
+  if (!blockedExecute.isError) {
+    throw new Error("execute_cleanup should be blocked in fixture e2e until the plan is confirmed");
+  }
+  await trace.write({ ...baseEvent, event: "mcp_tool_blocked", toolName: "execute_cleanup", mutationsAttempted: 0 });
 
   await client.close();
   await server.close();
@@ -74,9 +85,9 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
     "- provider: fixture",
     "- surface: chatgpt-app-mcp",
     "- dryRun: true",
-    "- mutationAllowed: false",
     "- mutationsAttempted: 0",
-    "- toolsCalled: 3",
+    "- toolsCalled: 4",
+    "- executeCleanupBlocked: true",
     `- trace: ${tracePath}`,
     "",
   ].join("\n");
@@ -97,7 +108,7 @@ async function callToolWithTrace(
   client: Client,
   name: string,
   args: Record<string, unknown>,
-): Promise<void> {
+): Promise<Awaited<ReturnType<Client["callTool"]>>> {
   const result = await client.callTool({ name, arguments: args });
   await trace.write({
     ...baseEvent,
@@ -105,6 +116,7 @@ async function callToolWithTrace(
     toolName: name,
     structuredContentKeys: Object.keys(result.structuredContent ?? {}),
   });
+  return result;
 }
 
 async function main(): Promise<void> {

@@ -28,6 +28,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "triage_inbox",
       "group_spam_candidates",
       "plan_cleanup",
+      "execute_cleanup",
     ]);
     expect(tools.tools.find((tool) => tool.name === "get_status")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_mailbox_summary")?.annotations?.readOnlyHint).toBe(true);
@@ -36,6 +37,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "group_spam_candidates")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_capability_snapshot")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "execute_cleanup")?.annotations?.destructiveHint).toBe(true);
 
     await client.close();
     await server.close();
@@ -206,6 +208,39 @@ describe("QFerry ChatGPT App MCP server", () => {
         ],
       },
     });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("blocks execute cleanup through the MCP server until the plan is confirmed", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "execute_cleanup",
+      arguments: {
+        plan: {
+          operationPlanId: "op-test",
+          runId: "run-test",
+          provider: "fixture",
+          action: "move",
+          status: "preview",
+          confirmationRequired: true,
+          messageRefs: [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }],
+          target: { folder: "Archive" },
+        },
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("must be confirmed");
 
     await client.close();
     await server.close();

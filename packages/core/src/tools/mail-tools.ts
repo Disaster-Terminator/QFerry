@@ -37,6 +37,19 @@ export interface GroupSpamCandidatesInput {
   rulesFile?: string;
 }
 
+export interface ExecuteCleanupInput {
+  plan: OperationPlan;
+}
+
+export interface ExecuteCleanupResult {
+  operationPlanId: string;
+  status: "blocked" | "executed";
+  action: OperationAction;
+  attemptedMessages: number;
+  mutationsAttempted: number;
+  moved?: number;
+}
+
 export interface SpamCandidate {
   message: MessageSummary;
   groupId: string;
@@ -92,6 +105,7 @@ export interface MailTools {
     classifications: MessageClassification[];
     mutationsAttempted: 0;
   }>;
+  executeCleanup(input: ExecuteCleanupInput): Promise<{ result: ExecuteCleanupResult }>;
   planCleanup(input: PlanCleanupInput): Promise<{
     plan: OperationPlan;
     classifications: MessageClassification[];
@@ -223,6 +237,41 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         groups: groupSpamCandidates(messages, spamClassifications),
         classifications,
         mutationsAttempted: 0,
+      };
+    },
+
+    async executeCleanup(executeInput) {
+      const plan = executeInput.plan;
+      if (plan.status !== "confirmed") {
+        throw new Error("Operation plan must be confirmed before execution");
+      }
+      const capability = input.provider.getCapabilitySnapshot
+        ? await input.provider.getCapabilitySnapshot()
+        : undefined;
+      if (!capability?.supportsMutation) {
+        throw new Error("Provider does not support mailbox mutation");
+      }
+      if (plan.action !== "move") {
+        throw new Error(`Unsupported execute_cleanup action: ${plan.action}`);
+      }
+      const targetFolder = plan.target?.folder;
+      if (!targetFolder) {
+        throw new Error("Move execution requires target.folder");
+      }
+      if (!input.provider.moveMessages) {
+        throw new Error("Provider does not implement moveMessages");
+      }
+
+      const moveResult = await input.provider.moveMessages(plan.messageRefs, targetFolder);
+      return {
+        result: {
+          operationPlanId: plan.operationPlanId,
+          status: "executed",
+          action: plan.action,
+          attemptedMessages: plan.messageRefs.length,
+          mutationsAttempted: plan.messageRefs.length,
+          moved: moveResult.moved,
+        },
       };
     },
 

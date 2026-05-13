@@ -32,7 +32,7 @@ describe("runtime config", () => {
     expect(config.provider).toBe("qqmail");
     expect(config.accountAlias).toBe("25***@qq.com");
     expect(config.configSource).toBe("env");
-    expect(config.mutationAllowed).toBe(false);
+    expect(config.mutationAllowed).toBe(true);
     expect(config.metadataSampleLimit).toBe(3);
     expect(config.qqmail).toMatchObject({
       email: "25abc@qq.com",
@@ -41,6 +41,16 @@ describe("runtime config", () => {
       imapPort: 993,
     });
     expect(JSON.stringify(config)).not.toContain("secret-auth-code");
+  });
+
+  it("does not require an extra env gate beyond MCP destructive-tool approval", async () => {
+    const config = await loadQFerryRuntimeConfig({
+      env: { QFERRY_PROVIDER: "qqmail", QQMAIL_EMAIL: "25abc@qq.com", QQMAIL_KEY: "secret" },
+      readFile: async () => undefined,
+    });
+
+    expect(config.mutationAllowed).toBe(true);
+    expect(JSON.stringify(config)).not.toContain("secret");
   });
 
   it("loads local JSON config when env provider is not set", async () => {

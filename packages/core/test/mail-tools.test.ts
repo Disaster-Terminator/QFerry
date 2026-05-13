@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 
 import { createMailTools } from "../src/tools/mail-tools.js";
 import { FixtureMailProvider } from "../src/providers/fixture-provider.js";
+import { confirmOperationPlan } from "../src/operation-plan.js";
 
 describe("mail tools", () => {
   it("lists mailboxes through the provider", async () => {
@@ -256,6 +257,90 @@ describe("mail tools", () => {
     expect(result.plan.messageRefs).toEqual([
       { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
     ]);
+  });
+
+  it("rejects execute cleanup for unconfirmed preview plans", async () => {
+    const provider = FixtureMailProvider.demo();
+    const tools = createMailTools({
+      provider,
+      runtimeConfig: {
+        provider: "fixture",
+        accountAlias: "demo",
+        configSource: "test",
+        mutationAllowed: false,
+        metadataSampleLimit: 10,
+        statusWarnings: [],
+      },
+    });
+    const plan = await tools.planCleanup({
+      runId: "run-execute-preview",
+      folder: "INBOX",
+      limit: 10,
+      action: "move",
+      target: { folder: "Archive" },
+      rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+      selectedGroupIds: ["archive"],
+    });
+
+    await expect(tools.executeCleanup({ plan: plan.plan })).rejects.toThrow(/must be confirmed/);
+  });
+
+  it("executes confirmed move plans through a mutation-capable provider", async () => {
+    const provider = FixtureMailProvider.demo();
+    let movedRefs: unknown[] = [];
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        scanMailboxMetadata: provider.scanMailboxMetadata.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async (refs, targetFolder) => {
+          movedRefs = refs;
+          expect(targetFolder).toBe("Archive");
+          return { moved: refs.length };
+        },
+      },
+      runtimeConfig: {
+        provider: "fixture",
+        accountAlias: "demo",
+        configSource: "test",
+        mutationAllowed: true,
+        metadataSampleLimit: 10,
+        statusWarnings: [],
+      },
+    });
+    const preview = await tools.planCleanup({
+      runId: "run-execute-confirmed",
+      folder: "INBOX",
+      limit: 10,
+      action: "move",
+      target: { folder: "Archive" },
+      rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+      selectedGroupIds: ["archive"],
+    });
+    const confirmed = confirmOperationPlan(preview.plan, preview.plan.operationPlanId);
+
+    const result = await tools.executeCleanup({ plan: confirmed });
+
+    expect(result.result).toMatchObject({
+      operationPlanId: confirmed.operationPlanId,
+      status: "executed",
+      action: "move",
+      attemptedMessages: 1,
+      mutationsAttempted: 1,
+      moved: 1,
+    });
+    expect(movedRefs).toEqual([{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" }]);
   });
 
   it("creates preview cleanup plans from a rules file and returns ruleset metadata", async () => {

@@ -74,7 +74,6 @@ async function recordFailure(error) {
       `- accountAlias: ${failureContext.baseEvent.accountAlias}`,
       "- surface: codex-plugin",
       "- dryRun: true",
-      "- mutationAllowed: false",
       "- mutationsAttempted: 0",
       "- ok: false",
       `- errorType: ${errorInfo.type}`,
@@ -121,7 +120,6 @@ async function main() {
     accountAlias: maskEmail(qqEmail),
     surface: "codex-plugin",
     dryRun: true,
-    mutationAllowed: false,
     sampleLimit: 1,
     candidateLimit,
   };
@@ -142,7 +140,6 @@ async function main() {
       ...process.env,
       ...(serverConfig.env ?? {}),
       QFERRY_PROVIDER: "qqmail",
-      QFERRY_MUTATION_ALLOWED: "0",
       QFERRY_METADATA_SAMPLE_LIMIT: String(candidateLimit),
       QQMAIL_METADATA_SAMPLE_LIMIT: String(candidateLimit),
       QQMAIL_EMAIL: qqEmail,
@@ -280,6 +277,21 @@ async function main() {
     mutationsAttempted: previewPlan.structuredContent?.mutationsAttempted,
   });
 
+  const blockedExecute = await client.callTool({
+    name: "execute_cleanup",
+    arguments: { plan: previewPlan.structuredContent?.plan },
+  });
+  if (!blockedExecute.isError) {
+    throw new Error("QFerry plugin execute_cleanup was expected to be blocked until the plan is confirmed");
+  }
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_blocked",
+    toolName: "execute_cleanup",
+    reason: "plan_not_confirmed",
+    mutationsAttempted: 0,
+  });
+
   await client.close();
 
   await writeFile(
@@ -291,7 +303,6 @@ async function main() {
       `- accountAlias: ${maskEmail(qqEmail)}`,
       "- surface: codex-plugin",
       "- dryRun: true",
-      "- mutationAllowed: false",
       "- mutationsAttempted: 0",
       `- statusProvider: ${status.structuredContent?.status?.provider ?? "<missing>"}`,
       `- statusConfigSource: ${status.structuredContent?.status?.configSource ?? "<missing>"}`,
@@ -308,6 +319,7 @@ async function main() {
       `- triageSampledMessages: ${triage.structuredContent?.triage?.sampledMessages ?? "<missing>"}`,
       `- previewPlanStatus: ${previewPlan.structuredContent?.plan?.status ?? "<missing>"}`,
       `- previewPlanMessageRefs: ${previewPlan.structuredContent?.plan?.messageRefs?.length ?? "<missing>"}`,
+      `- executeCleanupBlocked: ${blockedExecute.isError === true}`,
       `- trace: ${tracePath}`,
       `- mcpConfig: ${mcpConfigPath}`,
       `- stderrBytes: ${stderrChunks.join("").length}`,

@@ -9,11 +9,11 @@ import type {
   ScanMailboxMetadataInput,
 } from "./types.js";
 
-interface QqReadOnlyClient {
+export interface QqReadOnlyClient {
   connect(): Promise<void>;
   logout(): Promise<void>;
   list(): Promise<Array<{ path: string; delimiter?: string; flags?: Set<string> }>>;
-  mailboxOpen(path: string, options?: { readOnly?: boolean }): Promise<{ exists: number; uidValidity?: bigint | number | string }>;
+  mailboxOpen(path: string, options?: { readOnly?: boolean }): Promise<{ exists: number; uidValidity?: bigint | number | string; readOnly?: boolean }>;
   fetch(range: string, query: Record<string, unknown>, options?: Record<string, unknown>): AsyncIterable<{
     uid: number;
     flags?: Set<string>;
@@ -25,6 +25,7 @@ interface QqReadOnlyClient {
       date?: Date;
     };
   }>;
+  messageMove?(range: string | number[], destination: string, options?: { uid?: boolean }): Promise<{ uidMap?: Map<number, number> } | false>;
 }
 
 export interface QqReadOnlyProviderInput {
@@ -121,7 +122,7 @@ export class QqReadOnlyProvider implements MailProvider {
     return { ...found, bodyText: "" };
   }
 
-  private createClient(): QqReadOnlyClient {
+  protected createClient(): QqReadOnlyClient {
     if (this.input.clientFactory) {
       return this.input.clientFactory();
     }
@@ -138,7 +139,7 @@ export class QqReadOnlyProvider implements MailProvider {
     }) as unknown as QqReadOnlyClient;
   }
 
-  private async withClient<T>(fn: (client: QqReadOnlyClient) => Promise<T>): Promise<T> {
+  protected async withClient<T>(fn: (client: QqReadOnlyClient) => Promise<T>): Promise<T> {
     const client = this.createClient();
     await client.connect();
     try {

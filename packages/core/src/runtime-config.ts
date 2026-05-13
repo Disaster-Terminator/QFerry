@@ -9,7 +9,7 @@ export interface QFerryRuntimeConfig {
   provider: QFerryProviderName;
   accountAlias: string;
   configSource: string;
-  mutationAllowed: false;
+  mutationAllowed: boolean;
   metadataSampleLimit: number;
   statusWarnings: string[];
   qqmail?: {
@@ -74,7 +74,7 @@ export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInpu
     provider: "qqmail",
     accountAlias: email ? maskEmail(email) : "<account-missing>",
     configSource,
-    mutationAllowed: false,
+    mutationAllowed: true,
     metadataSampleLimit,
     statusWarnings,
     qqmail: {
@@ -157,7 +157,7 @@ function buildRuntimeConfig(
     provider: "qqmail",
     accountAlias: email ? maskEmail(email) : "<account-missing>",
     configSource,
-    mutationAllowed: false,
+    mutationAllowed: true,
     metadataSampleLimit,
     statusWarnings,
     qqmail: {

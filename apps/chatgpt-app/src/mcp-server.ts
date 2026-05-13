@@ -5,7 +5,7 @@ import {
   createMailTools,
   FixtureMailProvider,
   loadQFerryRuntimeConfigSync,
-  QqReadOnlyProvider,
+  QqMutableProvider,
   type MailProvider,
   type MessageRef,
   type QFerryRuntimeConfig,
@@ -30,6 +30,17 @@ const classificationRuleSchema = z.object({
     folderEquals: z.string().optional(),
     hasFlag: z.string().optional(),
   }),
+});
+
+const operationPlanSchema = z.object({
+  operationPlanId: z.string(),
+  runId: z.string(),
+  provider: z.enum(["fixture", "qqmail", "gmail"]),
+  action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
+  status: z.enum(["preview", "confirmed"]),
+  confirmationRequired: z.boolean(),
+  messageRefs: z.array(messageRefSchema),
+  target: z.record(z.string(), z.string()).optional(),
 });
 
 export function createQFerryMcpServer(): McpServer {
@@ -179,6 +190,19 @@ export function createQFerryMcpServer(): McpServer {
     async (input) => toToolResult(await tools.planCleanup(input)),
   );
 
+  server.registerTool(
+    "execute_cleanup",
+    {
+      title: "Execute cleanup",
+      description: "Use this only after a cleanup plan is explicitly confirmed. Only move actions are currently supported.",
+      inputSchema: {
+        plan: operationPlanSchema,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async (input) => toToolResult(await tools.executeCleanup(input)),
+  );
+
   return server;
 }
 
@@ -193,7 +217,7 @@ function createProviderFromConfig(runtimeConfig: QFerryRuntimeConfig): MailProvi
     return new UnavailableMailProvider(runtimeConfig);
   }
 
-  return new QqReadOnlyProvider({
+  return new QqMutableProvider({
     accountAlias: runtimeConfig.accountAlias,
     host: runtimeConfig.qqmail?.imapHost || "imap.qq.com",
     port: runtimeConfig.qqmail?.imapPort || 993,

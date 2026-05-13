@@ -44,7 +44,6 @@ async function main() {
     provider: "fixture",
     surface: "codex-plugin",
     dryRun: true,
-    mutationAllowed: false,
   };
   await mkdir(artifactDir, { recursive: true });
   await writeJsonl(tracePath, {
@@ -106,6 +105,7 @@ async function main() {
   let triageResult;
   let spamCandidatesResult;
   let planResult;
+  let blockedExecuteResult;
 
   for (const [name, args] of calls) {
     const result = await callToolWithStructuredContent(client, name, args);
@@ -128,6 +128,21 @@ async function main() {
     });
   }
 
+  blockedExecuteResult = await client.callTool({
+    name: "execute_cleanup",
+    arguments: { plan: planResult.plan },
+  });
+  if (!blockedExecuteResult.isError) {
+    throw new Error("QFerry plugin execute_cleanup was expected to be blocked until the plan is confirmed");
+  }
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_blocked",
+    toolName: "execute_cleanup",
+    reason: "plan_not_confirmed",
+    mutationsAttempted: 0,
+  });
+
   await client.close();
 
   await writeFile(
@@ -138,7 +153,6 @@ async function main() {
       "- provider: fixture",
       "- surface: codex-plugin",
       "- dryRun: true",
-      "- mutationAllowed: false",
       "- mutationsAttempted: 0",
       `- statusProvider: ${statusResult?.status?.provider ?? "<missing>"}`,
       `- statusConfigSource: ${statusResult?.status?.configSource ?? "<missing>"}`,
@@ -148,7 +162,8 @@ async function main() {
       `- rulesetVersion: ${classifyResult?.ruleset?.version ?? "<missing>"}`,
       `- rulesetRuleCount: ${classifyResult?.ruleset?.ruleCount ?? "<missing>"}`,
       `- toolsListed: ${tools.tools.length}`,
-      `- toolsCalled: ${calls.length}`,
+      `- toolsCalled: ${calls.length + 1}`,
+      `- executeCleanupBlocked: ${blockedExecuteResult?.isError === true}`,
       `- triageGroupCounts: ${JSON.stringify(triageResult?.triage?.groupCounts ?? {})}`,
       `- triageSampledMessages: ${triageResult?.triage?.sampledMessages ?? "<missing>"}`,
       `- spamCandidateGroups: ${JSON.stringify(Object.keys(spamCandidatesResult?.groups ?? {}))}`,
