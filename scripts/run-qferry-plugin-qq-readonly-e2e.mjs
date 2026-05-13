@@ -409,6 +409,34 @@ async function main() {
     mutationsAttempted: senderGovernance.structuredContent?.mutationsAttempted,
   });
 
+  const classificationMap = await callToolWithTrace(
+    client,
+    "classification_map",
+    {
+      folder: "INBOX",
+      pageSize: candidateLimit,
+      maxPages: 10,
+      order: "oldest",
+    },
+    tracePath,
+    baseEvent,
+  );
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "classification_map",
+    pagesScanned: classificationMap.structuredContent?.map?.pagesScanned,
+    scannedMessages: classificationMap.structuredContent?.map?.scannedMessages,
+    categoryCounts: classificationMap.structuredContent?.map?.categoryCounts,
+    buckets: classificationMap.structuredContent?.map?.buckets?.map((bucket) => ({
+      categoryId: bucket.categoryId,
+      messageCount: bucket.messageCount,
+      recommendedAction: bucket.recommendedAction,
+    })),
+    planPresent: Boolean(classificationMap.structuredContent?.plan),
+    mutationsAttempted: classificationMap.structuredContent?.mutationsAttempted,
+  });
+
   const bulkGovernance = await callToolWithTrace(
     client,
     "bulk_governance_preview",
@@ -552,6 +580,10 @@ async function main() {
       `- senderGovernanceSkippedDuplicates: ${senderGovernance.structuredContent?.rulesetPatch?.skippedDuplicateRules?.length ?? "<missing>"}`,
       `- senderGovernanceRenderedDraftRules: ${senderGovernance.structuredContent?.rulesetPatch?.renderedDraft?.rules?.length ?? "<missing>"}`,
       `- senderGovernanceChangelogLines: ${countLines(senderGovernance.structuredContent?.rulesetPatch?.changelog)}`,
+      `- classificationMapScannedMessages: ${classificationMap.structuredContent?.map?.scannedMessages ?? "<missing>"}`,
+      `- classificationMapBuckets: ${JSON.stringify((classificationMap.structuredContent?.map?.buckets ?? []).map((bucket) => bucket.categoryId))}`,
+      `- classificationMapCategoryCounts: ${JSON.stringify(classificationMap.structuredContent?.map?.categoryCounts ?? {})}`,
+      `- classificationMapPlanPresent: ${Boolean(classificationMap.structuredContent?.plan)}`,
       `- bulkGovernanceScannedMessages: ${bulkGovernance.structuredContent?.preview?.scannedMessages ?? "<missing>"}`,
       `- bulkGovernanceSelectedRefs: ${bulkGovernance.structuredContent?.preview?.selectedMessageRefs ?? "<missing>"}`,
       `- bulkGovernanceCategoryCounts: ${JSON.stringify(bulkGovernance.structuredContent?.preview?.categoryCounts ?? {})}`,

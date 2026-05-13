@@ -99,7 +99,20 @@ examples/qferry.rules.json
 
 工具仍兼容直接传入内联 `rules`。真实 QQ 路径使用规则文件时仍然只生成 preview plan，不执行邮箱写操作。
 
-## 批量整理预览
+## 分类地图与批量整理预览
+
+`classification_map` 是 Gmail-like 大批量治理的默认入口。它跨页扫描 bounded metadata，按 sender/domain/content 分类为 `security_or_account`、`receipt_or_purchase`、`developer_community`、`newsletter_or_digest`、`high_confidence_marketing` 和 `review`，返回分类桶、桶内 sender/domain 候选、建议动作和统计值，但不生成 operation plan。
+
+验收时必须关注这些字段：
+
+- `map.pagesScanned`
+- `map.scannedMessages`
+- `map.categoryCounts`
+- `map.buckets[].categoryId`
+- `map.buckets[].recommendedAction`
+- `map.mutationsAttempted`
+
+真实 QQ read-only e2e 调用该工具时必须保持 `mutationsAttempted: 0`，并确认输出里没有 `plan` 或 `operationPlanId`。后续只有在用户选定分类桶后，才进入 `bulk_governance_preview` 或更窄的规则化 preview plan。
 
 `preview_cleanup_batch` 是 Codex 插件侧的规则化批量整理入口。它跨页扫描 bounded metadata，应用 `rules` 或 `rulesFile`，按 `selectedGroupIds` 选出候选邮件，并生成 `status: "preview"` 的 operation plan。
 
@@ -214,7 +227,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 QQ provider 的 `fetch` 必须按 `folder + uid + uidValidity` 精确读取选中邮件 metadata，不能依赖最新 bounded scan 回查 UID。
 
-Gmail-like 大批量治理验收优先走 `bulk_governance_preview`。该工具可以扫描较大 metadata 窗口并按 sender/domain/content 分类，但仍是 dry-run preview；真实 QQ mutation 只允许在用户明确授权后，对高置信广告/营销等小范围子集执行。
+Gmail-like 大批量治理验收优先走 `classification_map`，先把窗口邮件分成可解释分类桶并记录建议动作。`bulk_governance_preview` 只在选定具体分类桶后生成 dry-run preview plan；真实 QQ mutation 只允许在用户明确授权后，对高置信广告/营销等小范围子集执行。
 
 ## 部署后验收
 

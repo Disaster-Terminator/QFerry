@@ -292,6 +292,23 @@ export function createQFerryMcpServer(): McpServer {
   );
 
   server.registerTool(
+    "classification_map",
+    {
+      title: "Classification map",
+      description: "Use this first for Gmail-like mailbox governance: scan a bounded window, classify it into action buckets, and return no operation plan.",
+      inputSchema: {
+        folder: z.string(),
+        pageSize: z.number().int().min(1).max(50),
+        maxPages: z.number().int().min(1).max(500),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await tools.classificationMap(input)),
+  );
+
+  server.registerTool(
     "bulk_governance_preview",
     {
       title: "Bulk governance preview",

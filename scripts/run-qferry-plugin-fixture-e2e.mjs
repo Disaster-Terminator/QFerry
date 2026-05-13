@@ -122,6 +122,12 @@ async function main() {
       target: { folder: "Archive" },
       selectedSenderDomains: ["example.com"],
     }],
+    ["classification_map", {
+      folder: "INBOX",
+      pageSize: 2,
+      maxPages: 2,
+      order: "oldest",
+    }],
     ["bulk_governance_preview", {
       runId,
       folder: "INBOX",
@@ -143,6 +149,7 @@ async function main() {
   let planResult;
   let batchPreviewResult;
   let senderGovernanceResult;
+  let classificationMapResult;
   let bulkGovernanceResult;
   let rulesetPatchApplyResult;
   let blockedExecuteResult;
@@ -159,6 +166,7 @@ async function main() {
     if (name === "plan_cleanup") planResult = result.structuredContent;
     if (name === "preview_cleanup_batch") batchPreviewResult = result.structuredContent;
     if (name === "plan_sender_governance") senderGovernanceResult = result.structuredContent;
+    if (name === "classification_map") classificationMapResult = result.structuredContent;
     if (name === "bulk_governance_preview") bulkGovernanceResult = result.structuredContent;
     await writeJsonl(tracePath, {
       ...baseEvent,
@@ -171,6 +179,9 @@ async function main() {
       statusMutationRequiresConfirmation: result.structuredContent?.status?.mutationRequiresConfirmation,
       statusAuthConfigured: result.structuredContent?.status?.authConfigured,
       statusProviderReady: result.structuredContent?.status?.providerReady,
+      classificationMapBuckets: result.structuredContent?.map?.buckets?.map((bucket) => bucket.categoryId),
+      classificationMapCategoryCounts: result.structuredContent?.map?.categoryCounts,
+      classificationMapPlanPresent: result.structuredContent?.map ? Boolean(result.structuredContent?.plan) : undefined,
       sampledMessages: result.structuredContent?.triage?.sampledMessages,
       triageGroupCounts: result.structuredContent?.triage?.groupCounts,
       priorityCounts: result.structuredContent?.priorityCounts,
@@ -301,6 +312,10 @@ async function main() {
       `- senderGovernanceSkippedDuplicates: ${senderGovernanceResult?.rulesetPatch?.skippedDuplicateRules?.length ?? "<missing>"}`,
       `- senderGovernanceRenderedDraftRules: ${senderGovernanceResult?.rulesetPatch?.renderedDraft?.rules?.length ?? "<missing>"}`,
       `- senderGovernanceChangelogLines: ${countLines(senderGovernanceResult?.rulesetPatch?.changelog)}`,
+      `- classificationMapScannedMessages: ${classificationMapResult?.map?.scannedMessages ?? "<missing>"}`,
+      `- classificationMapBuckets: ${JSON.stringify((classificationMapResult?.map?.buckets ?? []).map((bucket) => bucket.categoryId))}`,
+      `- classificationMapCategoryCounts: ${JSON.stringify(classificationMapResult?.map?.categoryCounts ?? {})}`,
+      `- classificationMapPlanPresent: ${Boolean(classificationMapResult?.plan)}`,
       `- bulkGovernanceScannedMessages: ${bulkGovernanceResult?.preview?.scannedMessages ?? "<missing>"}`,
       `- bulkGovernanceSelectedRefs: ${bulkGovernanceResult?.preview?.selectedMessageRefs ?? "<missing>"}`,
       `- bulkGovernanceCategoryCounts: ${JSON.stringify(bulkGovernanceResult?.preview?.categoryCounts ?? {})}`,

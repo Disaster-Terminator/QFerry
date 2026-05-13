@@ -57,6 +57,16 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
 
   await callToolWithTrace(trace, baseEvent, client, "list_mailboxes", {});
   await callToolWithTrace(trace, baseEvent, client, "search", { folder: "INBOX", limit: 10, query: "digest" });
+  const classificationMapResult = await callToolWithTrace(trace, baseEvent, client, "classification_map", {
+    folder: "INBOX",
+    pageSize: 2,
+    maxPages: 2,
+    order: "oldest",
+  });
+  const classificationMap = classificationMapResult.structuredContent as {
+    map?: { scannedMessages?: number; buckets?: Array<{ categoryId: string }>; categoryCounts?: Record<string, number> };
+    plan?: unknown;
+  } | undefined;
   const planResult = await callToolWithTrace(trace, baseEvent, client, "plan_cleanup", {
     runId,
     folder: "INBOX",
@@ -91,7 +101,11 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
     "- surface: chatgpt-app-mcp",
     "- dryRun: true",
     "- mutationsAttempted: 0",
-    "- toolsCalled: 4",
+    "- toolsCalled: 5",
+    `- classificationMapScannedMessages: ${classificationMap?.map?.scannedMessages ?? "<missing>"}`,
+    `- classificationMapBuckets: ${JSON.stringify((classificationMap?.map?.buckets ?? []).map((bucket) => bucket.categoryId))}`,
+    `- classificationMapCategoryCounts: ${JSON.stringify(classificationMap?.map?.categoryCounts ?? {})}`,
+    `- classificationMapPlanPresent: ${Boolean(classificationMap?.plan)}`,
     "- executeCleanupBlocked: true",
     `- trace: ${tracePath}`,
     "",

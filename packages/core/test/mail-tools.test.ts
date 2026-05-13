@@ -792,6 +792,177 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("builds classification-first mailbox maps without creating operation plans", async () => {
+    const messages = [
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "1", uidValidity: "999" },
+        from: "Microsoft 帐户团队 <account-security-noreply@accountprotection.microsoft.com>",
+        subject: "Microsoft 帐户安全代码",
+        date: "2023-01-01T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "2", uidValidity: "999" },
+        from: "World of Warships <wows_sea@prm.wargaming.net>",
+        subject: "高级账号和补给箱——礼物已到位！",
+        date: "2023-01-02T00:00:00.000Z",
+        snippet: "size=100",
+        flags: ["\\Seen"],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "3", uidValidity: "999" },
+        from: "Steam Support <noreply@steampowered.com>",
+        subject: "感谢您在 Steam 上的购买！",
+        date: "2023-01-03T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "4", uidValidity: "999" },
+        from: "World of Warships <wows_sea@prm.wargaming.net>",
+        subject: "登录游戏即可领取礼物",
+        date: "2023-01-04T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "5", uidValidity: "999" },
+        from: "Epic Games <help@acct.epicgames.com>",
+        subject: "您的 Epic Games 账号安全代码",
+        date: "2023-01-05T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "6", uidValidity: "999" },
+        from: "Epic Games <help@email.epicgames.com>",
+        subject: "Epic游戏商城协议更新",
+        date: "2023-01-06T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "7", uidValidity: "999" },
+        from: "no-reply <no-reply@wargaming.net>",
+        subject: "您购买了“17,500达布隆”",
+        date: "2023-01-07T00:00:00.000Z",
+        snippet: "size=100",
+        flags: [],
+      },
+    ];
+    const scanInputs: unknown[] = [];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        getMailboxSummary: async (folder) => ({ path: folder, exists: messages.length, uidValidity: "999" }),
+        getCapabilitySnapshot: async () => ({
+          provider: "qqmail",
+          accountAlias: "25***@qq.com",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 50,
+        }),
+        scanMailboxMetadata: async (input) => {
+          scanInputs.push(input);
+          const offset = input.offset ?? 0;
+          return messages.slice(offset, offset + input.limit);
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.classificationMap({
+      folder: "INBOX",
+      pageSize: 2,
+      maxPages: 4,
+      order: "oldest",
+    });
+
+    expect(scanInputs).toEqual([
+      { folder: "INBOX", limit: 2, order: "oldest", offset: 0 },
+      { folder: "INBOX", limit: 2, order: "oldest", offset: 2 },
+      { folder: "INBOX", limit: 2, order: "oldest", offset: 4 },
+      { folder: "INBOX", limit: 2, order: "oldest", offset: 6 },
+    ]);
+    expect(result.map).toMatchObject({
+      provider: "qqmail",
+      scannedMessages: 7,
+      categoryCounts: {
+        high_confidence_marketing: 2,
+        receipt_or_purchase: 2,
+        review: 1,
+        security_or_account: 2,
+      },
+      mutationsAttempted: 0,
+    });
+    expect(result.map.buckets.map((bucket) => ({
+      categoryId: bucket.categoryId,
+      messageCount: bucket.messageCount,
+      recommendedAction: bucket.recommendedAction,
+    }))).toEqual([
+      { categoryId: "security_or_account", messageCount: 2, recommendedAction: "keep_for_account_history" },
+      { categoryId: "receipt_or_purchase", messageCount: 2, recommendedAction: "keep_for_account_history" },
+      { categoryId: "high_confidence_marketing", messageCount: 2, recommendedAction: "move_to_junk_after_review" },
+      { categoryId: "review", messageCount: 1, recommendedAction: "review" },
+    ]);
+    expect(result.map.buckets.find((bucket) => bucket.categoryId === "high_confidence_marketing")?.candidates[0]).toMatchObject({
+      domain: "prm.wargaming.net",
+      messageCount: 2,
+      confidence: "high",
+    });
+    expect("plan" in result).toBe(false);
+    expect((result as { plan?: unknown }).plan).toBeUndefined();
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
+  it("uses provider bulk metadata windows for classification maps when available", async () => {
+    const scanCalls: unknown[] = [];
+    const bulkScanCalls: unknown[] = [];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async (input) => {
+          scanCalls.push(input);
+          return [];
+        },
+        scanMailboxMetadataWindow: async (input) => {
+          bulkScanCalls.push(input);
+          return {
+            pagesScanned: 1,
+            messages: [{
+              ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+              from: "newsletter@example.com",
+              subject: "Weekly digest",
+              date: "2026-05-11T00:00:00.000Z",
+              snippet: "A low priority newsletter.",
+              flags: ["\\Seen"],
+            }],
+          };
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.classificationMap({
+      folder: "INBOX",
+      pageSize: 10,
+      maxPages: 50,
+    });
+
+    expect(scanCalls).toEqual([]);
+    expect(bulkScanCalls).toEqual([{ folder: "INBOX", limit: 10, maxPages: 50, order: "oldest", offset: 0 }]);
+    expect(result.map.pagesScanned).toBe(1);
+    expect(result.map.categoryCounts).toEqual({ newsletter_or_digest: 1 });
+  });
+
   it("uses provider bulk metadata windows for Gmail-like governance when available", async () => {
     const scanCalls: unknown[] = [];
     const bulkScanCalls: unknown[] = [];

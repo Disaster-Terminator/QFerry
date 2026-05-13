@@ -69,8 +69,8 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 - Codex 能看到 QFerry skill。
 - QFerry MCP server 通过插件目录里的 `./mcp-bootstrap.mjs` 启动，再加载 plugin-local `./dist/mcp.cjs`。
 - `mcp-bootstrap.mjs` 会把运行 cwd 切到用户状态目录，避免 Windows 下 MCP 进程占住插件缓存目录，导致插件详情、升级或卸载失败。
-- fixture provider 可调用 `get_status`、`list_mailboxes`、`get_mailbox_summary`、`search`、`classify_messages`、`triage_inbox`、`group_spam_candidates`、`plan_cleanup`。
-- QQ Mail provider 可调用 `get_status`、`get_capability_snapshot`、`list_mailboxes`、`get_mailbox_summary`、bounded `search`、按 UID `fetch`、`triage_inbox` 和 `group_spam_candidates`。
+- fixture provider 可调用 `get_status`、`list_mailboxes`、`get_mailbox_summary`、`search`、`classify_messages`、`triage_inbox`、`group_spam_candidates`、`classification_map`、`plan_cleanup`。
+- QQ Mail provider 可调用 `get_status`、`get_capability_snapshot`、`list_mailboxes`、`get_mailbox_summary`、bounded `search`、按 UID `fetch`、`triage_inbox`、`classification_map` 和 `group_spam_candidates`。
 - 每次 e2e 留下 trace artifacts，方便验收回溯。
 
 ## 当前能力
@@ -84,6 +84,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 | 分类规则 | 用内联规则或 `qferry.rules.json` 把邮件归入用户定义的 group |
 | 收件箱整理报告 | `triage_inbox` 汇总 groupCounts、样本数、建议下一步 |
 | 垃圾/广告候选 | `group_spam_candidates` 从最旧 metadata 开始分组明显垃圾/广告，先给用户确认 |
+| 分类地图 | `classification_map` 先按安全/购买/营销/newsletter/开发社区/待审分桶，并给出建议动作，不生成操作计划 |
 | 清理计划 | 基于规则文件生成 preview-only cleanup plan，不直接修改真实邮箱 |
 | 测试留痕 | 写入 jsonl trace 和 Markdown summary |
 | 安全边界 | 默认 read-only / preview-first；真实写操作需要用户授权和服务端确认 plan |
@@ -121,7 +122,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 `get_status` 会同时暴露兼容字段 `mutationAllowed`、当前可用性字段 `authConfigured` / `providerReady` / `mutationOperationallyReady`，以及 `mutationCapable` / `mutationRequiresConfirmation`。真实 QQ 邮箱只有在凭据齐全时才报告当前 mutation 可用；任何 mutation 都仍需要 preview plan、用户确认和 server-side `operationPlanId`。
 
-Gmail-like 治理优先使用 `bulk_governance_preview` 做大窗口 dry-run：按发信人、域名和内容特征分类为高置信广告营销、newsletter/digest、安全/账号、购买/账单、开发社区和待审。真实执行只用于小范围确认后的子集，不把大范围 dry-run 等同于无人值守清理。
+Gmail-like 治理优先从 `classification_map` 开始：先按发信人、域名和内容特征分类为高置信广告营销、newsletter/digest、安全/账号、购买/账单、开发社区和待审，得到分类桶、桶内 sender/domain 候选和建议动作。只有选定具体桶后，才进入 `bulk_governance_preview` 生成 preview plan。真实执行只用于小范围确认后的子集，不把大范围 dry-run 等同于无人值守清理。
 
 ## 测试留痕
 

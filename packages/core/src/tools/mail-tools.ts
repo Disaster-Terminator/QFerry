@@ -190,6 +190,43 @@ export interface BulkGovernancePreview {
   mutationsAttempted: 0;
 }
 
+export interface ClassificationMapInput {
+  folder: string;
+  pageSize: number;
+  maxPages: number;
+  scanOffset?: number;
+  order?: "newest" | "oldest";
+}
+
+export type ClassificationMapAction =
+  | "keep_for_account_history"
+  | "archive_or_label"
+  | "move_to_junk_after_review"
+  | "review";
+
+export interface ClassificationMapBucket {
+  categoryId: BulkGovernanceCategoryId;
+  messageCount: number;
+  recommendedAction: ClassificationMapAction;
+  confidence: PriorityConfidence;
+  reason: string;
+  candidates: BulkGovernanceCandidate[];
+}
+
+export interface ClassificationMapReport {
+  provider: string;
+  folder: string;
+  scanOrder: "newest" | "oldest";
+  scanOffset: number;
+  pageSize: number;
+  maxPages: number;
+  pagesScanned: number;
+  scannedMessages: number;
+  categoryCounts: Partial<Record<BulkGovernanceCategoryId, number>>;
+  buckets: ClassificationMapBucket[];
+  mutationsAttempted: 0;
+}
+
 export interface SenderGovernanceCandidate {
   domain: string;
   messageCount: number;
@@ -295,6 +332,10 @@ export interface MailTools {
   bulkGovernancePreview(input: BulkGovernancePreviewInput): Promise<{
     preview: BulkGovernancePreview;
     plan: OperationPlan;
+    mutationsAttempted: 0;
+  }>;
+  classificationMap(input: ClassificationMapInput): Promise<{
+    map: ClassificationMapReport;
     mutationsAttempted: 0;
   }>;
 }
@@ -677,6 +718,52 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       };
     },
 
+    async classificationMap(mapInput) {
+      const pageSize = Math.max(mapInput.pageSize, 0);
+      const maxPages = Math.max(mapInput.maxPages, 0);
+      const scanOffset = Math.max(mapInput.scanOffset ?? 0, 0);
+      const scanOrder = mapInput.order ?? "oldest";
+      const scanWindow = input.provider.scanMailboxMetadataWindow
+        ? await input.provider.scanMailboxMetadataWindow({
+          folder: mapInput.folder,
+          limit: pageSize,
+          maxPages,
+          order: scanOrder,
+          offset: scanOffset,
+        })
+        : await scanMetadataWindowWithPages(input.provider, {
+          folder: mapInput.folder,
+          limit: pageSize,
+          maxPages,
+          order: scanOrder,
+          offset: scanOffset,
+        });
+      const messages = scanWindow.messages;
+      const categorized = messages.map((message) => ({
+        message,
+        classification: classifyBulkGovernanceMessage(message),
+      }));
+      const categoryCounts = countBulkCategories(categorized.map((entry) => entry.classification.categoryId));
+      const categoryCandidates = buildBulkGovernanceCandidates(categorized, new Set());
+
+      return {
+        map: {
+          provider: messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture",
+          folder: mapInput.folder,
+          scanOrder,
+          scanOffset,
+          pageSize,
+          maxPages,
+          pagesScanned: scanWindow.pagesScanned,
+          scannedMessages: messages.length,
+          categoryCounts,
+          buckets: buildClassificationMapBuckets(categoryCounts, categoryCandidates),
+          mutationsAttempted: 0,
+        },
+        mutationsAttempted: 0,
+      };
+    },
+
     async bulkGovernancePreview(bulkInput) {
       const pageSize = Math.max(bulkInput.pageSize, 0);
       const maxPages = Math.max(bulkInput.maxPages, 0);
@@ -1018,7 +1105,7 @@ function classifyBulkGovernanceMessage(message: MessageSummary): {
   const domain = extractSenderDomain(message.from);
   const text = `${message.from}\n${message.subject}\n${message.snippet}`.toLocaleLowerCase();
 
-  if (hasAny(text, ["安全代码", "security code", "异常登录", "new sign-in", "验证码", "验证", "account", "帐户"])) {
+  if (hasAny(text, ["安全代码", "security code", "security alert", "异常登录", "new sign-in", "验证码", "验证", "account", "帐户"])) {
     return { categoryId: "security_or_account", confidence: "high", reason: "metadata indicates account, login, verification, or security mail" };
   }
 
@@ -1049,6 +1136,62 @@ function countBulkCategories(categoryIds: BulkGovernanceCategoryId[]): Partial<R
     counts[categoryId] = (counts[categoryId] ?? 0) + 1;
   }
   return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function buildClassificationMapBuckets(
+  categoryCounts: Partial<Record<BulkGovernanceCategoryId, number>>,
+  categoryCandidates: Partial<Record<BulkGovernanceCategoryId, BulkGovernanceCandidate[]>>,
+): ClassificationMapBucket[] {
+  const categoryOrder: BulkGovernanceCategoryId[] = [
+    "security_or_account",
+    "receipt_or_purchase",
+    "developer_community",
+    "newsletter_or_digest",
+    "high_confidence_marketing",
+    "review",
+  ];
+  return categoryOrder
+    .map((categoryId) => {
+      const candidates = categoryCandidates[categoryId] ?? [];
+      const messageCount = categoryCounts[categoryId] ?? 0;
+      return {
+        categoryId,
+        messageCount,
+        recommendedAction: recommendedClassificationMapAction(categoryId),
+        confidence: highestConfidence(candidates.map((candidate) => candidate.confidence)),
+        reason: classificationMapReason(categoryId),
+        candidates,
+      };
+    })
+    .filter((bucket) => bucket.messageCount > 0);
+}
+
+function recommendedClassificationMapAction(categoryId: BulkGovernanceCategoryId): ClassificationMapAction {
+  if (categoryId === "security_or_account" || categoryId === "receipt_or_purchase") {
+    return "keep_for_account_history";
+  }
+  if (categoryId === "high_confidence_marketing") return "move_to_junk_after_review";
+  if (categoryId === "developer_community" || categoryId === "newsletter_or_digest") return "archive_or_label";
+  return "review";
+}
+
+function classificationMapReason(categoryId: BulkGovernanceCategoryId): string {
+  if (categoryId === "security_or_account") {
+    return "Account, login, verification, and security mail should be preserved before cleanup.";
+  }
+  if (categoryId === "receipt_or_purchase") {
+    return "Receipts, purchases, payments, and subscriptions are account history, not disposable ads.";
+  }
+  if (categoryId === "high_confidence_marketing") {
+    return "Known marketing senders or promotion subjects can be reviewed as a bucket before moving.";
+  }
+  if (categoryId === "newsletter_or_digest") {
+    return "Newsletters and digests are better archived or labeled after sender-level review.";
+  }
+  if (categoryId === "developer_community") {
+    return "Developer community notifications usually need archive or label treatment instead of junk.";
+  }
+  return "Messages without a strong category match need manual review before any batch action.";
 }
 
 function buildBulkGovernanceCandidates(

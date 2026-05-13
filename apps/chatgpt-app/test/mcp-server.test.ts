@@ -40,6 +40,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "plan_cleanup",
       "preview_cleanup_batch",
       "plan_sender_governance",
+      "classification_map",
       "bulk_governance_preview",
       "apply_ruleset_patch",
       "confirm_cleanup_plan",
@@ -51,6 +52,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "triage_inbox")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "group_spam_candidates")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_capability_snapshot")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "classification_map")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "preview_cleanup_batch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "plan_sender_governance")?.annotations?.destructiveHint).toBe(false);
@@ -58,6 +60,47 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "apply_ruleset_patch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "confirm_cleanup_plan")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_cleanup")?.annotations?.destructiveHint).toBe(true);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("calls classification map through the MCP server without creating a plan", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "classification_map",
+      arguments: {
+        folder: "INBOX",
+        pageSize: 2,
+        maxPages: 2,
+        order: "oldest",
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      map: {
+        scannedMessages: 2,
+        categoryCounts: {
+          newsletter_or_digest: 1,
+          security_or_account: 1,
+        },
+        buckets: [
+          { categoryId: "security_or_account", recommendedAction: "keep_for_account_history" },
+          { categoryId: "newsletter_or_digest", recommendedAction: "archive_or_label" },
+        ],
+        mutationsAttempted: 0,
+      },
+      mutationsAttempted: 0,
+    });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("operationPlanId");
 
     await client.close();
     await server.close();
