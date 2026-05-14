@@ -1113,18 +1113,20 @@ function classifyBulkGovernanceMessage(message: MessageSummary): {
     return { categoryId: "receipt_or_purchase", confidence: "high", reason: "metadata indicates a receipt, purchase, payment, or subscription" };
   }
 
-  if (hasAny(domain, ["wargaming.net", "postermaster.sony.com.cn"])
-    || hasAny(text, ["广告", "(ad)", "优惠", "促销", "特卖", "礼物已到位", "登录游戏即可", "promotion", "promo"])) {
+  if (hasAny(domain, ["dlsite.com", "mail.nikke-official.com", "wargaming.net", "postermaster.sony.com.cn"])
+    || (hasAny(domain, ["epicgames.com"]) && hasAny(text, ["sale", "off", "free", "discount", "特卖", "优惠"]))
+    || hasAny(text, ["广告", "(ad)", "优惠", "促销", "特卖", "礼物已到位", "登录游戏即可", "promotion", "promo", "campaign"])) {
     return { categoryId: "high_confidence_marketing", confidence: "high", reason: "metadata matches known marketing sender or promotion subject pattern" };
   }
 
-  if (hasAny(text, ["newsletter", "digest", "unsubscribe", "退订", "周报", "月报"])) {
-    return { categoryId: "newsletter_or_digest", confidence: "medium", reason: "metadata indicates newsletter, digest, or unsubscribe-capable bulk mail" };
-  }
-
-  if (hasAny(domain, ["github.com", "codeforces.com", "gitee.com", "oschina.net"])
+  if (hasAny(domain, ["github.com", "codeforces.com", "gitee.com", "oschina.net", "edmsend.csdn.net", "hyperskill.org", "openrouter.ai", "mail.trae.ai", "system.trae.ai"])
     || hasAny(text, ["codeforces round", "pull request", "issue", "commit"])) {
     return { categoryId: "developer_community", confidence: "medium", reason: "metadata indicates developer community or repository activity" };
+  }
+
+  if (hasAny(domain, ["e-mail.microsoft.com", "e-mails.microsoft.com", "email2.office.com", "notificationemails.microsoft.com", "worldcommunitygrid.org"])
+    || hasAny(text, ["windows insider", "preview build", "newsletter", "digest", "unsubscribe", "退订", "周报", "月报"])) {
+    return { categoryId: "newsletter_or_digest", confidence: "medium", reason: "metadata indicates newsletter, digest, or unsubscribe-capable bulk mail" };
   }
 
   return { categoryId: "review", confidence: "low", reason: "no high-confidence bulk governance category matched" };

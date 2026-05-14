@@ -963,6 +963,81 @@ describe("mail tools", () => {
     expect(result.map.categoryCounts).toEqual({ newsletter_or_digest: 1 });
   });
 
+  it("keeps recurring service and promo senders out of the generic review bucket", async () => {
+    const messages = [
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "1", uidValidity: "999" },
+        from: "CSDN <csdn@edmsend.csdn.net>",
+        subject: "【蓝桥杯】之考前押题",
+        date: "2025-01-01T00:00:00.000Z",
+        snippet: "developer learning newsletter",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "2", uidValidity: "999" },
+        from: "Hyperskill Crew <hello@hyperskill.org>",
+        subject: "Learn Java with new projects",
+        date: "2025-01-02T00:00:00.000Z",
+        snippet: "course update",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "3", uidValidity: "999" },
+        from: "OpenRouter Team <hello@openrouter.ai>",
+        subject: "Your OpenRouter usage report",
+        date: "2025-01-03T00:00:00.000Z",
+        snippet: "developer platform notification",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "4", uidValidity: "999" },
+        from: "Windows Insider Program <windowsinsiderprogram@e-mails.microsoft.com>",
+        subject: "Windows Insider Preview Build",
+        date: "2025-01-04T00:00:00.000Z",
+        snippet: "product update newsletter",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "5", uidValidity: "999" },
+        from: "NIKKE-OFFICIAL <notice@mail.nikke-official.com>",
+        subject: "New event rewards are available",
+        date: "2025-01-05T00:00:00.000Z",
+        snippet: "limited campaign",
+        flags: [],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "6", uidValidity: "999" },
+        from: "Epic Games <store@mail.epicgames.com>",
+        subject: "Spring Sale up to 75% off",
+        date: "2025-01-06T00:00:00.000Z",
+        snippet: "store promotion",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.classificationMap({
+      folder: "INBOX",
+      pageSize: 10,
+      maxPages: 1,
+    });
+
+    expect(result.map.categoryCounts).toEqual({
+      developer_community: 3,
+      high_confidence_marketing: 2,
+      newsletter_or_digest: 1,
+    });
+    expect(result.map.buckets.map((bucket) => bucket.categoryId)).not.toContain("review");
+  });
+
   it("uses provider bulk metadata windows for Gmail-like governance when available", async () => {
     const scanCalls: unknown[] = [];
     const bulkScanCalls: unknown[] = [];
