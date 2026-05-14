@@ -940,7 +940,6 @@ async function scanMetadataWindowWithPages(
     pagesScanned += 1;
     if (page.length === 0) break;
     messages.push(...page);
-    if (page.length < input.limit) break;
   }
   return { messages, pagesScanned };
 }

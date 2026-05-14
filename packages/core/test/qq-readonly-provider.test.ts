@@ -213,6 +213,49 @@ describe("QQ read-only provider", () => {
     expect(result.messages.map((message) => message.ref.uid)).toEqual(["1", "2", "3", "4", "5"]);
   });
 
+  it("continues QQ metadata window scanning after a short non-empty page", async () => {
+    const fetchCalls: unknown[] = [];
+    const client = {
+      connect: async () => undefined,
+      logout: async () => undefined,
+      list: async () => [],
+      mailboxOpen: async () => ({ exists: 6, uidValidity: 999n }),
+      fetch: (range: unknown, query: unknown, options: unknown) => {
+        fetchCalls.push({ range, query, options });
+        const uids = range === "1:2" ? [1] : range === "3:4" ? [3, 4] : [5, 6];
+        return asyncMessages(uids.map((uid) => ({
+          uid,
+          flags: new Set(),
+          size: 512,
+          internalDate: new Date("2026-05-01T00:00:00.000Z"),
+          envelope: {
+            from: [{ name: "Sender", address: `${uid}@example.com` }],
+            subject: `Message ${uid}`,
+            date: new Date("2026-05-01T00:00:00.000Z"),
+          },
+        })));
+      },
+    };
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => client,
+      maxRecommendedScanLimit: 2,
+    });
+
+    const result = await provider.scanMailboxMetadataWindow({
+      folder: "INBOX",
+      limit: 2,
+      maxPages: 3,
+      order: "oldest",
+      offset: 0,
+    });
+
+    expect(fetchCalls.map((call) => (call as { range: unknown }).range)).toEqual(["1:2", "3:4", "5:6"]);
+    expect(result.pagesScanned).toBe(3);
+    expect(result.messages.map((message) => message.ref.uid)).toEqual(["1", "3", "4", "5", "6"]);
+  });
+
   it("summarizes a QQ mailbox with read-only open", async () => {
     const opened: unknown[] = [];
     const client = {

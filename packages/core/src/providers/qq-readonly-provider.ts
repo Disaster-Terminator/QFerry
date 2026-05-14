@@ -186,7 +186,6 @@ export class QqReadOnlyProvider implements MailProvider {
             message,
           }));
         }
-        if (pageCount < limit) break;
       }
 
       return { messages, pagesScanned };
