@@ -20,6 +20,7 @@ export interface ProviderCapabilitySnapshot {
   supportsFetchMessage: boolean;
   supportsMutation: boolean;
   mutationActions: string[];
+  supportsCreateMailbox?: boolean;
   maxRecommendedScanLimit: number;
 }
 
@@ -60,4 +61,5 @@ export interface MailProvider {
   getCapabilitySnapshot?(): Promise<ProviderCapabilitySnapshot>;
   getMailboxSummary?(folder: string): Promise<MailboxSummary>;
   moveMessages?(refs: MessageRef[], targetFolder: string): Promise<{ moved: number }>;
+  createMailbox?(folder: string): Promise<{ path: string; created: boolean }>;
 }

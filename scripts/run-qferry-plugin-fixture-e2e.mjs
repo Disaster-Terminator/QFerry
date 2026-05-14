@@ -78,6 +78,7 @@ async function main() {
   const calls = [
     ["get_status", {}],
     ["list_mailboxes", {}],
+    ["ensure_classification_folder", { runId, displayName: "订阅摘要" }],
     ["get_mailbox_summary", { folder: "INBOX" }],
     ["search", { folder: "INBOX", limit: 10, query: "digest" }],
     ["search", { folder: "INBOX", limit: 10, fromIncludes: "newsletter@", fromDomainIncludes: "example.com", subjectIncludes: "digest", hasFlag: "\\Seen" }],
@@ -135,11 +136,12 @@ async function main() {
       maxPages: 2,
       maxMessageRefs: 10,
       action: "move",
-      target: { folder: "Archive" },
+      target: { folder: "其他文件夹/订阅摘要" },
       selectedCategoryIds: ["newsletter_or_digest"],
     }],
   ];
   let statusResult;
+  let classificationFolderResult;
   let mailboxSummaryResult;
   let structuredSearchResult;
   let fetchResult;
@@ -157,6 +159,7 @@ async function main() {
   for (const [name, args] of calls) {
     const result = await callToolWithStructuredContent(client, name, args);
     if (name === "get_status") statusResult = result.structuredContent;
+    if (name === "ensure_classification_folder") classificationFolderResult = result.structuredContent;
     if (name === "get_mailbox_summary") mailboxSummaryResult = result.structuredContent;
     if (name === "search" && args.fromIncludes) structuredSearchResult = result.structuredContent;
     if (name === "fetch") fetchResult = result.structuredContent;
@@ -187,6 +190,11 @@ async function main() {
       priorityCounts: result.structuredContent?.priorityCounts,
       priorityBucketWeights: summarizePriorityBucketWeights(result.structuredContent?.priorityBuckets),
       mailboxExists: result.structuredContent?.mailbox?.exists,
+      classificationFolderDisplayName: result.structuredContent?.folder?.displayName,
+      classificationFolderFullPath: result.structuredContent?.folder?.fullPath,
+      classificationFolderExists: result.structuredContent?.folder?.exists,
+      classificationFolderPlanStatus: result.structuredContent?.plan?.status,
+      classificationFolderPlanAction: result.structuredContent?.plan?.action,
       searchResultCount: Array.isArray(result.structuredContent?.messages)
         ? result.structuredContent.messages.length
         : undefined,
@@ -286,6 +294,10 @@ async function main() {
       `- statusProviderReady: ${statusResult?.status?.providerReady ?? "<missing>"}`,
       `- statusWarnings: ${(statusResult?.status?.statusWarnings ?? []).join("; ")}`,
       `- inboxExists: ${mailboxSummaryResult?.mailbox?.exists ?? "<missing>"}`,
+      `- classificationFolderDisplayName: ${classificationFolderResult?.folder?.displayName ?? "<missing>"}`,
+      `- classificationFolderFullPath: ${classificationFolderResult?.folder?.fullPath ?? "<missing>"}`,
+      `- classificationFolderExists: ${classificationFolderResult?.folder?.exists ?? "<missing>"}`,
+      `- classificationFolderPlanStatus: ${classificationFolderResult?.plan?.status ?? "<none>"}`,
       `- structuredSearchMessages: ${structuredSearchResult?.messages?.length ?? "<missing>"}`,
       `- fetchedSubject: ${fetchResult?.message?.subject ?? "<missing>"}`,
       `- rulesFile: ${rulesFile}`,

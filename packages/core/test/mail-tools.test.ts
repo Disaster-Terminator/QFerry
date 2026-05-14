@@ -908,7 +908,7 @@ describe("mail tools", () => {
     }))).toEqual([
       { categoryId: "security_or_account", messageCount: 2, recommendedAction: "keep_for_account_history" },
       { categoryId: "receipt_or_purchase", messageCount: 2, recommendedAction: "keep_for_account_history" },
-      { categoryId: "high_confidence_marketing", messageCount: 2, recommendedAction: "move_to_junk_after_review" },
+      { categoryId: "high_confidence_marketing", messageCount: 2, recommendedAction: "classify_to_folder" },
       { categoryId: "review", messageCount: 1, recommendedAction: "review" },
     ]);
     expect(result.map.buckets.find((bucket) => bucket.categoryId === "high_confidence_marketing")?.candidates[0]).toMatchObject({
@@ -1177,6 +1177,113 @@ describe("mail tools", () => {
       moved: 1,
     });
     expect(movedRefs).toEqual([{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" }]);
+  });
+
+  it("previews creation of missing classification folders using display names", async () => {
+    const provider = FixtureMailProvider.demo();
+    const tools = createMailTools({ provider });
+
+    const result = await tools.ensureClassificationFolder({
+      runId: "run-folder-preview",
+      displayName: "开发社区",
+    });
+
+    expect(result.folder).toEqual({
+      displayName: "开发社区",
+      fullPath: "其他文件夹/开发社区",
+      exists: false,
+      parentPath: "其他文件夹",
+    });
+    expect(result.plan).toMatchObject({
+      runId: "run-folder-preview",
+      provider: "fixture",
+      action: "create_folder",
+      status: "preview",
+      target: {
+        folder: "其他文件夹/开发社区",
+        displayName: "开发社区",
+        parentPath: "其他文件夹",
+      },
+      messageRefs: [],
+    });
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
+  it("returns existing classification folders without a create plan", async () => {
+    const provider = FixtureMailProvider.demo();
+    const tools = createMailTools({ provider });
+
+    const result = await tools.ensureClassificationFolder({
+      runId: "run-folder-existing",
+      displayName: "Archive",
+      parentPath: "",
+    });
+
+    expect(result.folder).toEqual({
+      displayName: "Archive",
+      fullPath: "Archive",
+      exists: true,
+      parentPath: "",
+    });
+    expect(result.plan).toBeUndefined();
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
+  it("executes confirmed create-folder plans through a mutation-capable provider", async () => {
+    const provider = FixtureMailProvider.demo();
+    let createdFolder = "";
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        scanMailboxMetadata: provider.scanMailboxMetadata.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move", "create_folder"],
+          maxRecommendedScanLimit: 10,
+        }),
+        createMailbox: async (folder) => {
+          createdFolder = folder;
+          return { path: folder, created: true };
+        },
+      },
+      runtimeConfig: {
+        provider: "fixture",
+        accountAlias: "demo",
+        configSource: "test",
+        mutationAllowed: true,
+        mutationCapable: true,
+        mutationOperationallyReady: true,
+        mutationRequiresConfirmation: true,
+        authConfigured: true,
+        providerReady: true,
+        metadataSampleLimit: 10,
+        statusWarnings: [],
+      },
+    });
+    const preview = await tools.ensureClassificationFolder({
+      runId: "run-create-folder-confirmed",
+      displayName: "广告营销",
+    });
+    const confirmed = confirmOperationPlan(preview.plan!, preview.plan!.operationPlanId);
+
+    const result = await tools.executeCleanup({ plan: confirmed });
+
+    expect(result.result).toMatchObject({
+      operationPlanId: confirmed.operationPlanId,
+      status: "executed",
+      action: "create_folder",
+      attemptedMessages: 0,
+      mutationsAttempted: 1,
+      createdFolder: "其他文件夹/广告营销",
+    });
+    expect(createdFolder).toBe("其他文件夹/广告营销");
   });
 
   it("marks direct message-ref cleanup plans as client refs and limits their size", async () => {

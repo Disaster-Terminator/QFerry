@@ -60,6 +60,7 @@ export interface ExecuteCleanupResult {
   attemptedMessages: number;
   mutationsAttempted: number;
   moved?: number;
+  createdFolder?: string;
 }
 
 export interface SpamCandidate {
@@ -159,6 +160,19 @@ export interface BulkGovernancePreviewInput {
   selectedCategoryIds: BulkGovernanceCategoryId[];
 }
 
+export interface EnsureClassificationFolderInput {
+  runId: string;
+  displayName: string;
+  parentPath?: string;
+}
+
+export interface ClassificationFolderPreview {
+  displayName: string;
+  fullPath: string;
+  exists: boolean;
+  parentPath: string;
+}
+
 export interface BulkGovernanceCandidate {
   categoryId: BulkGovernanceCategoryId;
   domain: string;
@@ -201,7 +215,7 @@ export interface ClassificationMapInput {
 export type ClassificationMapAction =
   | "keep_for_account_history"
   | "archive_or_label"
-  | "move_to_junk_after_review"
+  | "classify_to_folder"
   | "review";
 
 export interface ClassificationMapBucket {
@@ -310,6 +324,11 @@ export interface MailTools {
     mutationsAttempted: 0;
   }>;
   executeCleanup(input: ExecuteCleanupInput): Promise<{ result: ExecuteCleanupResult }>;
+  ensureClassificationFolder(input: EnsureClassificationFolderInput): Promise<{
+    folder: ClassificationFolderPreview;
+    plan?: OperationPlan;
+    mutationsAttempted: 0;
+  }>;
   planCleanup(input: PlanCleanupInput): Promise<{
     plan: OperationPlan;
     classifications: MessageClassification[];
@@ -487,8 +506,29 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       if (!capability?.supportsMutation) {
         throw new Error("Provider does not support mailbox mutation");
       }
-      if (plan.action !== "move") {
+      if (plan.action !== "move" && plan.action !== "create_folder") {
         throw new Error(`Unsupported execute_cleanup action: ${plan.action}`);
+      }
+      if (plan.action === "create_folder") {
+        const targetFolder = plan.target?.folder;
+        if (!targetFolder) {
+          throw new Error("Create-folder execution requires target.folder");
+        }
+        if (!input.provider.createMailbox) {
+          throw new Error("Provider does not implement createMailbox");
+        }
+
+        const createResult = await input.provider.createMailbox(targetFolder);
+        return {
+          result: {
+            operationPlanId: plan.operationPlanId,
+            status: "executed",
+            action: plan.action,
+            attemptedMessages: 0,
+            mutationsAttempted: createResult.created ? 1 : 0,
+            createdFolder: createResult.path,
+          },
+        };
       }
       const targetFolder = plan.target?.folder;
       if (!targetFolder) {
@@ -508,6 +548,46 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           mutationsAttempted: plan.messageRefs.length,
           moved: moveResult.moved,
         },
+      };
+    },
+
+    async ensureClassificationFolder(folderInput) {
+      const parentPath = folderInput.parentPath ?? "其他文件夹";
+      const displayName = normalizeFolderDisplayName(folderInput.displayName);
+      const fullPath = joinMailboxPath(parentPath, displayName);
+      const mailboxes = await input.provider.listMailboxes();
+      const exists = mailboxes.some((mailbox) => mailbox.path === fullPath);
+      const folder = {
+        displayName,
+        fullPath,
+        exists,
+        parentPath,
+      };
+
+      if (exists) {
+        return {
+          folder,
+          mutationsAttempted: 0,
+        };
+      }
+
+      const capability = input.provider.getCapabilitySnapshot
+        ? await input.provider.getCapabilitySnapshot()
+        : undefined;
+      return {
+        folder,
+        plan: createOperationPlan({
+          runId: folderInput.runId,
+          provider: capability?.provider === "qqmail" ? "qqmail" : "fixture",
+          action: "create_folder",
+          messageRefs: [],
+          target: {
+            folder: fullPath,
+            displayName,
+            parentPath,
+          },
+        }),
+        mutationsAttempted: 0,
       };
     },
 
@@ -1015,7 +1095,7 @@ function classifyPriority(message: MessageSummary): PriorityCandidate {
       reason: "metadata looks like newsletter, digest, promotion, or other bulk mail",
       confidence: "medium",
       weight: 40,
-      nextAction: "archive, move to Junk, or add a rule after review",
+      nextAction: "classify to a folder or add a rule after review",
     };
   }
 
@@ -1172,7 +1252,7 @@ function recommendedClassificationMapAction(categoryId: BulkGovernanceCategoryId
   if (categoryId === "security_or_account" || categoryId === "receipt_or_purchase") {
     return "keep_for_account_history";
   }
-  if (categoryId === "high_confidence_marketing") return "move_to_junk_after_review";
+  if (categoryId === "high_confidence_marketing") return "classify_to_folder";
   if (categoryId === "developer_community" || categoryId === "newsletter_or_digest") return "archive_or_label";
   return "review";
 }
@@ -1185,7 +1265,7 @@ function classificationMapReason(categoryId: BulkGovernanceCategoryId): string {
     return "Receipts, purchases, payments, and subscriptions are account history, not disposable ads.";
   }
   if (categoryId === "high_confidence_marketing") {
-    return "Known marketing senders or promotion subjects can be reviewed as a bucket before moving.";
+    return "Known marketing senders or promotion subjects can be reviewed as a bucket before moving to a marketing folder.";
   }
   if (categoryId === "newsletter_or_digest") {
     return "Newsletters and digests are better archived or labeled after sender-level review.";
@@ -1393,6 +1473,20 @@ function matchesQuery(message: MessageSummary, query: string): boolean {
 
 function includesIgnoreCase(value: string, needle: string): boolean {
   return value.toLocaleLowerCase().includes(needle.toLocaleLowerCase());
+}
+
+function normalizeFolderDisplayName(displayName: string): string {
+  const normalized = displayName.trim().replace(/[\\/]+/g, "");
+  if (!normalized) {
+    throw new Error("Classification folder displayName is empty");
+  }
+  return normalized;
+}
+
+function joinMailboxPath(parentPath: string, displayName: string): string {
+  const parent = parentPath.trim().replace(/\/+$/g, "");
+  if (!parent) return displayName;
+  return `${parent}/${displayName}`;
 }
 
 function hasAny(value: string, needles: string[]): boolean {

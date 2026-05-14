@@ -131,4 +131,28 @@ describe("ruleset patch rendering", () => {
     expect(applied.renderedDraft.rules).toHaveLength(2);
     expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toHaveLength(2);
   });
+
+  it("rejects applying a ruleset patch to a non-standard file name", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-apply-"));
+    const rulesFile = join(dir, "not-rules.txt");
+    const original = `${JSON.stringify({
+      version: "existing",
+      defaultGroupId: "review",
+      groups: [{ id: "review", label: "Needs review" }],
+      rules: [{ id: "keep", groupId: "review", match: { subjectIncludes: "keep" } }],
+    }, null, 2)}\n`;
+    await writeFile(rulesFile, original, "utf8");
+    const patch = {
+      groupToEnsure: { id: "sender_governance", label: "Sender governance" } as const,
+      candidateRuleCount: 1,
+      rulesToAdd: [
+        { id: "sender-domain-example-com", groupId: "sender_governance", match: { fromDomainIncludes: "example.com" } },
+      ],
+      skippedDuplicateRules: [],
+    };
+
+    await expect(applyRulesetPatchDraft({ rulesFile, patch, apply: true }))
+      .rejects.toThrow("qferry.rules.json");
+    expect(await readFile(rulesFile, "utf8")).toBe(original);
+  });
 });

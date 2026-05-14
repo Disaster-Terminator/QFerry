@@ -64,7 +64,7 @@ export async function runFixtureE2E(input: FixtureE2EInput): Promise<FixtureE2ER
     provider: "fixture",
     action: "move",
     messageRefs: messages.slice(1).map((message) => message.ref),
-    target: { folder: "Archive" },
+    target: { folder: "其他文件夹/订阅摘要" },
   });
   await writeFile(operationPlanPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
   await trace.write({
@@ -72,6 +72,7 @@ export async function runFixtureE2E(input: FixtureE2EInput): Promise<FixtureE2ER
     event: "operation_plan_created",
     operationPlanId: plan.operationPlanId,
     action: plan.action,
+    targetFolder: plan.target?.folder,
     plannedMessages: plan.messageRefs.length,
   });
 
@@ -85,6 +86,7 @@ export async function runFixtureE2E(input: FixtureE2EInput): Promise<FixtureE2ER
     `- mailboxes: ${mailboxes.length}`,
     `- scannedMessages: ${messages.length}`,
     `- operationPlanId: ${plan.operationPlanId}`,
+    `- operationPlanTarget: ${plan.target?.folder ?? "<missing>"}`,
     `- trace: ${tracePath}`,
     `- capabilitySnapshot: ${capabilitySnapshotPath}`,
     `- operationPlan: ${operationPlanPath}`,

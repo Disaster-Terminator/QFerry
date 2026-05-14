@@ -38,6 +38,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "triage_inbox",
       "group_spam_candidates",
       "plan_cleanup",
+      "ensure_classification_folder",
       "preview_cleanup_batch",
       "plan_sender_governance",
       "classification_map",
@@ -54,6 +55,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "get_capability_snapshot")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "classification_map")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "ensure_classification_folder")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "preview_cleanup_batch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "plan_sender_governance")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "bulk_governance_preview")?.annotations?.destructiveHint).toBe(false);
@@ -582,6 +584,45 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("previews classification folder creation through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "ensure_classification_folder",
+      arguments: {
+        runId: "run-mcp-folder-preview",
+        displayName: "开发社区",
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      folder: {
+        displayName: "开发社区",
+        fullPath: "其他文件夹/开发社区",
+        exists: false,
+      },
+      plan: {
+        action: "create_folder",
+        status: "preview",
+        target: {
+          folder: "其他文件夹/开发社区",
+          displayName: "开发社区",
+        },
+      },
+      mutationsAttempted: 0,
+    });
+
+    await client.close();
+    await server.close();
+  });
+
   it("consumes confirmed cleanup plans after one execute attempt", async () => {
     const server = createQFerryMcpServer();
     const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
@@ -805,6 +846,52 @@ describe("QFerry ChatGPT App MCP server", () => {
       addedRuleCount: 1,
     });
     expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toHaveLength(1);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("rejects applying ruleset patches to non-ruleset files", async () => {
+    const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mcp-rules-"));
+    const rulesFile = join(dir, "not-rules.txt");
+    const original = `${JSON.stringify({
+      version: "existing",
+      defaultGroupId: "review",
+      groups: [{ id: "review", label: "Needs review" }],
+      rules: [{ id: "keep", groupId: "review", match: { subjectIncludes: "keep" } }],
+    }, null, 2)}\n`;
+    await writeFile(rulesFile, original, "utf8");
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "apply_ruleset_patch",
+      arguments: {
+        rulesFile,
+        apply: true,
+        patch: {
+          groupToEnsure: { id: "sender_governance", label: "Sender governance" },
+          candidateRuleCount: 1,
+          rulesToAdd: [
+            { id: "sender-domain-example-com", groupId: "sender_governance", match: { fromDomainIncludes: "example.com" } },
+          ],
+          skippedDuplicateRules: [],
+        },
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("qferry.rules.json");
+    expect(await readFile(rulesFile, "utf8")).toBe(original);
 
     await client.close();
     await server.close();

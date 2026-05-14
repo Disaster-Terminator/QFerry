@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+if [ "${QFERRY_SKIP_GIT_HOOKS:-}" = "1" ]; then
+  exit 0
+fi
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "QFerry post-commit: pnpm is not on PATH; skipping generated artifact check." >&2
+  exit 0
+fi
+
+echo "QFerry post-commit: checking generated plugin artifacts..."
+
+if pnpm run check:generated; then
+  exit 0
+fi
+
+cat >&2 <<'EOF'
+QFerry post-commit: generated plugin artifacts do not match the committed source.
+
+Fix the commit before pushing:
+  pnpm run sync:qferry-plugin
+  git add plugins/qferry/dist
+  git commit --amend --no-edit
+
+Set QFERRY_SKIP_GIT_HOOKS=1 only for emergency local bypasses.
+EOF
+
+exit 1

@@ -12,8 +12,31 @@ export class QqMutableProvider extends QqReadOnlyProvider {
     return {
       ...capability,
       supportsMutation: true,
-      mutationActions: ["move"],
+      mutationActions: ["move", "create_folder"],
+      supportsCreateMailbox: true,
     };
+  }
+
+  async createMailbox(folder: string): Promise<{ path: string; created: boolean }> {
+    const target = folder.trim();
+    if (!target) {
+      throw new Error("Create mailbox target folder is empty");
+    }
+
+    return this.withClient("create_mailbox", async (client) => {
+      if (!client.mailboxCreate) {
+        throw new Error("QQ IMAP client does not expose mailboxCreate");
+      }
+      const result = await client.mailboxCreate(target);
+      if (result === false) {
+        throw new Error(`QQ IMAP create mailbox failed: ${target}`);
+      }
+      const resultObject = typeof result === "object" && result !== null ? result : undefined;
+      return {
+        path: resultObject?.path ?? target,
+        created: resultObject?.created ?? true,
+      };
+    });
   }
 
   async moveMessages(refs: MessageRef[], targetFolder: string): Promise<{ moved: number }> {

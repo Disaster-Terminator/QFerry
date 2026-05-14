@@ -256,6 +256,28 @@ async function main() {
     mutationsAttempted: spamCandidates.structuredContent?.mutationsAttempted,
   });
   const spamCandidateRefs = extractCandidateRefs(spamCandidates.structuredContent?.groups);
+  const marketingFolder = await callToolWithTrace(
+    client,
+    "ensure_classification_folder",
+    {
+      runId,
+      displayName: "广告营销",
+    },
+    tracePath,
+    baseEvent,
+  );
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "ensure_classification_folder",
+    displayName: marketingFolder.structuredContent?.folder?.displayName,
+    fullPath: marketingFolder.structuredContent?.folder?.fullPath,
+    folderExists: marketingFolder.structuredContent?.folder?.exists,
+    planStatus: marketingFolder.structuredContent?.plan?.status,
+    planAction: marketingFolder.structuredContent?.plan?.action,
+    mutationsAttempted: marketingFolder.structuredContent?.mutationsAttempted,
+  });
+  const marketingFolderPath = marketingFolder.structuredContent?.folder?.fullPath ?? "其他文件夹/广告营销";
   const spamPreviewPlan = spamCandidateRefs.length > 0
     ? await callToolWithTrace(
       client,
@@ -265,7 +287,7 @@ async function main() {
         folder: "INBOX",
         limit: candidateLimit,
         action: "move",
-        target: { folder: "Junk" },
+        target: { folder: marketingFolderPath },
         selectedGroupIds: [],
         messageRefs: spamCandidateRefs,
       },
@@ -346,7 +368,7 @@ async function main() {
       maxPages: 2,
       maxMessageRefs: 5,
       action: "move",
-      target: { folder: "Junk" },
+      target: { folder: marketingFolderPath },
       rules: [
         { id: "ad-subject", groupId: "ads_or_spam", match: { subjectIncludes: "广告" } },
         { id: "promo-subject", groupId: "ads_or_spam", match: { subjectIncludes: "优惠" } },
@@ -383,7 +405,7 @@ async function main() {
       maxPages: 2,
       maxMessageRefs: 0,
       action: "move",
-      target: { folder: "Junk" },
+      target: { folder: marketingFolderPath },
       order: "oldest",
     },
     tracePath,
@@ -447,7 +469,7 @@ async function main() {
       maxPages: 10,
       maxMessageRefs: 50,
       action: "move",
-      target: { folder: "Junk" },
+      target: { folder: marketingFolderPath },
       order: "oldest",
       selectedCategoryIds: ["high_confidence_marketing"],
     },
@@ -563,6 +585,10 @@ async function main() {
       `- spamPreviewPlanStatus: ${spamPreviewPlan?.structuredContent?.plan?.status ?? "<none>"}`,
       `- spamPreviewPlanMessageRefs: ${spamPreviewPlan?.structuredContent?.plan?.messageRefs?.length ?? 0}`,
       `- spamPreviewPlanTarget: ${spamPreviewPlan?.structuredContent?.plan?.target?.folder ?? "<none>"}`,
+      `- classificationFolderDisplayName: ${marketingFolder.structuredContent?.folder?.displayName ?? "<missing>"}`,
+      `- classificationFolderFullPath: ${marketingFolder.structuredContent?.folder?.fullPath ?? "<missing>"}`,
+      `- classificationFolderExists: ${marketingFolder.structuredContent?.folder?.exists ?? "<missing>"}`,
+      `- classificationFolderPlanStatus: ${marketingFolder.structuredContent?.plan?.status ?? "<none>"}`,
       `- triageGroupCounts: ${JSON.stringify(triage.structuredContent?.triage?.groupCounts ?? {})}`,
       `- priorityCounts: ${JSON.stringify(triage.structuredContent?.priorityCounts ?? {})}`,
       `- priorityBucketWeights: ${JSON.stringify(summarizePriorityBucketWeights(triage.structuredContent?.priorityBuckets))}`,

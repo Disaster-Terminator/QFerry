@@ -1,6 +1,7 @@
 import type { ClassificationRule } from "./classification.js";
 import { loadClassificationRuleset, type ClassificationGroup, type ClassificationRuleset, type ClassificationRulesetMetadata } from "./ruleset.js";
-import { writeFile } from "node:fs/promises";
+import { realpath, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, resolve } from "node:path";
 
 export interface RulesetPatchDraft {
   groupToEnsure: { id: "sender_governance"; label: "Sender governance" };
@@ -91,7 +92,8 @@ export async function applyRulesetPatchDraft(
   const changelog = formatRulesetPatchChangelog(input.patch);
 
   if (input.apply) {
-    await writeFile(input.rulesFile, `${JSON.stringify(renderedDraft, null, 2)}\n`, "utf8");
+    const safeRulesFile = await resolveWritableRulesFile(input.rulesFile);
+    await writeFile(safeRulesFile, `${JSON.stringify(renderedDraft, null, 2)}\n`, "utf8");
   }
 
   return {
@@ -104,6 +106,21 @@ export async function applyRulesetPatchDraft(
     renderedDraft,
     changelog,
   };
+}
+
+async function resolveWritableRulesFile(rulesFile: string): Promise<string> {
+  const resolved = resolve(rulesFile);
+  if (basename(resolved) !== "qferry.rules.json" || extname(resolved) !== ".json") {
+    throw new Error("QFerry can only apply ruleset patches to qferry.rules.json");
+  }
+
+  const parent = await realpath(dirname(resolved));
+  const file = await realpath(resolved);
+  if (dirname(file) !== parent) {
+    throw new Error("QFerry rulesFile must resolve inside its containing directory");
+  }
+
+  return file;
 }
 
 function formatMatch(match: ClassificationRule["match"]): string {

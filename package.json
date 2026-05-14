@@ -15,12 +15,16 @@
     "dev:sync-plugin-cache": "node scripts/sync-installed-plugin-cache.mjs",
     "dev:sync-plugin-cache:all": "node scripts/sync-installed-plugin-cache.mjs --include-windows --include-wsl",
     "verify:qferry-plugin": "node scripts/verify-qferry-plugin.mjs",
-    "check": "pnpm run sync:qferry-plugin && pnpm run verify:qferry-plugin && pnpm test && pnpm run typecheck",
+    "check:generated": "pnpm run sync:qferry-plugin && git diff --exit-code -- plugins/qferry/dist",
+    "gate:commit": "pnpm test && pnpm run typecheck",
+    "gate:local": "pnpm run gate:commit && pnpm run check:generated && pnpm run verify:qferry-plugin && pnpm run qferry:e2e:plugin-fixture",
+    "check": "pnpm run gate:local",
     "qferry:e2e:fixture": "pnpm --filter @qferry/core fixture:e2e",
     "qferry:e2e:chatgpt-fixture": "pnpm --filter @qferry/chatgpt-app fixture:e2e",
     "qferry:e2e:plugin-fixture": "node scripts/run-qferry-plugin-fixture-e2e.mjs",
     "qferry:e2e:plugin-qq-readonly": "node scripts/run-qferry-plugin-qq-readonly-e2e.mjs",
-    "qferry:e2e:plugin-qq-move-spam": "node scripts/run-qferry-plugin-qq-move-spam-e2e.mjs"
+    "qferry:e2e:plugin-qq-move-spam": "node scripts/run-qferry-plugin-qq-move-spam-e2e.mjs",
+    "dev:install-hooks": "node scripts/install-git-hooks.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

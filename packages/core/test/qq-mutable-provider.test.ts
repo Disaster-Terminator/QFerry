@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { QqMutableProvider } from "../src/providers/qq-mutable-provider.js";
 
 describe("QQ mutable provider", () => {
-  it("reports move-only mutation capability", async () => {
+  it("reports move and create-folder mutation capability", async () => {
     const provider = new QqMutableProvider({
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
@@ -14,14 +14,42 @@ describe("QQ mutable provider", () => {
         mailboxOpen: async () => ({ exists: 0 }),
         fetch: async function* () {},
         messageMove: async () => ({ uidMap: new Map() }),
+        mailboxCreate: async () => ({ path: "其他文件夹/开发社区", created: true }),
       }),
     });
 
     await expect(provider.getCapabilitySnapshot()).resolves.toMatchObject({
       provider: "qqmail",
       supportsMutation: true,
-      mutationActions: ["move"],
+      mutationActions: ["move", "create_folder"],
+      supportsCreateMailbox: true,
     });
+  });
+
+  it("creates QQ classification folders through IMAP CREATE", async () => {
+    const created: unknown[] = [];
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => ({
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async () => ({ exists: 0 }),
+        fetch: async function* () {},
+        messageMove: async () => ({ uidMap: new Map() }),
+        mailboxCreate: async (path: string) => {
+          created.push(path);
+          return { path, created: true };
+        },
+      }),
+    });
+
+    await expect(provider.createMailbox("其他文件夹/开发社区")).resolves.toEqual({
+      path: "其他文件夹/开发社区",
+      created: true,
+    });
+    expect(created).toEqual(["其他文件夹/开发社区"]);
   });
 
   it("moves QQ message refs by UID after opening the source mailbox writable", async () => {

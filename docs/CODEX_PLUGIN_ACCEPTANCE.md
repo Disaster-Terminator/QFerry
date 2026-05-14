@@ -112,7 +112,7 @@ examples/qferry.rules.json
 - `map.buckets[].recommendedAction`
 - `map.mutationsAttempted`
 
-真实 QQ read-only e2e 调用该工具时必须保持 `mutationsAttempted: 0`，并确认输出里没有 `plan` 或 `operationPlanId`。后续只有在用户选定分类桶后，才进入 `bulk_governance_preview` 或更窄的规则化 preview plan。
+真实 QQ read-only e2e 调用该工具时必须保持 `mutationsAttempted: 0`，并确认输出里没有 `plan` 或 `operationPlanId`。后续只有在用户选定分类桶后，才先进入 `ensure_classification_folder` 预览目标分类文件夹，再进入 `bulk_governance_preview` 或更窄的规则化 preview plan。用户界面和 summary 使用短文件夹名，例如 `广告营销`、`开发社区`；IMAP 执行路径可以是 `其他文件夹/广告营销`。
 
 `preview_cleanup_batch` 是 Codex 插件侧的规则化批量整理入口。它跨页扫描 bounded metadata，应用 `rules` 或 `rulesFile`，按 `selectedGroupIds` 选出候选邮件，并生成 `status: "preview"` 的 operation plan。
 
@@ -127,6 +127,8 @@ examples/qferry.rules.json
 - `mutationsAttempted`
 
 真实 QQ read-only e2e 调用该工具时仍必须保持 `mutationsAttempted: 0`。只有用户明确授权某个 plan 后，才允许调用 `confirm_cleanup_plan({ operationPlanId })`；真实执行必须再调用 `execute_cleanup({ operationPlanId })`，不能由客户端手写或修改 `status: "confirmed"` 的 plan JSON。
+
+`ensure_classification_folder` 用来把分类桶映射到 QQ 文件夹。文件夹已存在时只返回 `folder.exists: true`；文件夹缺失时返回 `status: "preview"`、`action: "create_folder"` 的 operation plan。真实创建文件夹必须和移动邮件一样走 `confirm_cleanup_plan` + `execute_cleanup`，并在 trace 里记录短名称、完整 IMAP 路径、plan 状态和 `mutationsAttempted`。
 
 ## 结构化搜索与优先级分桶
 
@@ -170,7 +172,7 @@ QFerry 当前支持的是规则层 blocklist：
 
 - 在规则文件或 e2e 脚本中按发件人、域名、主题等 metadata 匹配。
 - 生成可审计 preview plan。
-- 在用户授权的真实 mutation e2e 中，经 `confirm_cleanup_plan` 确认后将匹配邮件移动到 `Junk`。
+- 在用户授权的真实 mutation e2e 中，经 `confirm_cleanup_plan` 确认后将匹配邮件移动到可审计的分类文件夹，例如 `广告营销`。`Junk` 只在用户明确要求垃圾箱语义时使用。
 
 这能清理当前邮箱和持续识别同源垃圾邮件，但还不等于 QQ 邮箱服务器侧拒收。服务器侧拉黑需要后续 QQ Web 自动化或已验证接口支持。
 
@@ -201,7 +203,7 @@ QFerry 当前支持的是规则层 blocklist：
 
 - 未经明确授权和服务端确认 plan 的真实 QQ 邮件移动。
 - 标记已读/未读。
-- 创建/删除 QQ 文件夹。
+- 未经 preview/confirm/execute 流程创建 QQ 文件夹，或删除 QQ 文件夹。
 - 删除邮件。
 - 发送邮件。
 - 下载附件。
@@ -227,7 +229,24 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 QQ provider 的 `fetch` 必须按 `folder + uid + uidValidity` 精确读取选中邮件 metadata，不能依赖最新 bounded scan 回查 UID。
 
-Gmail-like 大批量治理验收优先走 `classification_map`，先把窗口邮件分成可解释分类桶并记录建议动作。`bulk_governance_preview` 只在选定具体分类桶后生成 dry-run preview plan；真实 QQ mutation 只允许在用户明确授权后，对高置信广告/营销等小范围子集执行。
+Gmail-like 大批量治理验收优先走 `classification_map`，先把窗口邮件分成可解释分类桶并记录建议动作。`bulk_governance_preview` 只在选定具体分类桶和目标文件夹后生成 dry-run preview plan；真实 QQ mutation 只允许在用户明确授权后，对高置信广告/营销等小范围子集执行。
+
+## 自动化门控
+
+QFerry 采用和 Retinue 相同的分层门控思想：
+
+- `pnpm run gate:commit`：源码层门控，跑单元测试和类型检查，不生成或改写插件 dist。
+- `pnpm run check:generated`：构建产物门控，先运行 `sync:qferry-plugin`，再用 `git diff --exit-code -- plugins/qferry/dist` 确认源码和提交中的插件 bundle 一致。
+- `pnpm run gate:local` / `pnpm run check`：本地完整确定性门控，组合源码门控、构建产物门控、插件结构校验和 fixture 插件 e2e。
+- `.githooks/pre-commit`：运行 `gate:commit`。
+- `.githooks/post-commit`：运行 `check:generated`，发现 dist 漏提交时提示 amend。
+- `.githooks/pre-push` 和 GitHub Actions CI：运行本地/CI 可重复的完整门控；真实 QQ readonly e2e 因依赖本机授权码，不放入公开 CI。
+
+首次启用本仓库 hooks：
+
+```powershell
+pnpm run dev:install-hooks
+```
 
 ## 部署后验收
 
@@ -269,8 +288,7 @@ artifacts/e2e/<runId>/summary.md
 
 ```powershell
 rtk pnpm run check
-rtk pnpm qferry:e2e:plugin-fixture
-rtk pnpm qferry:e2e:plugin-qq-readonly
+rtk pnpm run qferry:e2e:plugin-qq-readonly
 rtk uv run python -m unittest tests.test_probe_qqmail
 ```
 

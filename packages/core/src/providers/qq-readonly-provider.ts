@@ -28,6 +28,7 @@ export interface QqReadOnlyClient {
     };
   }>;
   messageMove?(range: string | number[], destination: string, options?: { uid?: boolean }): Promise<{ uidMap?: Map<number, number> } | false>;
+  mailboxCreate?(path: string): Promise<{ path?: string; created?: boolean } | boolean | void>;
 }
 
 export interface QqReadOnlyProviderInput {

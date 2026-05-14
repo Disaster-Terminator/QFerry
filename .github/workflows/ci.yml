@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Source code gate
+        run: pnpm run gate:commit
+      - name: Check generated plugin artifacts
+        run: pnpm run check:generated
+      - name: Verify QFerry plugin package
+        run: pnpm run verify:qferry-plugin
+      - name: Fixture plugin e2e
+        run: pnpm run qferry:e2e:plugin-fixture

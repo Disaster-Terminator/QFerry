@@ -15,9 +15,11 @@ Default local flow:
 
 ```bash
 pnpm run check
-pnpm run qferry:e2e:plugin-fixture
+pnpm run qferry:e2e:plugin-qq-readonly
 pnpm run dev:sync-plugin-cache:all -- --apply
 ```
+
+`pnpm run check` includes the fixture plugin e2e. Keep `qferry:e2e:plugin-qq-readonly` separate because it depends on local QQ Mail authorization and must stay bounded/read-only.
 
 Use `dev:sync-plugin-cache:all` only for QFerry. It syncs the installed QFerry cache for Windows and, when detectable, WSL. It does not install QFerry, uninstall QFerry, update marketplaces, or touch other plugin projects.
 
