@@ -60,6 +60,18 @@ export interface ExecuteCleanupResult {
   attemptedMessages: number;
   mutationsAttempted: number;
   moved?: number;
+  reconciliations?: Array<{
+    sourceFolder: string;
+    targetFolder: string;
+    sourceBefore: number;
+    sourceAfter: number;
+    sourceDelta: number;
+    targetBefore: number;
+    targetAfter: number;
+    targetDelta: number;
+    expectedSourceDelta: number;
+    expectedTargetDelta: number;
+  }>;
   createdFolder?: string;
 }
 
@@ -597,6 +609,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           attemptedMessages: plan.messageRefs.length,
           mutationsAttempted: plan.messageRefs.length,
           moved: moveResult.moved,
+          reconciliations: moveResult.reconciliations,
         },
       };
     },

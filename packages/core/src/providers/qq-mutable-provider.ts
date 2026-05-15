@@ -1,5 +1,5 @@
 import type { MessageRef } from "../operation-plan.js";
-import type { ProviderCapabilitySnapshot } from "./types.js";
+import type { MoveMessagesReconciliation, MoveMessagesResult, ProviderCapabilitySnapshot } from "./types.js";
 import { QqReadOnlyProvider, type QqReadOnlyClient, type QqReadOnlyProviderInput } from "./qq-readonly-provider.js";
 
 export class QqMutableProvider extends QqReadOnlyProvider {
@@ -39,50 +39,81 @@ export class QqMutableProvider extends QqReadOnlyProvider {
     });
   }
 
-  async moveMessages(refs: MessageRef[], targetFolder: string): Promise<{ moved: number }> {
+  async moveMessages(refs: MessageRef[], targetFolder: string): Promise<MoveMessagesResult> {
     if (refs.length === 0) {
-      return { moved: 0 };
+      return { moved: 0, reconciliations: [] };
     }
     if (!targetFolder.trim()) {
       throw new Error("Move target folder is empty");
     }
 
     return this.withClient("move_messages", async (client) => {
-      if (!client.messageCopy || !client.messageDelete) {
-        throw new Error("QQ IMAP client does not expose safe copy/delete move primitives");
-      }
-      if (!hasCapability(client, "UIDPLUS")) {
-        throw new Error("QQ IMAP move requires UIDPLUS for exact UID EXPUNGE");
+      if (!client.messageMove) {
+        throw new Error("QQ IMAP client does not expose messageMove");
       }
 
       let moved = 0;
+      const reconciliations: MoveMessagesReconciliation[] = [];
       for (const [folder, folderRefs] of groupRefsByFolder(refs)) {
-        const mailbox = await client.mailboxOpen(folder, { readOnly: false });
-        if (mailbox.readOnly) {
-          throw new Error(`Mailbox is read-only: ${folder}`);
+        if (folder === targetFolder) {
+          throw new Error(`Move target folder must differ from source folder: ${folder}`);
         }
-        assertUidValidity(folderRefs, mailbox.uidValidity);
+        for (const ref of folderRefs) {
+          const targetBefore = await getMailboxExists(client, targetFolder, true);
+          const mailbox = await client.mailboxOpen(folder, { readOnly: false });
+          if (mailbox.readOnly) {
+            throw new Error(`Mailbox is read-only: ${folder}`);
+          }
+          assertUidValidity([ref], mailbox.uidValidity);
 
-        const uids = folderRefs.map((ref) => parseUid(ref.uid));
-        const copyResult = await client.messageCopy(uids, targetFolder, { uid: true });
-        if (copyResult === false) {
-          throw new Error(`QQ IMAP copy failed for folder: ${folder}`);
+          const uid = parseUid(ref.uid);
+          const result = await client.messageMove([uid], targetFolder, { uid: true });
+          if (result === false) {
+            throw new Error(`QQ IMAP move failed for folder: ${folder}`);
+          }
+          const resultCount = result.uidMap?.size;
+          if (resultCount !== undefined && resultCount !== 1) {
+            throw new Error(`QQ IMAP move count mismatch for folder ${folder}: expected 1, got ${resultCount}`);
+          }
+          const sourceAfter = await getMailboxExists(client, folder, true);
+          const targetAfter = await getMailboxExists(client, targetFolder, true);
+          const reconciliation = {
+            sourceFolder: folder,
+            targetFolder,
+            sourceBefore: mailbox.exists,
+            sourceAfter,
+            sourceDelta: sourceAfter - mailbox.exists,
+            targetBefore,
+            targetAfter,
+            targetDelta: targetAfter - targetBefore,
+            expectedSourceDelta: -1,
+            expectedTargetDelta: 1,
+          };
+          assertReconciled(reconciliation);
+          reconciliations.push(reconciliation);
+          moved += 1;
         }
-        const deleteResult = await client.messageDelete(uids, { uid: true });
-        if (deleteResult === false || deleteResult === undefined) {
-          throw new Error(`QQ IMAP exact UID expunge failed for folder: ${folder}`);
-        }
-        moved += copyResult.uidMap?.size ?? uids.length;
       }
-      return { moved };
+      return { moved, reconciliations };
     });
   }
 }
 
-function hasCapability(client: QqReadOnlyClient, capability: string): boolean {
-  const capabilities = client.capabilities;
-  if (!capabilities) return false;
-  return capabilities.has(capability);
+async function getMailboxExists(client: QqReadOnlyClient, folder: string, readOnly: boolean): Promise<number> {
+  return (await client.mailboxOpen(folder, { readOnly })).exists;
+}
+
+function assertReconciled(reconciliation: MoveMessagesReconciliation): void {
+  if (
+    reconciliation.sourceDelta !== reconciliation.expectedSourceDelta
+    || reconciliation.targetDelta !== reconciliation.expectedTargetDelta
+  ) {
+    throw new Error(
+      `QQ IMAP move reconciliation failed: source ${reconciliation.sourceFolder} delta ${reconciliation.sourceDelta}`
+      + ` expected ${reconciliation.expectedSourceDelta}; target ${reconciliation.targetFolder} delta ${reconciliation.targetDelta}`
+      + ` expected ${reconciliation.expectedTargetDelta}`,
+    );
+  }
 }
 
 function groupRefsByFolder(refs: MessageRef[]): Map<string, MessageRef[]> {

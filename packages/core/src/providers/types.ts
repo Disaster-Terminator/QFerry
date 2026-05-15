@@ -60,6 +60,24 @@ export interface MailProvider {
   fetchMessage(ref: MessageRef): Promise<MessageDetail>;
   getCapabilitySnapshot?(): Promise<ProviderCapabilitySnapshot>;
   getMailboxSummary?(folder: string): Promise<MailboxSummary>;
-  moveMessages?(refs: MessageRef[], targetFolder: string): Promise<{ moved: number }>;
+  moveMessages?(refs: MessageRef[], targetFolder: string): Promise<MoveMessagesResult>;
   createMailbox?(folder: string): Promise<{ path: string; created: boolean }>;
+}
+
+export interface MoveMessagesReconciliation {
+  sourceFolder: string;
+  targetFolder: string;
+  sourceBefore: number;
+  sourceAfter: number;
+  sourceDelta: number;
+  targetBefore: number;
+  targetAfter: number;
+  targetDelta: number;
+  expectedSourceDelta: number;
+  expectedTargetDelta: number;
+}
+
+export interface MoveMessagesResult {
+  moved: number;
+  reconciliations?: MoveMessagesReconciliation[];
 }
