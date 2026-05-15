@@ -1494,6 +1494,79 @@ describe("mail tools", () => {
     ]);
   });
 
+  it("executes only the requested move chunk and reports remaining messages", async () => {
+    const provider = FixtureMailProvider.demo();
+    const movedRefs: unknown[] = [];
+    const counts = new Map([
+      ["INBOX", 3],
+      ["Archive", 0],
+    ]);
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        scanMailboxMetadata: provider.scanMailboxMetadata.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        getMailboxSummary: async (folder) => ({
+          path: folder,
+          exists: counts.get(folder) ?? 0,
+        }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async (refs, targetFolder) => {
+          movedRefs.push(refs);
+          expect(refs).toHaveLength(1);
+          const sourceFolder = refs[0]?.folder ?? "";
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - 1);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + 1);
+          return { moved: refs.length };
+        },
+      },
+    });
+    const previewPlan = createOperationPlan({
+      runId: "run-execute-chunked",
+      provider: "fixture",
+      action: "move",
+      messageRefs: [
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "3" },
+      ],
+      target: { folder: "Archive" },
+    });
+    const plan = confirmOperationPlan(previewPlan, previewPlan.operationPlanId);
+
+    const result = await tools.executeCleanup({ plan, maxMessages: 2 });
+
+    expect(result.result).toMatchObject({
+      operationPlanId: plan.operationPlanId,
+      status: "partially_executed",
+      action: "move",
+      attemptedMessages: 2,
+      mutationsAttempted: 2,
+      moved: 2,
+      totalPlanMessages: 3,
+      remainingMessages: 1,
+      executionBatch: { requestedMaxMessages: 2, executedMessages: 2 },
+      reconciliations: [
+        { sourceDelta: -1, targetDelta: 1 },
+        { sourceDelta: -1, targetDelta: 1 },
+      ],
+    });
+    expect(movedRefs).toEqual([
+      [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }],
+      [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" }],
+    ]);
+  });
+
   it("keeps prototype provider mutation methods when using fresh reconciliation", async () => {
     const fixture = FixtureMailProvider.demo();
     const movedRefs: unknown[] = [];

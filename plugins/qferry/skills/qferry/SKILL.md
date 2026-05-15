@@ -24,13 +24,13 @@ For real mailbox work, call tools in this order:
 11. `preview_cleanup_batch` when the user already has explicit rules and wants a cross-page bounded operation plan.
 12. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups or already reviewed message refs. Direct `messageRefs` plans are limited and marked as `source: "client_refs"`.
 12. `confirm_cleanup_plan` only after the user explicitly approves one specific preview plan.
-13. `execute_cleanup` only with the confirmed `operationPlanId`; never pass or fabricate a `status: "confirmed"` plan object.
+13. `execute_cleanup` only with the confirmed `operationPlanId`; never pass or fabricate a `status: "confirmed"` plan object. For move plans, the installed MCP server executes at most 5 messages by default and keeps a partially executed plan resumable under the same `operationPlanId`; call `execute_cleanup` again to continue remaining messages. You may pass `maxMessages` from 1 to 20 for controlled experiments, but use 5 for real QQ Mail unless a faster execution path has been verified.
 
 Use `classify_messages` when debugging rules or doing focused classification. Prefer `triage_inbox` for normal inbox organization because it returns group counts, priority buckets (`urgent`, `needs_review`, `waiting`, `fyi`, `bulk`), sampled message count, recommended next action, and `mutationsAttempted`.
 
 ## Safety Boundary
 
-Do not request real QQ Mail mutation through QFerry unless the user explicitly authorizes that specific operation. The default product workflow is read-only and preview-first; mutation requires a server-side plan generated in this MCP session, `confirm_cleanup_plan`, and then `execute_cleanup`.
+Do not request real QQ Mail mutation through QFerry unless the user explicitly authorizes that specific operation. The default product workflow is read-only and preview-first; mutation requires a server-side plan generated in this MCP session, `confirm_cleanup_plan`, and then `execute_cleanup`. Large confirmed move plans are checkpointed: `execute_cleanup` returns `partially_executed` with `remainingMessages` when more refs remain, and the same `operationPlanId` can be executed again until it returns `executed`.
 
 Allowed by default:
 

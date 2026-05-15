@@ -53,15 +53,22 @@ export interface GroupSpamCandidatesInput {
 
 export interface ExecuteCleanupInput {
   plan: OperationPlan;
+  maxMessages?: number;
 }
 
 export interface ExecuteCleanupResult {
   operationPlanId: string;
-  status: "blocked" | "executed";
+  status: "blocked" | "executed" | "partially_executed";
   action: OperationAction;
   attemptedMessages: number;
   mutationsAttempted: number;
   moved?: number;
+  totalPlanMessages?: number;
+  remainingMessages?: number;
+  executionBatch?: {
+    requestedMaxMessages: number;
+    executedMessages: number;
+  };
   reconciliations?: Array<{
     sourceFolder: string;
     targetFolder: string;
@@ -602,21 +609,31 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         throw new Error("Provider does not implement moveMessages");
       }
 
+      const executionLimit = normalizeMoveExecutionLimit(executeInput.maxMessages);
+      const messageRefsToMove = executionLimit === undefined
+        ? plan.messageRefs
+        : plan.messageRefs.slice(0, executionLimit);
+      const remainingMessages = plan.messageRefs.length - messageRefsToMove.length;
       const moveResult = input.provider.getMailboxSummary
         ? await moveMessagesWithFreshReconciliation(
             input.provider as MailProvider & { getMailboxSummary(folder: string): Promise<MailboxSummary> },
-            plan.messageRefs,
+            messageRefsToMove,
             targetFolder,
           )
-        : await input.provider.moveMessages(plan.messageRefs, targetFolder);
+        : await input.provider.moveMessages(messageRefsToMove, targetFolder);
       return {
         result: {
           operationPlanId: plan.operationPlanId,
-          status: "executed",
+          status: remainingMessages > 0 ? "partially_executed" : "executed",
           action: plan.action,
-          attemptedMessages: plan.messageRefs.length,
-          mutationsAttempted: plan.messageRefs.length,
+          attemptedMessages: messageRefsToMove.length,
+          mutationsAttempted: messageRefsToMove.length,
           moved: moveResult.moved,
+          totalPlanMessages: plan.messageRefs.length,
+          remainingMessages,
+          ...(executionLimit === undefined
+            ? {}
+            : { executionBatch: { requestedMaxMessages: executionLimit, executedMessages: messageRefsToMove.length } }),
           reconciliations: moveResult.reconciliations,
         },
       };
@@ -1588,6 +1605,16 @@ function slugifyRuleId(value: string): string {
 
 function messageRefKey(ref: MessageRef): string {
   return `${ref.provider}\0${ref.accountAlias}\0${ref.folder}\0${ref.uid}\0${ref.uidValidity ?? ""}`;
+}
+
+function normalizeMoveExecutionLimit(maxMessages: number | undefined): number | undefined {
+  if (maxMessages === undefined) {
+    return undefined;
+  }
+  if (!Number.isSafeInteger(maxMessages) || maxMessages <= 0) {
+    throw new Error(`maxMessages must be a positive integer, got ${maxMessages}`);
+  }
+  return maxMessages;
 }
 
 async function moveMessagesWithFreshReconciliation(

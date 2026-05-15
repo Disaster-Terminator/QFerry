@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { createQFerryMcpServer } from "../src/mcp-server.js";
+import type { MessageSummary } from "@qferry/core";
 
 describe("QFerry ChatGPT App MCP server", () => {
   const originalEnv = { ...process.env };
@@ -711,6 +712,136 @@ describe("QFerry ChatGPT App MCP server", () => {
     });
     expect(secondExecute.isError).toBe(true);
     expect(JSON.stringify(secondExecute.content)).toContain("already consumed");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("keeps partially executed cleanup plans resumable through the MCP server", async () => {
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "newsletter@example.com",
+        subject: "Promo one",
+        date: "2020-01-01T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "newsletter@example.com",
+        subject: "Promo two",
+        date: "2020-01-02T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "3" },
+        from: "newsletter@example.com",
+        subject: "Promo three",
+        date: "2020-01-03T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const movedBatches: unknown[] = [];
+    const counts = new Map([
+      ["INBOX", 3],
+      ["Archive", 0],
+    ]);
+    const server = createQFerryMcpServer({
+      provider: {
+        listMailboxes: async () => [{ path: "INBOX", name: "INBOX" }, { path: "Archive", name: "Archive" }],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async (ref) => ({
+          ref,
+          from: "newsletter@example.com",
+          subject: "Promo",
+          date: "2020-01-01T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+          bodyText: "",
+        }),
+        getMailboxSummary: async (folder) => ({ path: folder, exists: counts.get(folder) ?? 0 }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async (refs, targetFolder) => {
+          movedBatches.push(refs);
+          expect(refs).toHaveLength(1);
+          const sourceFolder = refs[0]?.folder ?? "";
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - 1);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + 1);
+          return { moved: refs.length };
+        },
+      },
+    });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const preview = await client.callTool({
+      name: "plan_cleanup",
+      arguments: {
+        runId: "run-resumable-execute",
+        folder: "INBOX",
+        limit: 10,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedGroupIds: ["archive"],
+        rules: [{ id: "promo", groupId: "archive", match: { subjectIncludes: "Promo" } }],
+      },
+    });
+    const previewContent = preview.structuredContent as { plan?: { operationPlanId?: string } } | undefined;
+    const operationPlanId = String(previewContent?.plan?.operationPlanId);
+    await client.callTool({ name: "confirm_cleanup_plan", arguments: { operationPlanId } });
+
+    const firstExecute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId, maxMessages: 2 },
+    });
+    expect(firstExecute.structuredContent).toMatchObject({
+      result: {
+        operationPlanId,
+        status: "partially_executed",
+        attemptedMessages: 2,
+        moved: 2,
+        remainingMessages: 1,
+      },
+    });
+
+    const secondExecute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId, maxMessages: 2 },
+    });
+    expect(secondExecute.structuredContent).toMatchObject({
+      result: {
+        operationPlanId,
+        status: "executed",
+        attemptedMessages: 1,
+        moved: 1,
+        remainingMessages: 0,
+      },
+    });
+
+    const thirdExecute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId },
+    });
+    expect(thirdExecute.isError).toBe(true);
+    expect(JSON.stringify(thirdExecute.content)).toContain("already consumed");
+    expect(movedBatches).toHaveLength(3);
 
     await client.close();
     await server.close();
