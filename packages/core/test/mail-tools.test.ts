@@ -935,6 +935,7 @@ describe("mail tools", () => {
           bulkScanCalls.push(input);
           return {
             pagesScanned: 1,
+            mailboxSnapshot: { folder: "INBOX", exists: 123, uidValidity: "snapshot-map" },
             messages: [{
               ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
               from: "newsletter@example.com",
@@ -960,6 +961,7 @@ describe("mail tools", () => {
     expect(scanCalls).toEqual([]);
     expect(bulkScanCalls).toEqual([{ folder: "INBOX", limit: 10, maxPages: 50, order: "oldest", offset: 0 }]);
     expect(result.map.pagesScanned).toBe(1);
+    expect(result.map.mailboxSnapshot).toEqual({ folder: "INBOX", exists: 123, uidValidity: "snapshot-map" });
     expect(result.map.categoryCounts).toEqual({ newsletter_or_digest: 1 });
   });
 
@@ -1174,6 +1176,11 @@ describe("mail tools", () => {
           const callIndex = scanCalls.length - 1;
           return {
             pagesScanned: 1,
+            mailboxSnapshot: {
+              folder: "INBOX",
+              exists: callIndex === 0 ? 10 : 9,
+              uidValidity: "sweep-window",
+            },
             messages: windows[callIndex] ?? [],
           };
         },
@@ -1207,6 +1214,10 @@ describe("mail tools", () => {
       },
       mutationsAttempted: 0,
     });
+    expect(result.sweep.chunks.map((chunk) => chunk.mailboxSnapshot)).toEqual([
+      { folder: "INBOX", exists: 10, uidValidity: "sweep-window" },
+      { folder: "INBOX", exists: 9, uidValidity: "sweep-window" },
+    ]);
   });
 
   it("keeps recurring service and promo senders out of the generic review bucket", async () => {
@@ -1298,6 +1309,7 @@ describe("mail tools", () => {
           bulkScanCalls.push(input);
           return {
             pagesScanned: 1,
+            mailboxSnapshot: { folder: "INBOX", exists: 321, uidValidity: "snapshot-governance" },
             messages: [{
               ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
               from: "newsletter@example.com",
@@ -1328,6 +1340,7 @@ describe("mail tools", () => {
     expect(scanCalls).toEqual([]);
     expect(bulkScanCalls).toEqual([{ folder: "INBOX", limit: 10, maxPages: 50, order: "oldest", offset: 0 }]);
     expect(result.preview.pagesScanned).toBe(1);
+    expect(result.preview.mailboxSnapshot).toEqual({ folder: "INBOX", exists: 321, uidValidity: "snapshot-governance" });
     expect(result.preview.selectedMessageRefs).toBe(1);
   });
 

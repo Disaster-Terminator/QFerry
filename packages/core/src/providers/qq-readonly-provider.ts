@@ -192,7 +192,15 @@ export class QqReadOnlyProvider implements MailProvider {
         }
       }
 
-      return { messages, pagesScanned };
+      return {
+        messages,
+        pagesScanned,
+        mailboxSnapshot: {
+          folder: input.folder,
+          exists: mailbox.exists,
+          uidValidity: mailbox.uidValidity?.toString(),
+        },
+      };
     });
   }
 

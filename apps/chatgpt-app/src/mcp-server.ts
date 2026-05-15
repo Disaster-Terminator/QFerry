@@ -604,6 +604,7 @@ function summarizeMcpToolResult(structuredContent: object): Record<string, unkno
     remainingMessages: result?.remainingMessages,
     mutationsAttempted: content.mutationsAttempted ?? result?.mutationsAttempted ?? 0,
     reconciliations: result?.reconciliations,
+    mailboxSnapshot: preview?.mailboxSnapshot ?? report?.mailboxSnapshot,
     categoryCounts: preview?.categoryCounts,
   };
 }

@@ -35,9 +35,16 @@ export interface ScanMailboxMetadataWindowInput extends ScanMailboxMetadataInput
   maxPages: number;
 }
 
+export interface MailboxWindowSnapshot {
+  folder: string;
+  exists: number;
+  uidValidity?: string;
+}
+
 export interface ScanMailboxMetadataWindowResult {
   messages: MessageSummary[];
   pagesScanned: number;
+  mailboxSnapshot?: MailboxWindowSnapshot;
 }
 
 export interface MessageSummary {

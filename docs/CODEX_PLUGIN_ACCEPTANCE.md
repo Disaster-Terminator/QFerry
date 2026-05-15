@@ -103,6 +103,8 @@ examples/qferry.rules.json
 
 `classification_sweep` 是 Gmail-like 大批量治理的默认入口。它按 chunk 渐进扫描 bounded metadata，按 sender/domain/content 分类为 `security_or_account`、`receipt_or_purchase`、`developer_community`、`newsletter_or_digest`、`high_confidence_marketing` 和 `review`，只返回聚合计数、chunk 摘要、bucket 摘要、`hasMore`、`resumeToken` 和 `nextScanOffset`，不返回 message refs，也不生成 operation plan。
 
+真实 QQ 邮箱发生移动后，IMAP sequence 窗口和 `INBOX exists` 可能重新折叠；因此 sweep 的分类计数和 `nextScanOffset` 只能作为 advisory 导航信号，不能作为“该类别已清空”的证明。真实执行前必须重新调用 `bulk_governance_preview`，以 preview 实际返回的 UID refs、`selectedMessageRefs` 和 `mailboxSnapshot` 为准；执行验收以目标文件夹增量为硬判据，源文件夹 delta 只记录为审计信息。
+
 验收时必须关注这些字段：
 
 - `sweep.pagesScanned`

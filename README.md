@@ -125,6 +125,8 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 Gmail-like 治理优先从 `classification_sweep` 开始：先按发信人、域名和内容特征分类为高置信广告营销、newsletter/digest、安全/账号、购买/账单、开发社区和待审，得到全量聚合计数、chunk 摘要和续扫位置。需要查看某个窗口的候选细节时再用 `classification_map`。只有选定具体桶后，才进入 `ensure_classification_folder` 和 `bulk_governance_preview` 生成 preview plan。真实执行只用于小范围确认后的子集，不把大范围 dry-run 等同于无人值守清理。
 
+QQ IMAP 在多轮移动后可能重新折叠 sequence 窗口和收件箱 `exists` 计数。QFerry 因此把 sweep 结果视为导航信号，把 `bulk_governance_preview` 返回的 UID refs、`selectedMessageRefs` 和 `mailboxSnapshot` 作为真实执行依据；移动后的硬校验以目标文件夹增量为准，源文件夹 delta 进入审计日志但不单独判失败。
+
 ## 测试留痕
 
 每次 e2e 都会写入：

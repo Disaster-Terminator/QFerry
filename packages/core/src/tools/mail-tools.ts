@@ -1,6 +1,6 @@
 import { classifyMessages, type ClassificationRule, type MessageClassification, type PriorityBucketId, type PriorityConfidence } from "../classification.js";
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
-import type { MailboxInfo, MailboxSummary, MailProvider, MessageDetail, MessageSummary, MoveMessagesReconciliation, ProviderCapabilitySnapshot } from "../providers/types.js";
+import type { MailboxInfo, MailboxSummary, MailProvider, MailboxWindowSnapshot, MessageDetail, MessageSummary, MoveMessagesReconciliation, ProviderCapabilitySnapshot, ScanMailboxMetadataWindowResult } from "../providers/types.js";
 import { loadClassificationRuleset, type ClassificationRulesetMetadata } from "../ruleset.js";
 import { formatRulesetPatchChangelog, renderRulesetPatchDraft, type RulesetPatchDraft } from "../ruleset-patch.js";
 import type { QFerryRuntimeConfig } from "../runtime-config.js";
@@ -211,6 +211,7 @@ export interface BulkGovernanceCandidate {
 export interface BulkGovernancePreview {
   provider: string;
   folder: string;
+  mailboxSnapshot?: MailboxWindowSnapshot;
   scanOrder: "newest" | "oldest";
   scanOffset: number;
   pageSize: number;
@@ -255,6 +256,7 @@ export interface ClassificationMapBucket {
 export interface ClassificationMapReport {
   provider: string;
   folder: string;
+  mailboxSnapshot?: MailboxWindowSnapshot;
   scanOrder: "newest" | "oldest";
   scanOffset: number;
   pageSize: number;
@@ -268,6 +270,7 @@ export interface ClassificationMapReport {
 
 export interface ClassificationSweepChunk {
   scanOffset: number;
+  mailboxSnapshot?: MailboxWindowSnapshot;
   pagesScanned: number;
   scannedMessages: number;
   categoryCounts: Partial<Record<BulkGovernanceCategoryId, number>>;
@@ -918,6 +921,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         map: {
           provider: messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture",
           folder: mapInput.folder,
+          mailboxSnapshot: scanWindow.mailboxSnapshot,
           scanOrder,
           scanOffset,
           pageSize,
@@ -973,6 +977,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         const categoryCounts = countBulkCategories(categorized.map((entry) => entry.classification.categoryId));
         chunks.push({
           scanOffset: currentOffset,
+          mailboxSnapshot: scanWindow.mailboxSnapshot,
           pagesScanned: scanWindow.pagesScanned,
           scannedMessages: scanWindow.messages.length,
           categoryCounts,
@@ -1067,6 +1072,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         preview: {
           provider,
           folder: bulkInput.folder,
+          mailboxSnapshot: scanWindow.mailboxSnapshot,
           scanOrder,
           scanOffset,
           pageSize,
@@ -1112,7 +1118,7 @@ async function scanMetadataWindowWithPages(
     order: "newest" | "oldest";
     offset: number;
   },
-): Promise<{ messages: MessageSummary[]; pagesScanned: number }> {
+): Promise<ScanMailboxMetadataWindowResult> {
   const messages: MessageSummary[] = [];
   let pagesScanned = 0;
   for (let pageIndex = 0; pageIndex < input.maxPages; pageIndex += 1) {

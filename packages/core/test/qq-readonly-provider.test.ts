@@ -135,6 +135,35 @@ describe("QQ read-only provider", () => {
     ]);
   });
 
+  it("returns a mailbox snapshot for window scans", async () => {
+    const client = {
+      connect: async () => undefined,
+      logout: async () => undefined,
+      list: async () => [],
+      mailboxOpen: async () => ({ exists: 42, uidValidity: 888n }),
+      fetch: () => asyncMessages([]),
+    };
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => client,
+    });
+
+    const result = await provider.scanMailboxMetadataWindow({
+      folder: "INBOX",
+      limit: 10,
+      maxPages: 2,
+      order: "oldest",
+      offset: 0,
+    });
+
+    expect(result.mailboxSnapshot).toEqual({
+      folder: "INBOX",
+      exists: 42,
+      uidValidity: "888",
+    });
+  });
+
   it("can scan oldest bounded metadata", async () => {
     const fetchCalls: unknown[] = [];
     const client = {
