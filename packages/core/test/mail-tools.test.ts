@@ -507,6 +507,7 @@ describe("mail tools", () => {
         ...provider,
         listMailboxes: provider.listMailboxes.bind(provider),
         fetchMessage: provider.fetchMessage.bind(provider),
+        getMailboxSummary: async (folder) => ({ path: folder, exists: 3, uidValidity: "batch-preview" }),
         scanMailboxMetadata: async (input) => {
           scanInputs.push(input);
           return provider.scanMailboxMetadata(input);
@@ -536,6 +537,7 @@ describe("mail tools", () => {
     expect(result.preview).toMatchObject({
       provider: "fixture",
       folder: "INBOX",
+      mailboxSnapshot: { folder: "INBOX", exists: 3, uidValidity: "batch-preview" },
       scanOrder: "oldest",
       scanOffset: 0,
       pageSize: 1,

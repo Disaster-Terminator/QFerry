@@ -347,6 +347,7 @@ export interface SenderGovernanceReport {
 export interface CleanupBatchPreview {
   provider: string;
   folder: string;
+  mailboxSnapshot?: MailboxWindowSnapshot;
   scanOrder: "newest" | "oldest";
   scanOffset: number;
   pageSize: number;
@@ -743,6 +744,16 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const maxMessageRefs = Math.max(batchInput.maxMessageRefs, 0);
       const scanOffset = Math.max(batchInput.scanOffset ?? 0, 0);
       const scanOrder = batchInput.order ?? "oldest";
+      const mailboxSummary = input.provider.getMailboxSummary
+        ? await input.provider.getMailboxSummary(batchInput.folder)
+        : undefined;
+      const mailboxSnapshot = mailboxSummary
+        ? {
+          folder: mailboxSummary.path,
+          exists: mailboxSummary.exists,
+          uidValidity: mailboxSummary.uidValidity,
+        }
+        : undefined;
       const messages: MessageSummary[] = [];
       const classifications: MessageClassification[] = [];
       let pagesScanned = 0;
@@ -783,6 +794,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         preview: {
           provider,
           folder: batchInput.folder,
+          mailboxSnapshot,
           scanOrder,
           scanOffset,
           pageSize,
