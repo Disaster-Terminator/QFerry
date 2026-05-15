@@ -1,9 +1,6 @@
 import type { MessageRef } from "../operation-plan.js";
-import type { MoveMessagesReconciliation, MoveMessagesResult, ProviderCapabilitySnapshot } from "./types.js";
-import { QqReadOnlyProvider, type QqReadOnlyClient, type QqReadOnlyProviderInput } from "./qq-readonly-provider.js";
-
-const MOVE_RECONCILE_ATTEMPTS = 6;
-const MOVE_RECONCILE_DELAY_MS = 500;
+import type { MoveMessagesResult, ProviderCapabilitySnapshot } from "./types.js";
+import { QqReadOnlyProvider, type QqReadOnlyProviderInput } from "./qq-readonly-provider.js";
 
 export class QqMutableProvider extends QqReadOnlyProvider {
   constructor(input: QqReadOnlyProviderInput) {
@@ -56,13 +53,11 @@ export class QqMutableProvider extends QqReadOnlyProvider {
       }
 
       let moved = 0;
-      const reconciliations: MoveMessagesReconciliation[] = [];
       for (const [folder, folderRefs] of groupRefsByFolder(refs)) {
         if (folder === targetFolder) {
           throw new Error(`Move target folder must differ from source folder: ${folder}`);
         }
         for (const ref of folderRefs) {
-          const targetBefore = await getMailboxExists(client, targetFolder, true);
           const mailbox = await client.mailboxOpen(folder, { readOnly: false });
           if (mailbox.readOnly) {
             throw new Error(`Mailbox is read-only: ${folder}`);
@@ -78,81 +73,11 @@ export class QqMutableProvider extends QqReadOnlyProvider {
           if (resultCount !== undefined && resultCount !== 1) {
             throw new Error(`QQ IMAP move count mismatch for folder ${folder}: expected 1, got ${resultCount}`);
           }
-          const reconciliation = await waitForReconciliation({
-            client,
-            sourceFolder: folder,
-            targetFolder,
-            sourceBefore: mailbox.exists,
-            targetBefore,
-            expectedSourceDelta: -1,
-            expectedTargetDelta: 1,
-            sleep: (ms) => this.sleepFor(ms),
-          });
-          reconciliations.push(reconciliation);
           moved += 1;
         }
       }
-      return { moved, reconciliations };
+      return { moved };
     });
-  }
-}
-
-async function getMailboxExists(client: QqReadOnlyClient, folder: string, readOnly: boolean): Promise<number> {
-  return (await client.mailboxOpen(folder, { readOnly })).exists;
-}
-
-async function waitForReconciliation(input: {
-  client: QqReadOnlyClient;
-  sourceFolder: string;
-  targetFolder: string;
-  sourceBefore: number;
-  targetBefore: number;
-  expectedSourceDelta: number;
-  expectedTargetDelta: number;
-  sleep: (ms: number) => Promise<void>;
-}): Promise<MoveMessagesReconciliation> {
-  let latest: MoveMessagesReconciliation | undefined;
-  for (let attempt = 0; attempt < MOVE_RECONCILE_ATTEMPTS; attempt += 1) {
-    const sourceAfter = await getMailboxExists(input.client, input.sourceFolder, true);
-    const targetAfter = await getMailboxExists(input.client, input.targetFolder, true);
-    latest = {
-      sourceFolder: input.sourceFolder,
-      targetFolder: input.targetFolder,
-      sourceBefore: input.sourceBefore,
-      sourceAfter,
-      sourceDelta: sourceAfter - input.sourceBefore,
-      targetBefore: input.targetBefore,
-      targetAfter,
-      targetDelta: targetAfter - input.targetBefore,
-      expectedSourceDelta: input.expectedSourceDelta,
-      expectedTargetDelta: input.expectedTargetDelta,
-    };
-    if (isReconciled(latest)) {
-      return latest;
-    }
-    if (attempt < MOVE_RECONCILE_ATTEMPTS - 1) {
-      await input.sleep(MOVE_RECONCILE_DELAY_MS);
-    }
-  }
-  if (!latest) {
-    throw new Error("QQ IMAP move reconciliation did not run");
-  }
-  assertReconciled(latest);
-  return latest;
-}
-
-function isReconciled(reconciliation: MoveMessagesReconciliation): boolean {
-  return reconciliation.sourceDelta === reconciliation.expectedSourceDelta
-    && reconciliation.targetDelta === reconciliation.expectedTargetDelta;
-}
-
-function assertReconciled(reconciliation: MoveMessagesReconciliation): void {
-  if (!isReconciled(reconciliation)) {
-    throw new Error(
-      `QQ IMAP move reconciliation failed: source ${reconciliation.sourceFolder} delta ${reconciliation.sourceDelta}`
-      + ` expected ${reconciliation.expectedSourceDelta}; target ${reconciliation.targetFolder} delta ${reconciliation.targetDelta}`
-      + ` expected ${reconciliation.expectedTargetDelta}`,
-    );
   }
 }
 

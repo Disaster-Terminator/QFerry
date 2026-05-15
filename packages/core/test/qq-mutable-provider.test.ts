@@ -54,13 +54,9 @@ describe("QQ mutable provider", () => {
     expect(created).toEqual(["其他文件夹/开发社区"]);
   });
 
-  it("moves QQ message refs one UID at a time and reconciles each mailbox delta", async () => {
+  it("moves QQ message refs one UID at a time after opening the source mailbox writable", async () => {
     const opened: unknown[] = [];
     const moved: unknown[] = [];
-    const mailboxExists = new Map([
-      ["垃圾箱", [10, 11, 11, 12]],
-      ["INBOX", [2, 1, 1, 0]],
-    ]);
     const provider = new QqMutableProvider({
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
@@ -70,10 +66,7 @@ describe("QQ mutable provider", () => {
         list: async () => [],
         mailboxOpen: async (path: string, options: unknown) => {
           opened.push({ path, options });
-          const values = mailboxExists.get(path) ?? [0];
-          const exists = values.shift() ?? 0;
-          mailboxExists.set(path, values);
-          return { exists, uidValidity: path === "INBOX" ? 888n : 999n };
+          return { exists: 2, uidValidity: 888n };
         },
         fetch: async function* () {},
         messageMove: async (range: unknown, destination: string, options: unknown) => {
@@ -86,93 +79,16 @@ describe("QQ mutable provider", () => {
     await expect(provider.moveMessages([
       { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
       { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "2", uidValidity: "888" },
-    ], "垃圾箱")).resolves.toMatchObject({
-      moved: 2,
-      reconciliations: [
-        { sourceDelta: -1, targetDelta: 1, expectedSourceDelta: -1, expectedTargetDelta: 1 },
-        { sourceDelta: -1, targetDelta: 1, expectedSourceDelta: -1, expectedTargetDelta: 1 },
-      ],
-    });
+    ], "垃圾箱")).resolves.toEqual({ moved: 2 });
 
     expect(opened).toEqual([
-      { path: "垃圾箱", options: { readOnly: true } },
       { path: "INBOX", options: { readOnly: false } },
-      { path: "INBOX", options: { readOnly: true } },
-      { path: "垃圾箱", options: { readOnly: true } },
-      { path: "垃圾箱", options: { readOnly: true } },
       { path: "INBOX", options: { readOnly: false } },
-      { path: "INBOX", options: { readOnly: true } },
-      { path: "垃圾箱", options: { readOnly: true } },
     ]);
     expect(moved).toEqual([
       { range: [1], destination: "垃圾箱", options: { uid: true } },
       { range: [2], destination: "垃圾箱", options: { uid: true } },
     ]);
-  });
-
-  it("polls reconciliation when QQ updates source counts after the first read", async () => {
-    const mailboxExists = new Map([
-      ["垃圾箱", [10, 11, 11]],
-      ["INBOX", [2, 2, 1]],
-    ]);
-    let sleepCalls = 0;
-    const provider = new QqMutableProvider({
-      accountAlias: "masked@qq.com",
-      auth: { user: "user@qq.com", pass: "secret" },
-      sleep: async () => {
-        sleepCalls += 1;
-      },
-      clientFactory: () => ({
-        connect: async () => undefined,
-        logout: async () => undefined,
-        list: async () => [],
-        mailboxOpen: async (path: string) => {
-          const values = mailboxExists.get(path) ?? [0];
-          const exists = values.shift() ?? 0;
-          mailboxExists.set(path, values);
-          return { exists, uidValidity: path === "INBOX" ? 888n : 999n };
-        },
-        fetch: async function* () {},
-        messageMove: async () => ({ uidMap: new Map([[1, 1001]]) }),
-      }),
-    });
-
-    await expect(provider.moveMessages([
-      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
-    ], "垃圾箱")).resolves.toMatchObject({
-      moved: 1,
-      reconciliations: [{ sourceDelta: -1, targetDelta: 1 }],
-    });
-    expect(sleepCalls).toBe(1);
-  });
-
-  it("rejects moves when a single UID move does not reconcile after polling", async () => {
-    const mailboxExists = new Map([
-      ["垃圾箱", [10, 11, 11, 11, 11, 11, 11]],
-      ["INBOX", [2, 2, 2, 2, 2, 2, 2]],
-    ]);
-    const provider = new QqMutableProvider({
-      accountAlias: "masked@qq.com",
-      auth: { user: "user@qq.com", pass: "secret" },
-      sleep: async () => undefined,
-      clientFactory: () => ({
-        connect: async () => undefined,
-        logout: async () => undefined,
-        list: async () => [],
-        mailboxOpen: async (path: string) => {
-          const values = mailboxExists.get(path) ?? [0];
-          const exists = values.shift() ?? 0;
-          mailboxExists.set(path, values);
-          return { exists, uidValidity: path === "INBOX" ? 888n : 999n };
-        },
-        fetch: async function* () {},
-        messageMove: async () => ({ uidMap: new Map([[1, 1001]]) }),
-      }),
-    });
-
-    await expect(provider.moveMessages([
-      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
-    ], "垃圾箱")).rejects.toThrow(/reconciliation failed/);
   });
 
   it("rejects stale refs when UIDVALIDITY no longer matches the opened mailbox", async () => {

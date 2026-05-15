@@ -1,11 +1,13 @@
 import { classifyMessages, type ClassificationRule, type MessageClassification, type PriorityBucketId, type PriorityConfidence } from "../classification.js";
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
-import type { MailboxInfo, MailboxSummary, MailProvider, MessageDetail, MessageSummary, ProviderCapabilitySnapshot } from "../providers/types.js";
+import type { MailboxInfo, MailboxSummary, MailProvider, MessageDetail, MessageSummary, MoveMessagesReconciliation, ProviderCapabilitySnapshot } from "../providers/types.js";
 import { loadClassificationRuleset, type ClassificationRulesetMetadata } from "../ruleset.js";
 import { formatRulesetPatchChangelog, renderRulesetPatchDraft, type RulesetPatchDraft } from "../ruleset-patch.js";
 import type { QFerryRuntimeConfig } from "../runtime-config.js";
 
 const CLIENT_REFS_PLAN_LIMIT = 20;
+const MOVE_RECONCILE_ATTEMPTS = 10;
+const MOVE_RECONCILE_DELAY_MS = 1_000;
 
 export interface CreateMailToolsInput {
   provider: MailProvider;
@@ -600,7 +602,13 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         throw new Error("Provider does not implement moveMessages");
       }
 
-      const moveResult = await input.provider.moveMessages(plan.messageRefs, targetFolder);
+      const moveResult = input.provider.getMailboxSummary
+        ? await moveMessagesWithFreshReconciliation(
+            { ...input.provider, getMailboxSummary: input.provider.getMailboxSummary.bind(input.provider) },
+            plan.messageRefs,
+            targetFolder,
+          )
+        : await input.provider.moveMessages(plan.messageRefs, targetFolder);
       return {
         result: {
           operationPlanId: plan.operationPlanId,
@@ -1580,6 +1588,93 @@ function slugifyRuleId(value: string): string {
 
 function messageRefKey(ref: MessageRef): string {
   return `${ref.provider}\0${ref.accountAlias}\0${ref.folder}\0${ref.uid}\0${ref.uidValidity ?? ""}`;
+}
+
+async function moveMessagesWithFreshReconciliation(
+  provider: MailProvider & { getMailboxSummary(folder: string): Promise<MailboxSummary> },
+  refs: MessageRef[],
+  targetFolder: string,
+): Promise<{ moved: number; reconciliations: MoveMessagesReconciliation[] }> {
+  let moved = 0;
+  const reconciliations: MoveMessagesReconciliation[] = [];
+  for (const ref of refs) {
+    const sourceBefore = await provider.getMailboxSummary(ref.folder);
+    const targetBefore = await provider.getMailboxSummary(targetFolder);
+    const result = await provider.moveMessages?.([ref], targetFolder);
+    if (!result || result.moved !== 1) {
+      throw new Error(`QQ IMAP single-message move failed for ${ref.folder}/${ref.uid}`);
+    }
+    const reconciliation = await waitForFreshReconciliation({
+      provider,
+      sourceFolder: ref.folder,
+      targetFolder,
+      sourceBefore: sourceBefore.exists,
+      targetBefore: targetBefore.exists,
+      expectedSourceDelta: -1,
+      expectedTargetDelta: 1,
+    });
+    reconciliations.push(reconciliation);
+    moved += 1;
+  }
+  return { moved, reconciliations };
+}
+
+async function waitForFreshReconciliation(input: {
+  provider: MailProvider & { getMailboxSummary(folder: string): Promise<MailboxSummary> };
+  sourceFolder: string;
+  targetFolder: string;
+  sourceBefore: number;
+  targetBefore: number;
+  expectedSourceDelta: number;
+  expectedTargetDelta: number;
+}): Promise<MoveMessagesReconciliation> {
+  let latest: MoveMessagesReconciliation | undefined;
+  for (let attempt = 0; attempt < MOVE_RECONCILE_ATTEMPTS; attempt += 1) {
+    const sourceAfter = await input.provider.getMailboxSummary(input.sourceFolder);
+    const targetAfter = await input.provider.getMailboxSummary(input.targetFolder);
+    latest = {
+      sourceFolder: input.sourceFolder,
+      targetFolder: input.targetFolder,
+      sourceBefore: input.sourceBefore,
+      sourceAfter: sourceAfter.exists,
+      sourceDelta: sourceAfter.exists - input.sourceBefore,
+      targetBefore: input.targetBefore,
+      targetAfter: targetAfter.exists,
+      targetDelta: targetAfter.exists - input.targetBefore,
+      expectedSourceDelta: input.expectedSourceDelta,
+      expectedTargetDelta: input.expectedTargetDelta,
+    };
+    if (isMoveReconciled(latest)) {
+      return latest;
+    }
+    if (attempt < MOVE_RECONCILE_ATTEMPTS - 1) {
+      await sleep(MOVE_RECONCILE_DELAY_MS);
+    }
+  }
+  if (!latest) {
+    throw new Error("QQ IMAP move reconciliation did not run");
+  }
+  assertMoveReconciled(latest);
+  return latest;
+}
+
+function isMoveReconciled(reconciliation: MoveMessagesReconciliation): boolean {
+  return reconciliation.sourceDelta === reconciliation.expectedSourceDelta
+    && reconciliation.targetDelta === reconciliation.expectedTargetDelta;
+}
+
+function assertMoveReconciled(reconciliation: MoveMessagesReconciliation): void {
+  if (!isMoveReconciled(reconciliation)) {
+    throw new Error(
+      `QQ IMAP move reconciliation failed: source ${reconciliation.sourceFolder} delta ${reconciliation.sourceDelta}`
+      + ` expected ${reconciliation.expectedSourceDelta}; target ${reconciliation.targetFolder} delta ${reconciliation.targetDelta}`
+      + ` expected ${reconciliation.expectedTargetDelta}`,
+    );
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function resolveRules(input: {
