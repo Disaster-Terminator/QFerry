@@ -160,7 +160,7 @@ describe("runtime config", () => {
       readFile: async () => undefined,
     });
 
-    expect(high.metadataSampleLimit).toBe(10);
+    expect(high.metadataSampleLimit).toBe(50);
     expect(low.metadataSampleLimit).toBe(1);
   });
 });

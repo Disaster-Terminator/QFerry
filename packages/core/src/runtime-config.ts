@@ -273,7 +273,7 @@ function parseInteger(value: string | undefined): number | undefined {
 }
 
 function clampSampleLimit(value: number): number {
-  return Math.min(Math.max(value, 1), 10);
+  return Math.min(Math.max(value, 1), 50);
 }
 
 function maskEmail(value: string): string {
