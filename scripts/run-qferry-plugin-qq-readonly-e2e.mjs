@@ -408,6 +408,39 @@ async function main() {
     mutationsAttempted: batchPreview.structuredContent?.mutationsAttempted,
   });
 
+  const rulesTargetPreview = await callToolWithTrace(
+    client,
+    "preview_cleanup_batch",
+    {
+      runId,
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      maxMessageRefs: 50,
+      action: "move",
+      rulesFile,
+      selectedGroupIds: ["archive"],
+      order: "oldest",
+    },
+    tracePath,
+    baseEvent,
+  );
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "preview_cleanup_batch_rules_target",
+    pagesScanned: rulesTargetPreview.structuredContent?.preview?.pagesScanned,
+    scannedMessages: rulesTargetPreview.structuredContent?.preview?.scannedMessages,
+    selectedMessageRefs: rulesTargetPreview.structuredContent?.preview?.selectedMessageRefs,
+    selectedGroupTargets: rulesTargetPreview.structuredContent?.preview?.selectedGroupTargets,
+    targetFolder: rulesTargetPreview.structuredContent?.plan?.target?.folder,
+    planStatus: rulesTargetPreview.structuredContent?.plan?.status,
+    plannedMessageRefs: Array.isArray(rulesTargetPreview.structuredContent?.plan?.messageRefs)
+      ? rulesTargetPreview.structuredContent.plan.messageRefs.length
+      : 0,
+    mutationsAttempted: rulesTargetPreview.structuredContent?.mutationsAttempted,
+  });
+
   const senderGovernance = await callToolWithTrace(
     client,
     "plan_sender_governance",
@@ -639,6 +672,11 @@ async function main() {
       `- batchPreviewSelectedRefs: ${batchPreview.structuredContent?.preview?.selectedMessageRefs ?? "<missing>"}`,
       `- batchPreviewScannedMessages: ${batchPreview.structuredContent?.preview?.scannedMessages ?? "<missing>"}`,
       `- batchPreviewPagesScanned: ${batchPreview.structuredContent?.preview?.pagesScanned ?? "<missing>"}`,
+      `- rulesTargetPreviewPlanStatus: ${rulesTargetPreview.structuredContent?.plan?.status ?? "<missing>"}`,
+      `- rulesTargetPreviewTarget: ${rulesTargetPreview.structuredContent?.plan?.target?.folder ?? "<missing>"}`,
+      `- rulesTargetPreviewSelectedGroupTargets: ${JSON.stringify(rulesTargetPreview.structuredContent?.preview?.selectedGroupTargets ?? {})}`,
+      `- rulesTargetPreviewSelectedRefs: ${rulesTargetPreview.structuredContent?.preview?.selectedMessageRefs ?? "<missing>"}`,
+      `- rulesTargetPreviewPageSize: ${rulesTargetPreview.structuredContent?.preview?.pageSize ?? "<missing>"}`,
       `- senderGovernanceDomainCandidates: ${senderGovernance.structuredContent?.governance?.domainCandidates?.length ?? "<missing>"}`,
       `- senderGovernanceSelectedRefs: ${senderGovernance.structuredContent?.governance?.selectedMessageRefs ?? "<missing>"}`,
       `- senderGovernanceBlocklistSupported: ${senderGovernance.structuredContent?.governance?.serverBlocklistCapability?.supported ?? "<missing>"}`,
