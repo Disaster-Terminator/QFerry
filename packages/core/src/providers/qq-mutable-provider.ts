@@ -61,8 +61,7 @@ export class QqMutableProvider extends QqReadOnlyProvider {
         assertUidValidity(folderRefs, mailbox.uidValidity);
 
         const uids = folderRefs.map((ref) => parseUid(ref.uid));
-        const uidSet = uids.join(",");
-        const result = await client.messageMove(uidSet, targetFolder, { uid: true });
+        const result = await client.messageMove(uids, targetFolder, { uid: true });
         if (result === false) {
           throw new Error(`QQ IMAP move failed for folder: ${folder}`);
         }
