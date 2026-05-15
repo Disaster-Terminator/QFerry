@@ -775,10 +775,9 @@ describe("QFerry ChatGPT App MCP server", () => {
         }),
         moveMessages: async (refs, targetFolder) => {
           movedBatches.push(refs);
-          expect(refs).toHaveLength(1);
           const sourceFolder = refs[0]?.folder ?? "";
-          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - 1);
-          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + 1);
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
           return { moved: refs.length };
         },
       },
@@ -841,7 +840,13 @@ describe("QFerry ChatGPT App MCP server", () => {
     });
     expect(thirdExecute.isError).toBe(true);
     expect(JSON.stringify(thirdExecute.content)).toContain("already consumed");
-    expect(movedBatches).toHaveLength(3);
+    expect(movedBatches).toEqual([
+      [
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+      ],
+      [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "3" }],
+    ]);
 
     await client.close();
     await server.close();

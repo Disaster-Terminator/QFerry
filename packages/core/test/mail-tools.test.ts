@@ -1425,7 +1425,7 @@ describe("mail tools", () => {
     expect(movedRefs).toEqual([{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" }]);
   });
 
-  it("executes confirmed move plans one message at a time with fresh mailbox reconciliation", async () => {
+  it("executes confirmed move plans in source-folder batches with fresh mailbox reconciliation", async () => {
     const provider = FixtureMailProvider.demo();
     const movedRefs: unknown[] = [];
     const counts = new Map([
@@ -1454,10 +1454,9 @@ describe("mail tools", () => {
         }),
         moveMessages: async (refs, targetFolder) => {
           movedRefs.push(refs);
-          expect(refs).toHaveLength(1);
           const sourceFolder = refs[0]?.folder ?? "";
-          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - 1);
-          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + 1);
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
           return { moved: refs.length };
         },
       },
@@ -1484,13 +1483,14 @@ describe("mail tools", () => {
       mutationsAttempted: 2,
       moved: 2,
       reconciliations: [
-        { sourceDelta: -1, targetDelta: 1 },
-        { sourceDelta: -1, targetDelta: 1 },
+        { sourceDelta: -2, targetDelta: 2 },
       ],
     });
     expect(movedRefs).toEqual([
-      [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }],
-      [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" }],
+      [
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+      ],
     ]);
   });
 
@@ -1523,10 +1523,9 @@ describe("mail tools", () => {
         }),
         moveMessages: async (refs, targetFolder) => {
           movedRefs.push(refs);
-          expect(refs).toHaveLength(1);
           const sourceFolder = refs[0]?.folder ?? "";
-          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - 1);
-          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + 1);
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
           return { moved: refs.length };
         },
       },
@@ -1557,13 +1556,14 @@ describe("mail tools", () => {
       remainingMessages: 1,
       executionBatch: { requestedMaxMessages: 2, executedMessages: 2 },
       reconciliations: [
-        { sourceDelta: -1, targetDelta: 1 },
-        { sourceDelta: -1, targetDelta: 1 },
+        { sourceDelta: -2, targetDelta: 2 },
       ],
     });
     expect(movedRefs).toEqual([
-      [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }],
-      [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" }],
+      [
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+      ],
     ]);
   });
 

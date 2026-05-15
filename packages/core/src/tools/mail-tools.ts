@@ -1624,26 +1624,36 @@ async function moveMessagesWithFreshReconciliation(
 ): Promise<{ moved: number; reconciliations: MoveMessagesReconciliation[] }> {
   let moved = 0;
   const reconciliations: MoveMessagesReconciliation[] = [];
-  for (const ref of refs) {
-    const sourceBefore = await provider.getMailboxSummary(ref.folder);
+  for (const [sourceFolder, folderRefs] of groupMessageRefsByFolder(refs)) {
+    const sourceBefore = await provider.getMailboxSummary(sourceFolder);
     const targetBefore = await provider.getMailboxSummary(targetFolder);
-    const result = await provider.moveMessages?.([ref], targetFolder);
-    if (!result || result.moved !== 1) {
-      throw new Error(`QQ IMAP single-message move failed for ${ref.folder}/${ref.uid}`);
+    const result = await provider.moveMessages?.(folderRefs, targetFolder);
+    if (!result || result.moved !== folderRefs.length) {
+      throw new Error(`QQ IMAP batch move failed for ${sourceFolder}: expected ${folderRefs.length}, got ${result?.moved ?? 0}`);
     }
     const reconciliation = await waitForFreshReconciliation({
       provider,
-      sourceFolder: ref.folder,
+      sourceFolder,
       targetFolder,
       sourceBefore: sourceBefore.exists,
       targetBefore: targetBefore.exists,
-      expectedSourceDelta: -1,
-      expectedTargetDelta: 1,
+      expectedSourceDelta: -folderRefs.length,
+      expectedTargetDelta: folderRefs.length,
     });
     reconciliations.push(reconciliation);
-    moved += 1;
+    moved += folderRefs.length;
   }
   return { moved, reconciliations };
+}
+
+function groupMessageRefsByFolder(refs: MessageRef[]): Map<string, MessageRef[]> {
+  const grouped = new Map<string, MessageRef[]>();
+  for (const ref of refs) {
+    const folderRefs = grouped.get(ref.folder) ?? [];
+    folderRefs.push(ref);
+    grouped.set(ref.folder, folderRefs);
+  }
+  return grouped;
 }
 
 async function waitForFreshReconciliation(input: {

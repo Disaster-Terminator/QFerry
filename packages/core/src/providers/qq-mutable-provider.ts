@@ -57,24 +57,22 @@ export class QqMutableProvider extends QqReadOnlyProvider {
         if (folder === targetFolder) {
           throw new Error(`Move target folder must differ from source folder: ${folder}`);
         }
-        for (const ref of folderRefs) {
-          const mailbox = await client.mailboxOpen(folder, { readOnly: false });
-          if (mailbox.readOnly) {
-            throw new Error(`Mailbox is read-only: ${folder}`);
-          }
-          assertUidValidity([ref], mailbox.uidValidity);
-
-          const uid = parseUid(ref.uid);
-          const result = await client.messageMove([uid], targetFolder, { uid: true });
-          if (result === false) {
-            throw new Error(`QQ IMAP move failed for folder: ${folder}`);
-          }
-          const resultCount = result.uidMap?.size;
-          if (resultCount !== undefined && resultCount !== 1) {
-            throw new Error(`QQ IMAP move count mismatch for folder ${folder}: expected 1, got ${resultCount}`);
-          }
-          moved += 1;
+        const mailbox = await client.mailboxOpen(folder, { readOnly: false });
+        if (mailbox.readOnly) {
+          throw new Error(`Mailbox is read-only: ${folder}`);
         }
+        assertUidValidity(folderRefs, mailbox.uidValidity);
+
+        const uids = folderRefs.map((ref) => parseUid(ref.uid));
+        const result = await client.messageMove(uids, targetFolder, { uid: true });
+        if (result === false) {
+          throw new Error(`QQ IMAP move failed for folder: ${folder}`);
+        }
+        const resultCount = result.uidMap?.size;
+        if (resultCount !== undefined && resultCount !== folderRefs.length) {
+          throw new Error(`QQ IMAP move count mismatch for folder ${folder}: expected ${folderRefs.length}, got ${resultCount}`);
+        }
+        moved += folderRefs.length;
       }
       return { moved };
     });

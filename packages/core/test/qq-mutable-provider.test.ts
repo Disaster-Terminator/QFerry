@@ -54,7 +54,7 @@ describe("QQ mutable provider", () => {
     expect(created).toEqual(["其他文件夹/开发社区"]);
   });
 
-  it("moves QQ message refs one UID at a time after opening the source mailbox writable", async () => {
+  it("moves QQ message refs in one UID batch after opening the source mailbox writable", async () => {
     const opened: unknown[] = [];
     const moved: unknown[] = [];
     const provider = new QqMutableProvider({
@@ -71,7 +71,7 @@ describe("QQ mutable provider", () => {
         fetch: async function* () {},
         messageMove: async (range: unknown, destination: string, options: unknown) => {
           moved.push({ range, destination, options });
-          return { uidMap: new Map([[Array.isArray(range) ? range[0] as number : 1, 1001]]) };
+          return { uidMap: new Map((Array.isArray(range) ? range : [1]).map((uid) => [uid as number, 1000 + (uid as number)])) };
         },
       }),
     });
@@ -83,11 +83,9 @@ describe("QQ mutable provider", () => {
 
     expect(opened).toEqual([
       { path: "INBOX", options: { readOnly: false } },
-      { path: "INBOX", options: { readOnly: false } },
     ]);
     expect(moved).toEqual([
-      { range: [1], destination: "垃圾箱", options: { uid: true } },
-      { range: [2], destination: "垃圾箱", options: { uid: true } },
+      { range: [1, 2], destination: "垃圾箱", options: { uid: true } },
     ]);
   });
 
