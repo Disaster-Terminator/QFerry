@@ -330,6 +330,24 @@ export function createQFerryMcpServer(): McpServer {
   );
 
   server.registerTool(
+    "classification_sweep",
+    {
+      title: "Classification sweep",
+      description: "Use this for Gmail-like full-mailbox governance: progressively scan classification chunks and return compact aggregate counts plus nextScanOffset, without message refs or an operation plan.",
+      inputSchema: {
+        folder: z.string(),
+        pageSize: z.number().int().min(1).max(50),
+        maxPages: z.number().int().min(1).max(500),
+        chunkPages: z.number().int().min(1).max(50).optional(),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await tools.classificationSweep(input)),
+  );
+
+  server.registerTool(
     "bulk_governance_preview",
     {
       title: "Bulk governance preview",

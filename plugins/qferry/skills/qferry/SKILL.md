@@ -15,13 +15,14 @@ For real mailbox work, call tools in this order:
 2. `list_mailboxes` to discover available folders.
 3. `get_mailbox_summary` to get read-only folder counts before scanning.
 4. `search` with structured filters when the task can be narrowed by sender, domain, subject, snippet, flag, date, order, or offset.
-5. `classification_map` for Gmail-like classification-first governance. Use it to scan a bounded window into category buckets, recommended actions, and sender/domain candidates without creating an operation plan.
-6. `ensure_classification_folder` after a bucket is selected and before planning moves. Pass a short user-facing folder name such as `广告营销` or `开发社区`; QFerry maps it to the QQ IMAP path such as `其他文件夹/广告营销` and returns a preview `create_folder` plan if the folder is missing.
-7. `bulk_governance_preview` only after the user or workflow has selected one or more classification buckets and a target classification folder for a dry-run operation plan.
-8. `triage_inbox` for a small inbox review summary and urgency buckets.
-9. `group_spam_candidates` only for narrow spam/ad spot checks. Present the grouped candidates for confirmation before any real operation.
-10. `preview_cleanup_batch` when the user already has explicit rules and wants a cross-page bounded operation plan.
-11. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups or already reviewed message refs. Direct `messageRefs` plans are limited and marked as `source: "client_refs"`.
+5. `classification_sweep` for Gmail-like large mailbox governance. Use it to progressively scan chunks and return compact aggregate category counts plus `hasMore` / `resumeToken` / `nextScanOffset`, without message refs or an operation plan.
+6. `classification_map` for bounded classification detail. Use it on a selected window when you need category buckets, recommended actions, and sender/domain candidates.
+7. `ensure_classification_folder` after a bucket is selected and before planning moves. Pass a short user-facing folder name such as `广告营销` or `开发社区`; QFerry maps it to the QQ IMAP path such as `其他文件夹/广告营销` and returns a preview `create_folder` plan if the folder is missing.
+8. `bulk_governance_preview` only after the user or workflow has selected one or more classification buckets and a target classification folder for a dry-run operation plan.
+9. `triage_inbox` for a small inbox review summary and urgency buckets.
+10. `group_spam_candidates` only for narrow spam/ad spot checks. Present the grouped candidates for confirmation before any real operation.
+11. `preview_cleanup_batch` when the user already has explicit rules and wants a cross-page bounded operation plan.
+12. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups or already reviewed message refs. Direct `messageRefs` plans are limited and marked as `source: "client_refs"`.
 12. `confirm_cleanup_plan` only after the user explicitly approves one specific preview plan.
 13. `execute_cleanup` only with the confirmed `operationPlanId`; never pass or fabricate a `status: "confirmed"` plan object.
 
@@ -38,7 +39,8 @@ Allowed by default:
 - Search with metadata filters before considering body fetches.
 - Fetch a single selected message when needed.
 - Classify messages into QFerry-local groups.
-- Build a classification-first mailbox map with `classification_map`; treat this as the default starting point for large cleanup work.
+- Build a classification-first mailbox sweep with `classification_sweep`; treat this as the default starting point for large cleanup work. Continue with `resumeToken.offset` or `nextScanOffset` until the sweep is complete.
+- Use `classification_map` for bounded detail after the sweep has identified a window or category worth inspecting.
 - Preview missing classification folders with `ensure_classification_folder`. Do not expose meaningless prefixes in the suggested display name; use `其他文件夹/...` only as the IMAP execution path.
 - Dry-run large mailbox windows with `bulk_governance_preview`; prefer categories such as `high_confidence_marketing`, `newsletter_or_digest`, `security_or_account`, `receipt_or_purchase`, and `developer_community` over manual UID picking. Do not default advertising or marketing mail to `Junk`; classify it into a reviewable folder such as `广告营销` unless the user explicitly asks for Junk.
 - Group oldest obvious spam or ads for confirmation.
@@ -58,7 +60,7 @@ Rules may include optional `priority` metadata with `bucketId`, `reason`, `confi
 
 Use `plan_sender_governance` when the user wants Gmail-like sender/domain cleanup. It returns domain candidates, suggested local rules, `rulesetPatch.rulesToAdd` for explicitly selected sender/domain filters, duplicate-rule skips, `rulesetPatch.renderedDraft`, `rulesetPatch.changelog`, a preview-only operation plan, and `serverBlocklistCapability.supported: false` when the current provider exposes no QQ server-side blocklist mutation API.
 
-Use `classification_map` before high-throughput mailbox治理. It returns aggregate category counts, category buckets, recommended actions, and sender/domain candidates without a plan, so the workflow stays "classify first, act second." After selecting buckets such as `high_confidence_marketing`, `newsletter_or_digest`, `security_or_account`, `receipt_or_purchase`, and `developer_community`, call `ensure_classification_folder` for the target folder name, then use `bulk_governance_preview` with the returned full folder path. For real QQ Mail, execute only a confirmed subset after reviewing the categories, folder plan, and move plan.
+Use `classification_sweep` before high-throughput mailbox治理. It returns compact aggregate category counts, chunk summaries, bucket summaries, and `nextScanOffset` without message refs or a plan, so large real mailboxes can be classified first without flooding context. Use `classification_map` only when you need bounded window details. After selecting buckets such as `high_confidence_marketing`, `newsletter_or_digest`, `security_or_account`, `receipt_or_purchase`, and `developer_community`, call `ensure_classification_folder` for the target folder name, then use `bulk_governance_preview` with the returned full folder path. For real QQ Mail, execute only a confirmed subset after reviewing the categories, folder plan, and move plan.
 
 Use `apply_ruleset_patch` only for local QFerry rules files. Default to `apply: false` for review. `apply: true` writes the local rules file but does not mutate QQ Mail, labels, folders, messages, or server-side blocklists.
 

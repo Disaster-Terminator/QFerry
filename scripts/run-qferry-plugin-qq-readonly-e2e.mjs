@@ -459,6 +459,33 @@ async function main() {
     mutationsAttempted: classificationMap.structuredContent?.mutationsAttempted,
   });
 
+  const classificationSweep = await callToolWithTrace(
+    client,
+    "classification_sweep",
+    {
+      folder: "INBOX",
+      pageSize: candidateLimit,
+      maxPages: 10,
+      chunkPages: 5,
+      order: "oldest",
+    },
+    tracePath,
+    baseEvent,
+  );
+  await writeJsonl(tracePath, {
+    ...baseEvent,
+    event: "plugin_tool_called",
+    toolName: "classification_sweep",
+    pagesScanned: classificationSweep.structuredContent?.sweep?.pagesScanned,
+    scannedMessages: classificationSweep.structuredContent?.sweep?.scannedMessages,
+    categoryCounts: classificationSweep.structuredContent?.sweep?.categoryCounts,
+    chunks: classificationSweep.structuredContent?.sweep?.chunks?.length,
+    hasMore: classificationSweep.structuredContent?.sweep?.hasMore,
+    nextScanOffset: classificationSweep.structuredContent?.sweep?.nextScanOffset,
+    planPresent: Boolean(classificationSweep.structuredContent?.plan),
+    mutationsAttempted: classificationSweep.structuredContent?.mutationsAttempted,
+  });
+
   const bulkGovernance = await callToolWithTrace(
     client,
     "bulk_governance_preview",
@@ -610,6 +637,13 @@ async function main() {
       `- classificationMapBuckets: ${JSON.stringify((classificationMap.structuredContent?.map?.buckets ?? []).map((bucket) => bucket.categoryId))}`,
       `- classificationMapCategoryCounts: ${JSON.stringify(classificationMap.structuredContent?.map?.categoryCounts ?? {})}`,
       `- classificationMapPlanPresent: ${Boolean(classificationMap.structuredContent?.plan)}`,
+      `- classificationSweepScannedMessages: ${classificationSweep.structuredContent?.sweep?.scannedMessages ?? "<missing>"}`,
+      `- classificationSweepPagesScanned: ${classificationSweep.structuredContent?.sweep?.pagesScanned ?? "<missing>"}`,
+      `- classificationSweepChunks: ${classificationSweep.structuredContent?.sweep?.chunks?.length ?? "<missing>"}`,
+      `- classificationSweepHasMore: ${classificationSweep.structuredContent?.sweep?.hasMore ?? "<missing>"}`,
+      `- classificationSweepNextScanOffset: ${classificationSweep.structuredContent?.sweep?.nextScanOffset ?? "<complete>"}`,
+      `- classificationSweepCategoryCounts: ${JSON.stringify(classificationSweep.structuredContent?.sweep?.categoryCounts ?? {})}`,
+      `- classificationSweepPlanPresent: ${Boolean(classificationSweep.structuredContent?.plan)}`,
       `- bulkGovernanceScannedMessages: ${bulkGovernance.structuredContent?.preview?.scannedMessages ?? "<missing>"}`,
       `- bulkGovernanceSelectedRefs: ${bulkGovernance.structuredContent?.preview?.selectedMessageRefs ?? "<missing>"}`,
       `- bulkGovernanceCategoryCounts: ${JSON.stringify(bulkGovernance.structuredContent?.preview?.categoryCounts ?? {})}`,

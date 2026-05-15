@@ -212,6 +212,10 @@ export interface ClassificationMapInput {
   order?: "newest" | "oldest";
 }
 
+export interface ClassificationSweepInput extends ClassificationMapInput {
+  chunkPages?: number;
+}
+
 export type ClassificationMapAction =
   | "keep_for_account_history"
   | "archive_or_label"
@@ -238,6 +242,48 @@ export interface ClassificationMapReport {
   scannedMessages: number;
   categoryCounts: Partial<Record<BulkGovernanceCategoryId, number>>;
   buckets: ClassificationMapBucket[];
+  mutationsAttempted: 0;
+}
+
+export interface ClassificationSweepChunk {
+  scanOffset: number;
+  pagesScanned: number;
+  scannedMessages: number;
+  categoryCounts: Partial<Record<BulkGovernanceCategoryId, number>>;
+}
+
+export interface ClassificationSweepBucket {
+  categoryId: BulkGovernanceCategoryId;
+  messageCount: number;
+  recommendedAction: ClassificationMapAction;
+  confidence: PriorityConfidence;
+  reason: string;
+  candidateCount: number;
+  topCandidates: Array<{
+    domain: string;
+    messageCount: number;
+    confidence: PriorityConfidence;
+    reason: string;
+  }>;
+}
+
+export interface ClassificationSweepReport {
+  provider: string;
+  folder: string;
+  scanOrder: "newest" | "oldest";
+  scanOffset: number;
+  pageSize: number;
+  maxPages: number;
+  chunkPages: number;
+  pagesScanned: number;
+  scannedMessages: number;
+  complete: boolean;
+  hasMore: boolean;
+  nextScanOffset?: number;
+  resumeToken?: { offset: number };
+  categoryCounts: Partial<Record<BulkGovernanceCategoryId, number>>;
+  buckets: ClassificationSweepBucket[];
+  chunks: ClassificationSweepChunk[];
   mutationsAttempted: 0;
 }
 
@@ -355,6 +401,10 @@ export interface MailTools {
   }>;
   classificationMap(input: ClassificationMapInput): Promise<{
     map: ClassificationMapReport;
+    mutationsAttempted: 0;
+  }>;
+  classificationSweep(input: ClassificationSweepInput): Promise<{
+    sweep: ClassificationSweepReport;
     mutationsAttempted: 0;
   }>;
 }
@@ -838,6 +888,103 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           scannedMessages: messages.length,
           categoryCounts,
           buckets: buildClassificationMapBuckets(categoryCounts, categoryCandidates),
+          mutationsAttempted: 0,
+        },
+        mutationsAttempted: 0,
+      };
+    },
+
+    async classificationSweep(sweepInput) {
+      const pageSize = Math.max(sweepInput.pageSize, 0);
+      const maxPages = Math.max(sweepInput.maxPages, 0);
+      const chunkPages = Math.max(Math.min(sweepInput.chunkPages ?? 25, maxPages), 0);
+      const scanOffset = Math.max(sweepInput.scanOffset ?? 0, 0);
+      const scanOrder = sweepInput.order ?? "oldest";
+      const chunks: ClassificationSweepChunk[] = [];
+      const allCategorized: Array<{
+        message: MessageSummary;
+        classification: ReturnType<typeof classifyBulkGovernanceMessage>;
+      }> = [];
+      let pagesScanned = 0;
+      let scannedMessages = 0;
+      let currentOffset = scanOffset;
+      let complete = false;
+
+      while (pageSize > 0 && chunkPages > 0 && pagesScanned < maxPages) {
+        const pagesRemaining = maxPages - pagesScanned;
+        const currentChunkPages = Math.min(chunkPages, pagesRemaining);
+        const scanWindow = input.provider.scanMailboxMetadataWindow
+          ? await input.provider.scanMailboxMetadataWindow({
+            folder: sweepInput.folder,
+            limit: pageSize,
+            maxPages: currentChunkPages,
+            order: scanOrder,
+            offset: currentOffset,
+          })
+          : await scanMetadataWindowWithPages(input.provider, {
+            folder: sweepInput.folder,
+            limit: pageSize,
+            maxPages: currentChunkPages,
+            order: scanOrder,
+            offset: currentOffset,
+          });
+        const categorized = scanWindow.messages.map((message) => ({
+          message,
+          classification: classifyBulkGovernanceMessage(message),
+        }));
+        const categoryCounts = countBulkCategories(categorized.map((entry) => entry.classification.categoryId));
+        chunks.push({
+          scanOffset: currentOffset,
+          pagesScanned: scanWindow.pagesScanned,
+          scannedMessages: scanWindow.messages.length,
+          categoryCounts,
+        });
+        allCategorized.push(...categorized);
+        pagesScanned += scanWindow.pagesScanned;
+        scannedMessages += scanWindow.messages.length;
+        currentOffset += scanWindow.messages.length;
+
+        if (scanWindow.messages.length < pageSize * currentChunkPages || scanWindow.pagesScanned === 0) {
+          complete = true;
+          break;
+        }
+      }
+
+      const categoryCounts = countBulkCategories(allCategorized.map((entry) => entry.classification.categoryId));
+      const categoryCandidates = buildBulkGovernanceCandidates(allCategorized, new Set());
+      const bucketSummaries = buildClassificationMapBuckets(categoryCounts, categoryCandidates).map((bucket) => ({
+        categoryId: bucket.categoryId,
+        messageCount: bucket.messageCount,
+        recommendedAction: bucket.recommendedAction,
+        confidence: bucket.confidence,
+        reason: bucket.reason,
+        candidateCount: bucket.candidates.length,
+        topCandidates: bucket.candidates.slice(0, 5).map((candidate) => ({
+          domain: candidate.domain,
+          messageCount: candidate.messageCount,
+          confidence: candidate.confidence,
+          reason: candidate.reason,
+        })),
+      }));
+
+      return {
+        sweep: {
+          provider: allCategorized[0]?.message.ref.provider ?? input.runtimeConfig?.provider ?? "fixture",
+          folder: sweepInput.folder,
+          scanOrder,
+          scanOffset,
+          pageSize,
+          maxPages,
+          chunkPages,
+          pagesScanned,
+          scannedMessages,
+          complete,
+          hasMore: !complete,
+          nextScanOffset: complete ? undefined : currentOffset,
+          resumeToken: complete ? undefined : { offset: currentOffset },
+          categoryCounts,
+          buckets: bucketSummaries,
+          chunks,
           mutationsAttempted: 0,
         },
         mutationsAttempted: 0,

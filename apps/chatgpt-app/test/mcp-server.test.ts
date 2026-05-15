@@ -42,6 +42,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "preview_cleanup_batch",
       "plan_sender_governance",
       "classification_map",
+      "classification_sweep",
       "bulk_governance_preview",
       "apply_ruleset_patch",
       "confirm_cleanup_plan",
@@ -54,6 +55,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "group_spam_candidates")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_capability_snapshot")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "classification_map")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "classification_sweep")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "ensure_classification_folder")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "preview_cleanup_batch")?.annotations?.destructiveHint).toBe(false);
@@ -102,6 +104,49 @@ describe("QFerry ChatGPT App MCP server", () => {
       },
       mutationsAttempted: 0,
     });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("operationPlanId");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("calls classification sweep through the MCP server without returning message refs", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "classification_sweep",
+      arguments: {
+        folder: "INBOX",
+        pageSize: 2,
+        maxPages: 2,
+        chunkPages: 1,
+        order: "oldest",
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      sweep: {
+        scannedMessages: 2,
+        categoryCounts: {
+          newsletter_or_digest: 1,
+          security_or_account: 1,
+        },
+        chunks: [
+          { scanOffset: 0, scannedMessages: 2 },
+          { scanOffset: 2, scannedMessages: 0 },
+        ],
+        mutationsAttempted: 0,
+      },
+      mutationsAttempted: 0,
+    });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("uid");
     expect(JSON.stringify(result.structuredContent)).not.toContain("operationPlanId");
 
     await client.close();

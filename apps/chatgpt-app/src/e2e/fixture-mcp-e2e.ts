@@ -67,6 +67,24 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
     map?: { scannedMessages?: number; buckets?: Array<{ categoryId: string }>; categoryCounts?: Record<string, number> };
     plan?: unknown;
   } | undefined;
+  const classificationSweepResult = await callToolWithTrace(trace, baseEvent, client, "classification_sweep", {
+    folder: "INBOX",
+    pageSize: 2,
+    maxPages: 2,
+    chunkPages: 1,
+    order: "oldest",
+  });
+  const classificationSweep = classificationSweepResult.structuredContent as {
+    sweep?: {
+      scannedMessages?: number;
+      pagesScanned?: number;
+      hasMore?: boolean;
+      nextScanOffset?: number;
+      chunks?: unknown[];
+      categoryCounts?: Record<string, number>;
+    };
+    plan?: unknown;
+  } | undefined;
   const planResult = await callToolWithTrace(trace, baseEvent, client, "plan_cleanup", {
     runId,
     folder: "INBOX",
@@ -101,11 +119,18 @@ export async function runFixtureMcpE2E(input: FixtureMcpE2EInput): Promise<Fixtu
     "- surface: chatgpt-app-mcp",
     "- dryRun: true",
     "- mutationsAttempted: 0",
-    "- toolsCalled: 5",
+    "- toolsCalled: 6",
     `- classificationMapScannedMessages: ${classificationMap?.map?.scannedMessages ?? "<missing>"}`,
     `- classificationMapBuckets: ${JSON.stringify((classificationMap?.map?.buckets ?? []).map((bucket) => bucket.categoryId))}`,
     `- classificationMapCategoryCounts: ${JSON.stringify(classificationMap?.map?.categoryCounts ?? {})}`,
     `- classificationMapPlanPresent: ${Boolean(classificationMap?.plan)}`,
+    `- classificationSweepScannedMessages: ${classificationSweep?.sweep?.scannedMessages ?? "<missing>"}`,
+    `- classificationSweepPagesScanned: ${classificationSweep?.sweep?.pagesScanned ?? "<missing>"}`,
+    `- classificationSweepChunks: ${classificationSweep?.sweep?.chunks?.length ?? "<missing>"}`,
+    `- classificationSweepHasMore: ${classificationSweep?.sweep?.hasMore ?? "<missing>"}`,
+    `- classificationSweepNextScanOffset: ${classificationSweep?.sweep?.nextScanOffset ?? "<complete>"}`,
+    `- classificationSweepCategoryCounts: ${JSON.stringify(classificationSweep?.sweep?.categoryCounts ?? {})}`,
+    `- classificationSweepPlanPresent: ${Boolean(classificationSweep?.plan)}`,
     "- executeCleanupBlocked: true",
     `- trace: ${tracePath}`,
     "",

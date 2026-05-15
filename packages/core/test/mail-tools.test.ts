@@ -963,6 +963,182 @@ describe("mail tools", () => {
     expect(result.map.categoryCounts).toEqual({ newsletter_or_digest: 1 });
   });
 
+  it("builds progressive classification sweeps without returning message refs", async () => {
+    const bulkScanCalls: unknown[] = [];
+    const messages = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Security <security@example.com>",
+        subject: "Your verification code",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "account verification",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "Newsletter <news@example.com>",
+        subject: "Weekly digest",
+        date: "2026-05-12T00:00:00.000Z",
+        snippet: "weekly newsletter digest",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "3" },
+        from: "Promo <promo@example.com>",
+        subject: "80% off sale",
+        date: "2026-05-13T00:00:00.000Z",
+        snippet: "limited time discount",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "4" },
+        from: "OpenRouter <hello@openrouter.ai>",
+        subject: "API usage report",
+        date: "2026-05-14T00:00:00.000Z",
+        snippet: "developer platform usage",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "5" },
+        from: "Store <store@example.com>",
+        subject: "Your receipt",
+        date: "2026-05-15T00:00:00.000Z",
+        snippet: "purchase receipt",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => {
+          throw new Error("not used");
+        },
+        scanMailboxMetadataWindow: async (input) => {
+          bulkScanCalls.push(input);
+          const offset = input.offset ?? 0;
+          const count = input.limit * input.maxPages;
+          return {
+            pagesScanned: Math.ceil(messages.slice(offset, offset + count).length / input.limit),
+            messages: messages.slice(offset, offset + count),
+          };
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.classificationSweep({
+      folder: "INBOX",
+      pageSize: 2,
+      maxPages: 3,
+      chunkPages: 1,
+      order: "oldest",
+    });
+
+    expect(bulkScanCalls).toEqual([
+      { folder: "INBOX", limit: 2, maxPages: 1, order: "oldest", offset: 0 },
+      { folder: "INBOX", limit: 2, maxPages: 1, order: "oldest", offset: 2 },
+      { folder: "INBOX", limit: 2, maxPages: 1, order: "oldest", offset: 4 },
+    ]);
+    expect(result.sweep).toMatchObject({
+      scannedMessages: 5,
+      pagesScanned: 3,
+      complete: true,
+      hasMore: false,
+      nextScanOffset: undefined,
+      resumeToken: undefined,
+      categoryCounts: {
+        developer_community: 1,
+        high_confidence_marketing: 1,
+        newsletter_or_digest: 1,
+        receipt_or_purchase: 1,
+        security_or_account: 1,
+      },
+      mutationsAttempted: 0,
+    });
+    expect(result.sweep.chunks).toEqual([
+      {
+        scanOffset: 0,
+        pagesScanned: 1,
+        scannedMessages: 2,
+        categoryCounts: {
+          newsletter_or_digest: 1,
+          security_or_account: 1,
+        },
+      },
+      {
+        scanOffset: 2,
+        pagesScanned: 1,
+        scannedMessages: 2,
+        categoryCounts: {
+          developer_community: 1,
+          high_confidence_marketing: 1,
+        },
+      },
+      {
+        scanOffset: 4,
+        pagesScanned: 1,
+        scannedMessages: 1,
+        categoryCounts: {
+          receipt_or_purchase: 1,
+        },
+      },
+    ]);
+    expect(JSON.stringify(result.sweep)).not.toContain("uid");
+    expect(JSON.stringify(result.sweep)).not.toContain("sampleSenders");
+    expect(JSON.stringify(result.sweep)).not.toContain("sampleSubjectHashes");
+    expect(JSON.stringify(result.sweep).length).toBeLessThan(10_000);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
+  it("returns a resume token when a classification sweep reaches the requested window limit", async () => {
+    const messages = Array.from({ length: 4 }, (_, index) => ({
+      ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: String(index + 1) },
+      from: `Newsletter ${index}@example.com`,
+      subject: "Weekly digest",
+      date: `2026-05-1${index}T00:00:00.000Z`,
+      snippet: "weekly newsletter digest",
+      flags: [],
+    }));
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => {
+          throw new Error("not used");
+        },
+        scanMailboxMetadataWindow: async (input) => {
+          const offset = input.offset ?? 0;
+          const count = input.limit * input.maxPages;
+          return {
+            pagesScanned: input.maxPages,
+            messages: messages.slice(offset, offset + count),
+          };
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.classificationSweep({
+      folder: "INBOX",
+      pageSize: 2,
+      maxPages: 1,
+      chunkPages: 1,
+      order: "oldest",
+    });
+
+    expect(result.sweep).toMatchObject({
+      scannedMessages: 2,
+      complete: false,
+      hasMore: true,
+      nextScanOffset: 2,
+      resumeToken: { offset: 2 },
+      mutationsAttempted: 0,
+    });
+  });
+
   it("keeps recurring service and promo senders out of the generic review bucket", async () => {
     const messages = [
       {

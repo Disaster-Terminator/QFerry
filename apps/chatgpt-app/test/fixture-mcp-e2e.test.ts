@@ -21,8 +21,9 @@ describe("fixture MCP e2e", () => {
 
     const summary = await readFile(result.artifacts.summaryPath, "utf8");
     expect(summary).toContain("provider: fixture");
-    expect(summary).toContain("toolsCalled: 5");
+    expect(summary).toContain("toolsCalled: 6");
     expect(summary).toContain("classificationMapPlanPresent: false");
+    expect(summary).toContain("classificationSweepPlanPresent: false");
     expect(summary).toContain("executeCleanupBlocked: true");
     expect(summary).toContain("mutationsAttempted: 0");
   });

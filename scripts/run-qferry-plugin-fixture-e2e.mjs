@@ -129,6 +129,13 @@ async function main() {
       maxPages: 2,
       order: "oldest",
     }],
+    ["classification_sweep", {
+      folder: "INBOX",
+      pageSize: 2,
+      maxPages: 2,
+      chunkPages: 1,
+      order: "oldest",
+    }],
     ["bulk_governance_preview", {
       runId,
       folder: "INBOX",
@@ -152,6 +159,7 @@ async function main() {
   let batchPreviewResult;
   let senderGovernanceResult;
   let classificationMapResult;
+  let classificationSweepResult;
   let bulkGovernanceResult;
   let rulesetPatchApplyResult;
   let blockedExecuteResult;
@@ -170,6 +178,7 @@ async function main() {
     if (name === "preview_cleanup_batch") batchPreviewResult = result.structuredContent;
     if (name === "plan_sender_governance") senderGovernanceResult = result.structuredContent;
     if (name === "classification_map") classificationMapResult = result.structuredContent;
+    if (name === "classification_sweep") classificationSweepResult = result.structuredContent;
     if (name === "bulk_governance_preview") bulkGovernanceResult = result.structuredContent;
     await writeJsonl(tracePath, {
       ...baseEvent,
@@ -185,6 +194,12 @@ async function main() {
       classificationMapBuckets: result.structuredContent?.map?.buckets?.map((bucket) => bucket.categoryId),
       classificationMapCategoryCounts: result.structuredContent?.map?.categoryCounts,
       classificationMapPlanPresent: result.structuredContent?.map ? Boolean(result.structuredContent?.plan) : undefined,
+      classificationSweepScannedMessages: result.structuredContent?.sweep?.scannedMessages,
+      classificationSweepPagesScanned: result.structuredContent?.sweep?.pagesScanned,
+      classificationSweepHasMore: result.structuredContent?.sweep?.hasMore,
+      classificationSweepNextScanOffset: result.structuredContent?.sweep?.nextScanOffset,
+      classificationSweepCategoryCounts: result.structuredContent?.sweep?.categoryCounts,
+      classificationSweepChunks: result.structuredContent?.sweep?.chunks?.length,
       sampledMessages: result.structuredContent?.triage?.sampledMessages,
       triageGroupCounts: result.structuredContent?.triage?.groupCounts,
       priorityCounts: result.structuredContent?.priorityCounts,
@@ -328,6 +343,12 @@ async function main() {
       `- classificationMapBuckets: ${JSON.stringify((classificationMapResult?.map?.buckets ?? []).map((bucket) => bucket.categoryId))}`,
       `- classificationMapCategoryCounts: ${JSON.stringify(classificationMapResult?.map?.categoryCounts ?? {})}`,
       `- classificationMapPlanPresent: ${Boolean(classificationMapResult?.plan)}`,
+      `- classificationSweepScannedMessages: ${classificationSweepResult?.sweep?.scannedMessages ?? "<missing>"}`,
+      `- classificationSweepPagesScanned: ${classificationSweepResult?.sweep?.pagesScanned ?? "<missing>"}`,
+      `- classificationSweepChunks: ${classificationSweepResult?.sweep?.chunks?.length ?? "<missing>"}`,
+      `- classificationSweepHasMore: ${classificationSweepResult?.sweep?.hasMore ?? "<missing>"}`,
+      `- classificationSweepNextScanOffset: ${classificationSweepResult?.sweep?.nextScanOffset ?? "<complete>"}`,
+      `- classificationSweepCategoryCounts: ${JSON.stringify(classificationSweepResult?.sweep?.categoryCounts ?? {})}`,
       `- bulkGovernanceScannedMessages: ${bulkGovernanceResult?.preview?.scannedMessages ?? "<missing>"}`,
       `- bulkGovernanceSelectedRefs: ${bulkGovernanceResult?.preview?.selectedMessageRefs ?? "<missing>"}`,
       `- bulkGovernanceCategoryCounts: ${JSON.stringify(bulkGovernanceResult?.preview?.categoryCounts ?? {})}`,
