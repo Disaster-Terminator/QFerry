@@ -1455,7 +1455,7 @@ describe("mail tools", () => {
         moveMessages: async (refs, targetFolder) => {
           movedRefs.push(refs);
           const sourceFolder = refs[0]?.folder ?? "";
-          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length);
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length - 3);
           counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
           return { moved: refs.length };
         },
@@ -1483,7 +1483,7 @@ describe("mail tools", () => {
       mutationsAttempted: 2,
       moved: 2,
       reconciliations: [
-        { sourceDelta: -2, targetDelta: 2 },
+        { sourceDelta: -5, targetDelta: 2 },
       ],
     });
     expect(movedRefs).toEqual([

@@ -1696,7 +1696,7 @@ async function waitForFreshReconciliation(input: {
 }
 
 function isMoveReconciled(reconciliation: MoveMessagesReconciliation): boolean {
-  return reconciliation.sourceDelta === reconciliation.expectedSourceDelta
+  return reconciliation.sourceDelta <= reconciliation.expectedSourceDelta
     && reconciliation.targetDelta === reconciliation.expectedTargetDelta;
 }
 
