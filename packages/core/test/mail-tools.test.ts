@@ -1044,10 +1044,10 @@ describe("mail tools", () => {
     expect(result.sweep).toMatchObject({
       scannedMessages: 5,
       pagesScanned: 3,
-      complete: true,
-      hasMore: false,
-      nextScanOffset: undefined,
-      resumeToken: undefined,
+      complete: false,
+      hasMore: true,
+      nextScanOffset: 5,
+      resumeToken: { offset: 5 },
       categoryCounts: {
         developer_community: 1,
         high_confidence_marketing: 1,
@@ -1135,6 +1135,76 @@ describe("mail tools", () => {
       hasMore: true,
       nextScanOffset: 2,
       resumeToken: { offset: 2 },
+      mutationsAttempted: 0,
+    });
+  });
+
+  it("continues classification sweeps after short non-empty windows", async () => {
+    const scanCalls: unknown[] = [];
+    const windows = [
+      [
+        {
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+          from: "Newsletter <news@example.com>",
+          subject: "Weekly digest",
+          date: "2026-05-11T00:00:00.000Z",
+          snippet: "weekly newsletter digest",
+          flags: [],
+        },
+      ],
+      [
+        {
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "2" },
+          from: "Security <security@example.com>",
+          subject: "Your verification code",
+          date: "2026-05-12T00:00:00.000Z",
+          snippet: "account verification",
+          flags: [],
+        },
+      ],
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => {
+          throw new Error("not used");
+        },
+        scanMailboxMetadataWindow: async (input) => {
+          scanCalls.push(input);
+          const callIndex = scanCalls.length - 1;
+          return {
+            pagesScanned: 1,
+            messages: windows[callIndex] ?? [],
+          };
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.classificationSweep({
+      folder: "INBOX",
+      pageSize: 10,
+      maxPages: 2,
+      chunkPages: 1,
+      order: "oldest",
+    });
+
+    expect(scanCalls).toEqual([
+      { folder: "INBOX", limit: 10, maxPages: 1, order: "oldest", offset: 0 },
+      { folder: "INBOX", limit: 10, maxPages: 1, order: "oldest", offset: 1 },
+    ]);
+    expect(result.sweep).toMatchObject({
+      scannedMessages: 2,
+      pagesScanned: 2,
+      complete: false,
+      hasMore: true,
+      nextScanOffset: 2,
+      categoryCounts: {
+        newsletter_or_digest: 1,
+        security_or_account: 1,
+      },
       mutationsAttempted: 0,
     });
   });

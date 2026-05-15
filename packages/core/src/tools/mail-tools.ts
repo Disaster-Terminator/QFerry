@@ -944,7 +944,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         scannedMessages += scanWindow.messages.length;
         currentOffset += scanWindow.messages.length;
 
-        if (scanWindow.messages.length < pageSize * currentChunkPages || scanWindow.pagesScanned === 0) {
+        if (scanWindow.messages.length === 0 || scanWindow.pagesScanned < currentChunkPages) {
           complete = true;
           break;
         }
