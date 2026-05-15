@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { createQFerryMcpServer } from "../src/mcp-server.js";
 import type { MessageSummary } from "@qferry/core";
@@ -847,6 +850,107 @@ describe("QFerry ChatGPT App MCP server", () => {
       ],
       [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "3" }],
     ]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("writes trace artifacts for confirmed MCP cleanup execution", async () => {
+    const traceRoot = await mkdtemp(join(tmpdir(), "qferry-mcp-trace-"));
+    process.env.QFERRY_MCP_TRACE_ROOT = traceRoot;
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "newsletter@example.com",
+        subject: "Promo one",
+        date: "2020-01-01T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const counts = new Map([
+      ["INBOX", 1],
+      ["Archive", 0],
+    ]);
+    const server = createQFerryMcpServer({
+      provider: {
+        listMailboxes: async () => [{ path: "INBOX", name: "INBOX" }, { path: "Archive", name: "Archive" }],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async (ref) => ({
+          ref,
+          from: "newsletter@example.com",
+          subject: "Promo",
+          date: "2020-01-01T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+          bodyText: "",
+        }),
+        getMailboxSummary: async (folder) => ({ path: folder, exists: counts.get(folder) ?? 0 }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async (refs, targetFolder) => {
+          const sourceFolder = refs[0]?.folder ?? "";
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
+          return { moved: refs.length };
+        },
+      },
+    });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const preview = await client.callTool({
+      name: "plan_cleanup",
+      arguments: {
+        runId: "run-mcp-trace-execute",
+        folder: "INBOX",
+        limit: 10,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedGroupIds: ["archive"],
+        rules: [{ id: "promo", groupId: "archive", match: { subjectIncludes: "Promo" } }],
+      },
+    });
+    const previewContent = preview.structuredContent as { plan?: { operationPlanId?: string } } | undefined;
+    const operationPlanId = String(previewContent?.plan?.operationPlanId);
+    await client.callTool({ name: "confirm_cleanup_plan", arguments: { operationPlanId } });
+
+    const execute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId, maxMessages: 1 },
+    });
+
+    expect(execute.structuredContent).toMatchObject({
+      audit: {
+        runId: "run-mcp-trace-execute",
+      },
+      result: {
+        status: "executed",
+        moved: 1,
+      },
+    });
+    const audit = execute.structuredContent as { audit?: { tracePath?: string; summaryPath?: string } };
+    expect(audit.audit?.tracePath).toBe(join(traceRoot, "logs", "runs", "run-mcp-trace-execute.jsonl"));
+    expect(audit.audit?.summaryPath).toBe(join(traceRoot, "artifacts", "e2e", "run-mcp-trace-execute", "summary.md"));
+    const trace = await readFile(audit.audit?.tracePath ?? "", "utf8");
+    expect(trace).toContain("\"toolName\":\"execute_cleanup\"");
+    expect(trace).toContain("\"mutationsAttempted\":1");
+    const summary = await readFile(audit.audit?.summaryPath ?? "", "utf8");
+    expect(summary).toContain("# QFerry MCP Audit run-mcp-trace-execute");
+    expect(summary).toContain("- lastTool: execute_cleanup");
 
     await client.close();
     await server.close();

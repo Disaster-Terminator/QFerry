@@ -6,6 +6,7 @@ import {
   applyRulesetPatchDraft,
   confirmOperationPlan,
   FixtureMailProvider,
+  JsonlTraceWriter,
   loadQFerryRuntimeConfigSync,
   loadQFerryRuntimeSecretsSync,
   QqMutableProvider,
@@ -14,6 +15,8 @@ import {
   type OperationPlan,
   type QFerryRuntimeConfig,
 } from "@qferry/core";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const messageRefSchema = z.object({
@@ -88,6 +91,12 @@ export interface CreateQFerryMcpServerOptions {
 }
 
 const DEFAULT_MOVE_EXECUTION_MAX_MESSAGES = 5;
+
+interface McpAuditInfo {
+  runId: string;
+  tracePath: string;
+  summaryPath: string;
+}
 
 export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}): McpServer {
   const server = new McpServer({
@@ -246,7 +255,10 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => toToolResult(registerPlan(await tools.planCleanup(input), planRegistry)),
+    async (input) => {
+      const result = registerPlan(await tools.planCleanup(input), planRegistry);
+      return toToolResult(await withMcpAudit("plan_cleanup", input.runId, input, result));
+    },
   );
 
   server.registerTool(
@@ -263,10 +275,8 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     },
     async (input) => {
       const result = await tools.ensureClassificationFolder(input);
-      if (!result.plan) {
-        return toToolResult(result);
-      }
-      return toToolResult(registerPlan({ ...result, plan: result.plan }, planRegistry));
+      const registered = result.plan ? registerPlan({ ...result, plan: result.plan }, planRegistry) : result;
+      return toToolResult(await withMcpAudit("ensure_classification_folder", input.runId, input, registered));
     },
   );
 
@@ -292,7 +302,10 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => toToolResult(registerPlan(await tools.previewCleanupBatch(input), planRegistry)),
+    async (input) => {
+      const result = registerPlan(await tools.previewCleanupBatch(input), planRegistry);
+      return toToolResult(await withMcpAudit("preview_cleanup_batch", input.runId, input, result));
+    },
   );
 
   server.registerTool(
@@ -317,7 +330,10 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => toToolResult(registerPlan(await tools.planSenderGovernance(input), planRegistry)),
+    async (input) => {
+      const result = registerPlan(await tools.planSenderGovernance(input), planRegistry);
+      return toToolResult(await withMcpAudit("plan_sender_governance", input.runId, input, result));
+    },
   );
 
   server.registerTool(
@@ -374,7 +390,10 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => toToolResult(registerPlan(await tools.bulkGovernancePreview(input), planRegistry)),
+    async (input) => {
+      const result = registerPlan(await tools.bulkGovernancePreview(input), planRegistry);
+      return toToolResult(await withMcpAudit("bulk_governance_preview", input.runId, input, result));
+    },
   );
 
   server.registerTool(
@@ -412,11 +431,12 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         plan: confirmed,
         expiresAt: Date.now() + PLAN_TTL_MS,
       });
-      return toToolResult({
+      const result = {
         plan: confirmed,
         expiresAt: new Date(Date.now() + PLAN_TTL_MS).toISOString(),
         mutationsAttempted: 0,
-      });
+      };
+      return toToolResult(await withMcpAudit("confirm_cleanup_plan", confirmed.runId, input, result));
     },
   );
 
@@ -451,7 +471,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
           planRegistry.delete(input.operationPlanId);
           consumedPlanIds.add(input.operationPlanId);
         }
-        return toToolResult(result);
+        return toToolResult(await withMcpAudit("execute_cleanup", stored.plan.runId, input, result));
       } catch (error) {
         planRegistry.delete(input.operationPlanId);
         consumedPlanIds.add(input.operationPlanId);
@@ -491,6 +511,100 @@ function getStoredPlan(
     throw new Error(`Operation plan expired: ${operationPlanId}`);
   }
   return stored;
+}
+
+async function withMcpAudit<T extends object>(
+  toolName: string,
+  runId: string,
+  input: object,
+  structuredContent: T,
+): Promise<T & { audit: McpAuditInfo }> {
+  const audit = await writeMcpAudit(toolName, runId, input, structuredContent);
+  return { ...structuredContent, audit };
+}
+
+async function writeMcpAudit(
+  toolName: string,
+  runId: string,
+  input: object,
+  structuredContent: object,
+): Promise<McpAuditInfo> {
+  const root = process.env.QFERRY_MCP_TRACE_ROOT?.trim() || process.cwd();
+  const tracePath = join(root, "logs", "runs", `${runId}.jsonl`);
+  const artifactDir = join(root, "artifacts", "e2e", runId);
+  const summaryPath = join(artifactDir, "summary.md");
+  const summary = summarizeMcpToolResult(structuredContent);
+  const trace = new JsonlTraceWriter(tracePath);
+
+  await trace.write({
+    event: "mcp_tool_result",
+    runId,
+    toolName,
+    input: summarizeMcpToolInput(input),
+    ...summary,
+  });
+  await mkdir(artifactDir, { recursive: true });
+  await writeFile(
+    summaryPath,
+    [
+      `# QFerry MCP Audit ${runId}`,
+      "",
+      `- lastTool: ${toolName}`,
+      `- operationPlanId: ${summary.operationPlanId ?? "<none>"}`,
+      `- status: ${summary.status ?? "<none>"}`,
+      `- action: ${summary.action ?? "<none>"}`,
+      `- mutationsAttempted: ${summary.mutationsAttempted}`,
+      `- trace: ${tracePath}`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  return { runId, tracePath, summaryPath };
+}
+
+function summarizeMcpToolInput(input: object): Record<string, unknown> {
+  const raw = input as Record<string, unknown>;
+  return {
+    runId: typeof raw.runId === "string" ? raw.runId : undefined,
+    operationPlanId: typeof raw.operationPlanId === "string" ? raw.operationPlanId : undefined,
+    folder: typeof raw.folder === "string" ? raw.folder : undefined,
+    action: typeof raw.action === "string" ? raw.action : undefined,
+    target: raw.target,
+    scanOffset: raw.scanOffset,
+    pageSize: raw.pageSize,
+    maxPages: raw.maxPages,
+    maxMessageRefs: raw.maxMessageRefs,
+    maxMessages: raw.maxMessages,
+    selectedGroupIds: raw.selectedGroupIds,
+    selectedCategoryIds: raw.selectedCategoryIds,
+    selectedSenderDomains: raw.selectedSenderDomains,
+    selectedFromIncludes: raw.selectedFromIncludes,
+  };
+}
+
+function summarizeMcpToolResult(structuredContent: object): Record<string, unknown> {
+  const content = structuredContent as Record<string, unknown>;
+  const plan = content.plan as Record<string, unknown> | undefined;
+  const result = content.result as Record<string, unknown> | undefined;
+  const preview = content.preview as Record<string, unknown> | undefined;
+  const report = content.report as Record<string, unknown> | undefined;
+
+  return {
+    provider: result?.provider ?? plan?.provider ?? preview?.provider ?? report?.provider,
+    operationPlanId: result?.operationPlanId ?? plan?.operationPlanId,
+    status: result?.status ?? plan?.status,
+    action: result?.action ?? plan?.action,
+    target: plan?.target,
+    selectedMessageRefs: preview?.selectedMessageRefs ?? report?.selectedMessageRefs,
+    totalPlanMessages: result?.totalPlanMessages ?? (Array.isArray(plan?.messageRefs) ? plan.messageRefs.length : undefined),
+    attemptedMessages: result?.attemptedMessages,
+    moved: result?.moved,
+    remainingMessages: result?.remainingMessages,
+    mutationsAttempted: content.mutationsAttempted ?? result?.mutationsAttempted ?? 0,
+    reconciliations: result?.reconciliations,
+    categoryCounts: preview?.categoryCounts,
+  };
 }
 
 function createProviderFromConfig(runtimeConfig: QFerryRuntimeConfig): MailProvider {
