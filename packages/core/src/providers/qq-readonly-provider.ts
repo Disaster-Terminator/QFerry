@@ -85,6 +85,10 @@ export class QqReadOnlyProvider implements MailProvider {
     this.sleep = input.sleep ?? defaultSleep;
   }
 
+  protected sleepFor(ms: number): Promise<void> {
+    return this.sleep(ms);
+  }
+
   async getCapabilitySnapshot(): Promise<ProviderCapabilitySnapshot> {
     return {
       provider: "qqmail",

@@ -7,6 +7,7 @@ describe("QQ mutable provider", () => {
     const provider = new QqMutableProvider({
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
+      sleep: async () => undefined,
       clientFactory: () => ({
         connect: async () => undefined,
         logout: async () => undefined,
@@ -31,6 +32,7 @@ describe("QQ mutable provider", () => {
     const provider = new QqMutableProvider({
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
+      sleep: async () => undefined,
       clientFactory: () => ({
         connect: async () => undefined,
         logout: async () => undefined,
@@ -108,14 +110,18 @@ describe("QQ mutable provider", () => {
     ]);
   });
 
-  it("rejects moves when a single UID move does not reconcile", async () => {
+  it("polls reconciliation when QQ updates source counts after the first read", async () => {
     const mailboxExists = new Map([
-      ["垃圾箱", [10, 11]],
-      ["INBOX", [2, -1]],
+      ["垃圾箱", [10, 11, 11]],
+      ["INBOX", [2, 2, 1]],
     ]);
+    let sleepCalls = 0;
     const provider = new QqMutableProvider({
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
+      sleep: async () => {
+        sleepCalls += 1;
+      },
       clientFactory: () => ({
         connect: async () => undefined,
         logout: async () => undefined,
@@ -133,7 +139,39 @@ describe("QQ mutable provider", () => {
 
     await expect(provider.moveMessages([
       { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
-      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "2", uidValidity: "888" },
+    ], "垃圾箱")).resolves.toMatchObject({
+      moved: 1,
+      reconciliations: [{ sourceDelta: -1, targetDelta: 1 }],
+    });
+    expect(sleepCalls).toBe(1);
+  });
+
+  it("rejects moves when a single UID move does not reconcile after polling", async () => {
+    const mailboxExists = new Map([
+      ["垃圾箱", [10, 11, 11, 11, 11, 11, 11]],
+      ["INBOX", [2, 2, 2, 2, 2, 2, 2]],
+    ]);
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      sleep: async () => undefined,
+      clientFactory: () => ({
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async (path: string) => {
+          const values = mailboxExists.get(path) ?? [0];
+          const exists = values.shift() ?? 0;
+          mailboxExists.set(path, values);
+          return { exists, uidValidity: path === "INBOX" ? 888n : 999n };
+        },
+        fetch: async function* () {},
+        messageMove: async () => ({ uidMap: new Map([[1, 1001]]) }),
+      }),
+    });
+
+    await expect(provider.moveMessages([
+      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
     ], "垃圾箱")).rejects.toThrow(/reconciliation failed/);
   });
 
