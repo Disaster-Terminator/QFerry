@@ -1494,6 +1494,77 @@ describe("mail tools", () => {
     ]);
   });
 
+  it("keeps prototype provider mutation methods when using fresh reconciliation", async () => {
+    const fixture = FixtureMailProvider.demo();
+    const movedRefs: unknown[] = [];
+    const counts = new Map([
+      ["INBOX", 1],
+      ["Archive", 0],
+    ]);
+    class PrototypeMoveProvider {
+      async listMailboxes() {
+        return fixture.listMailboxes();
+      }
+
+      async scanMailboxMetadata(input: Parameters<typeof fixture.scanMailboxMetadata>[0]) {
+        return fixture.scanMailboxMetadata(input);
+      }
+
+      async fetchMessage(input: Parameters<typeof fixture.fetchMessage>[0]) {
+        return fixture.fetchMessage(input);
+      }
+
+      async getMailboxSummary(folder: string) {
+        return {
+          path: folder,
+          exists: counts.get(folder) ?? 0,
+        };
+      }
+
+      async getCapabilitySnapshot() {
+        return {
+          provider: "fixture" as const,
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move" as const],
+          maxRecommendedScanLimit: 10,
+        };
+      }
+
+      async moveMessages(refs: { folder: string }[], targetFolder: string) {
+        movedRefs.push(refs);
+        expect(refs).toHaveLength(1);
+        const sourceFolder = refs[0]?.folder ?? "";
+        counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - 1);
+        counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + 1);
+        return { moved: refs.length };
+      }
+    }
+    const tools = createMailTools({ provider: new PrototypeMoveProvider() });
+    const previewPlan = createOperationPlan({
+      runId: "run-execute-prototype-provider",
+      provider: "fixture",
+      action: "move",
+      messageRefs: [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }],
+      target: { folder: "Archive" },
+    });
+    const plan = confirmOperationPlan(previewPlan, previewPlan.operationPlanId);
+
+    const result = await tools.executeCleanup({ plan });
+
+    expect(result.result).toMatchObject({
+      status: "executed",
+      attemptedMessages: 1,
+      mutationsAttempted: 1,
+      moved: 1,
+      reconciliations: [{ sourceDelta: -1, targetDelta: 1 }],
+    });
+    expect(movedRefs).toEqual([[{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }]]);
+  });
+
   it("previews creation of missing classification folders using display names", async () => {
     const provider = FixtureMailProvider.demo();
     const tools = createMailTools({ provider });

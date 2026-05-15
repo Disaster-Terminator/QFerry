@@ -604,7 +604,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
 
       const moveResult = input.provider.getMailboxSummary
         ? await moveMessagesWithFreshReconciliation(
-            { ...input.provider, getMailboxSummary: input.provider.getMailboxSummary.bind(input.provider) },
+            input.provider as MailProvider & { getMailboxSummary(folder: string): Promise<MailboxSummary> },
             plan.messageRefs,
             targetFolder,
           )
