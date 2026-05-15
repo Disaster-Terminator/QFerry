@@ -44,7 +44,7 @@ describe("QQ read-only provider", () => {
       provider: "qqmail",
       accountAlias: "masked@qq.com",
       supportsMutation: false,
-      maxRecommendedScanLimit: 10,
+      maxRecommendedScanLimit: 50,
     });
   });
 
@@ -104,6 +104,35 @@ describe("QQ read-only provider", () => {
       },
     ]);
     expect(JSON.stringify(messages)).not.toContain("bodyText");
+  });
+
+  it("defaults QQ metadata scans to the MCP page-size ceiling", async () => {
+    const fetchCalls: unknown[] = [];
+    const client = {
+      connect: async () => undefined,
+      logout: async () => undefined,
+      list: async () => [],
+      mailboxOpen: async () => ({ exists: 100, uidValidity: 777n }),
+      fetch: (range: unknown, query: unknown, options: unknown) => {
+        fetchCalls.push({ range, query, options });
+        return asyncMessages([]);
+      },
+    };
+    const provider = new QqReadOnlyProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => client,
+    });
+
+    await provider.scanMailboxMetadata({ folder: "INBOX", limit: 50, order: "oldest" });
+
+    expect(fetchCalls).toEqual([
+      {
+        range: "1:50",
+        query: { envelope: true, flags: true, internalDate: true, size: true, uid: true },
+        options: { uid: false },
+      },
+    ]);
   });
 
   it("can scan oldest bounded metadata", async () => {

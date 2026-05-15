@@ -79,7 +79,7 @@ export class QqReadOnlyProvider implements MailProvider {
   private hasConnected = false;
 
   constructor(private readonly input: QqReadOnlyProviderInput) {
-    this.maxRecommendedScanLimit = Math.min(Math.max(input.maxRecommendedScanLimit ?? 10, 1), 10);
+    this.maxRecommendedScanLimit = Math.min(Math.max(input.maxRecommendedScanLimit ?? 50, 1), 50);
     this.connectionCooldownMs = Math.max(input.connectionCooldownMs ?? 750, 0);
     this.connectRetryDelayMs = Math.max(input.connectRetryDelayMs ?? 1_500, 0);
     this.sleep = input.sleep ?? defaultSleep;
