@@ -13,6 +13,9 @@ describe("QQ mutable provider", () => {
         list: async () => [],
         mailboxOpen: async () => ({ exists: 0 }),
         fetch: async function* () {},
+        capabilities: new Map([["UIDPLUS", true]]),
+        messageCopy: async () => ({ uidMap: new Map() }),
+        messageDelete: async () => true,
         messageMove: async () => ({ uidMap: new Map() }),
         mailboxCreate: async () => ({ path: "其他文件夹/开发社区", created: true }),
       }),
@@ -37,6 +40,9 @@ describe("QQ mutable provider", () => {
         list: async () => [],
         mailboxOpen: async () => ({ exists: 0 }),
         fetch: async function* () {},
+        capabilities: new Map([["UIDPLUS", true]]),
+        messageCopy: async () => ({ uidMap: new Map() }),
+        messageDelete: async () => true,
         messageMove: async () => ({ uidMap: new Map() }),
         mailboxCreate: async (path: string) => {
           created.push(path);
@@ -52,9 +58,10 @@ describe("QQ mutable provider", () => {
     expect(created).toEqual(["其他文件夹/开发社区"]);
   });
 
-  it("moves QQ message refs by UID after opening the source mailbox writable", async () => {
+  it("moves QQ message refs through copy plus exact UID expunge after opening the source mailbox writable", async () => {
     const opened: unknown[] = [];
-    const moved: unknown[] = [];
+    const copied: unknown[] = [];
+    const deleted: unknown[] = [];
     const provider = new QqMutableProvider({
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
@@ -67,9 +74,17 @@ describe("QQ mutable provider", () => {
           return { exists: 2, uidValidity: 888n };
         },
         fetch: async function* () {},
-        messageMove: async (range: unknown, destination: string, options: unknown) => {
-          moved.push({ range, destination, options });
+        capabilities: new Map([["UIDPLUS", true]]),
+        messageCopy: async (range: unknown, destination: string, options: unknown) => {
+          copied.push({ range, destination, options });
           return { uidMap: new Map([[1, 1001], [2, 1002]]) };
+        },
+        messageDelete: async (range: unknown, options: unknown) => {
+          deleted.push({ range, options });
+          return true;
+        },
+        messageMove: async () => {
+          throw new Error("messageMove should not be used");
         },
       }),
     });
@@ -80,7 +95,30 @@ describe("QQ mutable provider", () => {
     ], "垃圾箱")).resolves.toEqual({ moved: 2 });
 
     expect(opened).toEqual([{ path: "INBOX", options: { readOnly: false } }]);
-    expect(moved).toEqual([{ range: [1, 2], destination: "垃圾箱", options: { uid: true } }]);
+    expect(copied).toEqual([{ range: [1, 2], destination: "垃圾箱", options: { uid: true } }]);
+    expect(deleted).toEqual([{ range: [1, 2], options: { uid: true } }]);
+  });
+
+  it("rejects moves when UIDPLUS is unavailable because plain EXPUNGE is not exact", async () => {
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => ({
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async () => ({ exists: 1, uidValidity: 888n }),
+        fetch: async function* () {},
+        capabilities: new Map([["MOVE", true]]),
+        messageCopy: async () => ({ uidMap: new Map() }),
+        messageDelete: async () => true,
+        messageMove: async () => ({ uidMap: new Map() }),
+      }),
+    });
+
+    await expect(provider.moveMessages([
+      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
+    ], "垃圾箱")).rejects.toThrow(/requires UIDPLUS/);
   });
 
   it("rejects stale refs when UIDVALIDITY no longer matches the opened mailbox", async () => {
@@ -93,6 +131,9 @@ describe("QQ mutable provider", () => {
         list: async () => [],
         mailboxOpen: async () => ({ exists: 1, uidValidity: 999n }),
         fetch: async function* () {},
+        capabilities: new Map([["UIDPLUS", true]]),
+        messageCopy: async () => ({ uidMap: new Map() }),
+        messageDelete: async () => true,
         messageMove: async () => ({ uidMap: new Map() }),
       }),
     });
@@ -112,6 +153,9 @@ describe("QQ mutable provider", () => {
         list: async () => [],
         mailboxOpen: async () => ({ exists: 1, uidValidity: 999n }),
         fetch: async function* () {},
+        capabilities: new Map([["UIDPLUS", true]]),
+        messageCopy: async () => ({ uidMap: new Map() }),
+        messageDelete: async () => true,
         messageMove: async () => ({ uidMap: new Map() }),
       }),
     });

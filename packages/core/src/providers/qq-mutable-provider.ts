@@ -48,8 +48,11 @@ export class QqMutableProvider extends QqReadOnlyProvider {
     }
 
     return this.withClient("move_messages", async (client) => {
-      if (!client.messageMove) {
-        throw new Error("QQ IMAP client does not expose messageMove");
+      if (!client.messageCopy || !client.messageDelete) {
+        throw new Error("QQ IMAP client does not expose safe copy/delete move primitives");
+      }
+      if (!hasCapability(client, "UIDPLUS")) {
+        throw new Error("QQ IMAP move requires UIDPLUS for exact UID EXPUNGE");
       }
 
       let moved = 0;
@@ -61,15 +64,25 @@ export class QqMutableProvider extends QqReadOnlyProvider {
         assertUidValidity(folderRefs, mailbox.uidValidity);
 
         const uids = folderRefs.map((ref) => parseUid(ref.uid));
-        const result = await client.messageMove(uids, targetFolder, { uid: true });
-        if (result === false) {
-          throw new Error(`QQ IMAP move failed for folder: ${folder}`);
+        const copyResult = await client.messageCopy(uids, targetFolder, { uid: true });
+        if (copyResult === false) {
+          throw new Error(`QQ IMAP copy failed for folder: ${folder}`);
         }
-        moved += result.uidMap?.size ?? uids.length;
+        const deleteResult = await client.messageDelete(uids, { uid: true });
+        if (deleteResult === false || deleteResult === undefined) {
+          throw new Error(`QQ IMAP exact UID expunge failed for folder: ${folder}`);
+        }
+        moved += copyResult.uidMap?.size ?? uids.length;
       }
       return { moved };
     });
   }
+}
+
+function hasCapability(client: QqReadOnlyClient, capability: string): boolean {
+  const capabilities = client.capabilities;
+  if (!capabilities) return false;
+  return capabilities.has(capability);
 }
 
 function groupRefsByFolder(refs: MessageRef[]): Map<string, MessageRef[]> {
