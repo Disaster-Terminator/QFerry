@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { createQFerryMcpServer } from "../src/mcp-server.js";
-import type { MessageSummary } from "@qferry/core";
+import type { MailProvider, MessageSummary } from "@qferry/core";
 
 describe("QFerry ChatGPT App MCP server", () => {
   const originalEnv = { ...process.env };
@@ -194,6 +194,72 @@ describe("QFerry ChatGPT App MCP server", () => {
       },
       mutationsAttempted: 0,
     });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("writes preview mailbox snapshots to MCP audit summaries", async () => {
+    const traceRoot = await mkdtemp(join(tmpdir(), "qferry-mcp-preview-audit-"));
+    process.env.QFERRY_MCP_TRACE_ROOT = traceRoot;
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "qqmail", accountAlias: "test", folder: "INBOX", uid: "42", uidValidity: "uv-preview" },
+        from: "security@example.com",
+        subject: "Security verification code",
+        date: "2026-05-15T00:00:00.000Z",
+        snippet: "Account verification",
+        flags: [],
+      },
+    ];
+    const provider: MailProvider = {
+      async listMailboxes() {
+        return [];
+      },
+      async scanMailboxMetadata() {
+        return messages;
+      },
+      async scanMailboxMetadataWindow() {
+        return {
+          messages,
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "INBOX", exists: 2385, uidValidity: "uv-preview" },
+        };
+      },
+      async fetchMessage(ref) {
+        return { ...messages[0], ref, bodyText: "" };
+      },
+    };
+    const server = createQFerryMcpServer({ provider });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "bulk_governance_preview",
+      arguments: {
+        runId: "run-mcp-preview-snapshot",
+        folder: "INBOX",
+        pageSize: 50,
+        maxPages: 1,
+        maxMessageRefs: 50,
+        action: "move",
+        target: { folder: "其他文件夹/账号安全" },
+        selectedCategoryIds: ["security_or_account"],
+      },
+    });
+
+    const audit = result.structuredContent as { audit?: { summaryPath?: string; tracePath?: string } };
+    const summary = await readFile(audit.audit?.summaryPath ?? "", "utf8");
+    expect(summary).toContain("- selectedMessageRefs: 1");
+    expect(summary).toContain('- mailboxSnapshot: {"folder":"INBOX","exists":2385,"uidValidity":"uv-preview"}');
+    expect(summary).toContain('"security_or_account":1');
+    const trace = await readFile(audit.audit?.tracePath ?? "", "utf8");
+    expect(trace).toContain('"mailboxSnapshot":{"folder":"INBOX","exists":2385,"uidValidity":"uv-preview"}');
 
     await client.close();
     await server.close();

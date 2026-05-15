@@ -554,7 +554,14 @@ async function writeMcpAudit(
       `- operationPlanId: ${summary.operationPlanId ?? "<none>"}`,
       `- status: ${summary.status ?? "<none>"}`,
       `- action: ${summary.action ?? "<none>"}`,
+      `- selectedMessageRefs: ${summary.selectedMessageRefs ?? "<none>"}`,
+      `- totalPlanMessages: ${summary.totalPlanMessages ?? "<none>"}`,
+      `- attemptedMessages: ${summary.attemptedMessages ?? "<none>"}`,
+      `- moved: ${summary.moved ?? "<none>"}`,
+      `- remainingMessages: ${summary.remainingMessages ?? "<none>"}`,
       `- mutationsAttempted: ${summary.mutationsAttempted}`,
+      `- mailboxSnapshot: ${formatSummaryJson(summary.mailboxSnapshot)}`,
+      `- categoryCounts: ${formatSummaryJson(summary.categoryCounts)}`,
       `- trace: ${tracePath}`,
       "",
     ].join("\n"),
@@ -607,6 +614,10 @@ function summarizeMcpToolResult(structuredContent: object): Record<string, unkno
     mailboxSnapshot: preview?.mailboxSnapshot ?? report?.mailboxSnapshot,
     categoryCounts: preview?.categoryCounts,
   };
+}
+
+function formatSummaryJson(value: unknown): string {
+  return value === undefined ? "<none>" : JSON.stringify(value);
 }
 
 function createProviderFromConfig(runtimeConfig: QFerryRuntimeConfig): MailProvider {
