@@ -83,6 +83,7 @@ const PLAN_TTL_MS = 15 * 60 * 1000;
 interface StoredPlan {
   plan: OperationPlan;
   expiresAt: number;
+  previewSummary?: Record<string, unknown>;
 }
 
 export interface CreateQFerryMcpServerOptions {
@@ -431,6 +432,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       planRegistry.set(input.operationPlanId, {
         plan: confirmed,
         expiresAt: Date.now() + PLAN_TTL_MS,
+        previewSummary: stored.previewSummary,
       });
       const result = {
         plan: confirmed,
@@ -467,6 +469,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
               messageRefs: stored.plan.messageRefs.slice(result.result.attemptedMessages),
             },
             expiresAt: Date.now() + PLAN_TTL_MS,
+            previewSummary: stored.previewSummary,
           });
         } else {
           planRegistry.delete(input.operationPlanId);
@@ -475,6 +478,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         return toToolResult(
           await withMcpAudit("execute_cleanup", stored.plan.runId, input, result, {
             ...result,
+            preview: stored.previewSummary,
             plan: { target: stored.plan.target },
           }),
         );
@@ -496,6 +500,7 @@ function registerPlan<T extends { plan: OperationPlan }>(
   registry.set(result.plan.operationPlanId, {
     plan: result.plan,
     expiresAt: Date.now() + PLAN_TTL_MS,
+    previewSummary: summarizeMcpToolResult(result),
   });
   return result;
 }

@@ -212,6 +212,10 @@ describe("QFerry ChatGPT App MCP server", () => {
         flags: [],
       },
     ];
+    const counts = new Map([
+      ["INBOX", 1],
+      ["其他文件夹/账号安全", 0],
+    ]);
     const provider: MailProvider = {
       async listMailboxes() {
         return [];
@@ -228,6 +232,27 @@ describe("QFerry ChatGPT App MCP server", () => {
       },
       async fetchMessage(ref) {
         return { ...messages[0], ref, bodyText: "" };
+      },
+      async getMailboxSummary(folder) {
+        return { path: folder, exists: counts.get(folder) ?? 0, uidValidity: folder === "INBOX" ? "uv-preview" : "target-uv" };
+      },
+      async getCapabilitySnapshot() {
+        return {
+          provider: "qqmail",
+          accountAlias: "test",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 50,
+        };
+      },
+      async moveMessages(refs, targetFolder) {
+        const sourceFolder = refs[0]?.folder ?? "INBOX";
+        counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length);
+        counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
+        return { moved: refs.length };
       },
     };
     const server = createQFerryMcpServer({ provider });
@@ -260,6 +285,21 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(summary).toContain('"security_or_account":1');
     const trace = await readFile(audit.audit?.tracePath ?? "", "utf8");
     expect(trace).toContain('"mailboxSnapshot":{"folder":"INBOX","exists":2385,"uidValidity":"uv-preview"}');
+
+    const preview = result.structuredContent as { plan?: { operationPlanId?: string } };
+    const operationPlanId = String(preview.plan?.operationPlanId);
+    await client.callTool({ name: "confirm_cleanup_plan", arguments: { operationPlanId } });
+    const execute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId, maxMessages: 1 },
+    });
+    const executeAudit = execute.structuredContent as { audit?: { summaryPath?: string; tracePath?: string } };
+    const executeSummary = await readFile(executeAudit.audit?.summaryPath ?? "", "utf8");
+    expect(executeSummary).toContain("- lastTool: execute_cleanup");
+    expect(executeSummary).toContain('- mailboxSnapshot: {"folder":"INBOX","exists":2385,"uidValidity":"uv-preview"}');
+    expect(executeSummary).toContain('"security_or_account":1');
+    const executeTrace = await readFile(executeAudit.audit?.tracePath ?? "", "utf8");
+    expect(executeTrace).toContain('"mailboxSnapshot":{"folder":"INBOX","exists":2385,"uidValidity":"uv-preview"}');
 
     await client.close();
     await server.close();
