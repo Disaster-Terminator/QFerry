@@ -52,7 +52,7 @@ Allowed by default:
 
 ## Rules
 
-Prefer a persisted `qferry.rules.json` rules file when the user wants repeatable classification. The ruleset includes `version`, `defaultGroupId`, `groups`, and ordered `rules`.
+Prefer a persisted `qferry.rules.json` rules file when the user wants repeatable classification. The ruleset includes `version`, `defaultGroupId`, `groups`, and ordered `rules`. A group may include `target.folder` to bind a user-defined classification group to a QQ folder. When `preview_cleanup_batch` selects exactly one group with a configured target and no explicit `target` is provided, QFerry uses that group target and records `selectedGroupTargets` in audit output.
 
 Rules can match `fromIncludes`, `fromDomainIncludes`, `subjectIncludes`, `snippetIncludes`, `folderEquals`, and `hasFlag` without reading message bodies.
 

@@ -81,7 +81,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 | 文件夹摘要 | 只读读取文件夹邮件数量，类似 Gmail label counts |
 | 小批量扫描 | 对 QQ 邮箱执行 bounded metadata search |
 | 单封读取 | 按 `folder + uid + uidValidity` 精确读取选中邮件 metadata，不靠 bounded scan 回查 |
-| 分类规则 | 用内联规则或 `qferry.rules.json` 把邮件归入用户定义的 group |
+| 分类规则 | 用内联规则或 `qferry.rules.json` 把邮件归入用户定义的 group；group 可选绑定自定义目标文件夹 |
 | 收件箱整理报告 | `triage_inbox` 汇总 groupCounts、样本数、建议下一步 |
 | 垃圾/广告候选 | `group_spam_candidates` 从最旧 metadata 开始分组明显垃圾/广告，先给用户确认 |
 | 分类扫描 | `classification_sweep` 面向大邮箱逐块扫描，只返回聚合分类计数、chunk 摘要和 `hasMore` / `resumeToken` / `nextScanOffset`，不生成操作计划 |
@@ -90,7 +90,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 | 测试留痕 | 写入 jsonl trace 和 Markdown summary |
 | 安全边界 | 默认 read-only / preview-first；真实写操作需要用户授权和服务端确认 plan |
 
-规则文件示例见 [examples/qferry.rules.json](examples/qferry.rules.json)。规则文件包含 `version`、`defaultGroupId`、`groups` 和 `rules`，e2e summary 会记录规则版本和规则数量。
+规则文件示例见 [examples/qferry.rules.json](examples/qferry.rules.json)。规则文件包含 `version`、`defaultGroupId`、`groups` 和 `rules`，group 可选配置 `target.folder`。当 `preview_cleanup_batch` 只选中一个带目标文件夹的 group 且没有显式传入 `target` 时，QFerry 会从规则文件推导移动目标，并把 `selectedGroupTargets` 写入 e2e summary，方便审计。
 
 ## 安全边界
 

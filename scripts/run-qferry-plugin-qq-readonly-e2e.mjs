@@ -56,6 +56,8 @@ function describeError(error) {
 async function recordFailure(error) {
   if (!failureContext) return;
   const errorInfo = describeError(error);
+  const stderrPath = resolve(failureContext.artifactDir, "stderr.log");
+  await writeFile(stderrPath, redactDiagnosticText(failureContext.stderrText()), "utf8");
   await writeJsonl(failureContext.tracePath, {
     ...failureContext.baseEvent,
     event: "plugin_qq_readonly_e2e_finished",
@@ -64,6 +66,7 @@ async function recordFailure(error) {
     artifactDir: failureContext.artifactDir,
     error: errorInfo,
     stderrBytes: failureContext.stderrBytes(),
+    stderrPath,
   });
   await writeFile(
     failureContext.summaryPath,
@@ -81,10 +84,19 @@ async function recordFailure(error) {
       `- trace: ${failureContext.tracePath}`,
       `- mcpConfig: ${failureContext.mcpConfigPath}`,
       `- stderrBytes: ${failureContext.stderrBytes()}`,
+      `- stderr: ${stderrPath}`,
       "",
     ].join("\n"),
     "utf8",
   );
+}
+
+function redactDiagnosticText(text) {
+  let redacted = text;
+  for (const secret of [process.env.QQMAIL_KEY, process.env.QQMAIL_EMAIL]) {
+    if (secret) redacted = redacted.replaceAll(secret, "<redacted>");
+  }
+  return redacted;
 }
 
 function maskEmail(value) {
@@ -160,6 +172,7 @@ async function main() {
     summaryPath,
     mcpConfigPath,
     stderrBytes: () => stderrChunks.join("").length,
+    stderrText: () => stderrChunks.join(""),
   };
 
   await client.connect(transport);

@@ -5,6 +5,9 @@ import type { ClassificationRule, ClassificationRulePriority } from "./classific
 export interface ClassificationGroup {
   id: string;
   label: string;
+  target?: {
+    folder: string;
+  };
 }
 
 export interface ClassificationRulesetMetadata {
@@ -74,8 +77,17 @@ function readGroups(value: unknown): ClassificationGroup[] {
     return {
       id: readString(group, "id"),
       label: readString(group, "label"),
+      target: readGroupTarget(group),
     };
   });
+}
+
+function readGroupTarget(group: Record<string, unknown>): ClassificationGroup["target"] {
+  if (group.target === undefined) return undefined;
+  if (!isRecord(group.target)) {
+    throw new Error("QFerry ruleset group target must be an object");
+  }
+  return { folder: readString(group.target, "folder") };
 }
 
 function readRules(value: unknown): ClassificationRule[] {

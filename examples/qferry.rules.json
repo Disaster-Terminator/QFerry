@@ -4,7 +4,10 @@
   "groups": [
     {
       "id": "archive",
-      "label": "Archive candidates"
+      "label": "Archive candidates",
+      "target": {
+        "folder": "其他文件夹/订阅摘要"
+      }
     },
     {
       "id": "review",

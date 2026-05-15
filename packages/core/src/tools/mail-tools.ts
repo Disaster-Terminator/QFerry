@@ -1,7 +1,7 @@
 import { classifyMessages, type ClassificationRule, type MessageClassification, type PriorityBucketId, type PriorityConfidence } from "../classification.js";
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
 import type { MailboxInfo, MailboxSummary, MailProvider, MailboxWindowSnapshot, MessageDetail, MessageSummary, MoveMessagesReconciliation, ProviderCapabilitySnapshot, ScanMailboxMetadataWindowResult } from "../providers/types.js";
-import { loadClassificationRuleset, type ClassificationRulesetMetadata } from "../ruleset.js";
+import { loadClassificationRuleset, type ClassificationGroup, type ClassificationRulesetMetadata } from "../ruleset.js";
 import { formatRulesetPatchChangelog, renderRulesetPatchDraft, type RulesetPatchDraft } from "../ruleset-patch.js";
 import type { QFerryRuntimeConfig } from "../runtime-config.js";
 
@@ -358,6 +358,7 @@ export interface CleanupBatchPreview {
   groupCounts: Record<string, number>;
   sampledMessages: MessageSummary[];
   selectedGroups: Record<string, SpamCandidate[]>;
+  selectedGroupTargets?: Record<string, { folder: string }>;
   ruleset?: ClassificationRulesetMetadata;
   mutationsAttempted: 0;
 }
@@ -774,6 +775,8 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         messages,
         selectedClassifications.filter((classification) => selectedRefKeys.has(messageRefKey(classification.messageRef))),
       );
+      const selectedGroupTargets = resolveSelectedGroupTargets(resolvedRules.groups, batchInput.selectedGroupIds);
+      const target = batchInput.target ?? inferSingleSelectedTarget(selectedGroupTargets);
       const provider = selectedRefs[0]?.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
 
       return {
@@ -791,6 +794,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           groupCounts: countGroups(classifications),
           sampledMessages: messages.slice(0, Math.min(messages.length, 10)),
           selectedGroups,
+          selectedGroupTargets,
           ruleset: resolvedRules.ruleset,
           mutationsAttempted: 0,
         },
@@ -799,7 +803,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           provider,
           action: batchInput.action,
           messageRefs: selectedRefs,
-          target: batchInput.target,
+          target,
         }),
         classifications,
         ruleset: resolvedRules.ruleset,
@@ -1466,6 +1470,29 @@ function classificationMapReason(categoryId: BulkGovernanceCategoryId): string {
   return "Messages without a strong category match need manual review before any batch action.";
 }
 
+function resolveSelectedGroupTargets(
+  groups: ClassificationGroup[] | undefined,
+  selectedGroupIds: string[],
+): Record<string, { folder: string }> | undefined {
+  if (!groups) return undefined;
+  const selected = new Set(selectedGroupIds);
+  const targets: Record<string, { folder: string }> = {};
+  for (const group of groups) {
+    if (selected.has(group.id) && group.target?.folder) {
+      targets[group.id] = { folder: group.target.folder };
+    }
+  }
+  return Object.keys(targets).length > 0 ? targets : undefined;
+}
+
+function inferSingleSelectedTarget(
+  selectedGroupTargets: Record<string, { folder: string }> | undefined,
+): { folder: string } | undefined {
+  if (!selectedGroupTargets) return undefined;
+  const targets = Object.values(selectedGroupTargets);
+  return targets.length === 1 ? targets[0] : undefined;
+}
+
 function buildBulkGovernanceCandidates(
   categorized: Array<{
     message: MessageSummary;
@@ -1726,6 +1753,7 @@ async function resolveRules(input: {
 }): Promise<{
   rules: ClassificationRule[];
   defaultGroupId: string;
+  groups?: ClassificationGroup[];
   ruleset?: ClassificationRulesetMetadata;
 }> {
   if (input.rulesFile) {
@@ -1733,6 +1761,7 @@ async function resolveRules(input: {
     return {
       rules: ruleset.rules,
       defaultGroupId: input.defaultGroupId ?? ruleset.defaultGroupId,
+      groups: ruleset.groups,
       ruleset: ruleset.metadata,
     };
   }

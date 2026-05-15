@@ -67,6 +67,24 @@ describe("classification ruleset", () => {
     });
   });
 
+  it("parses optional group target folder mappings for user-defined folders", () => {
+    const ruleset = parseClassificationRuleset({
+      version: "target-v1",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "github", label: "GitHub 通知", target: { folder: "其他文件夹/GitHub通知" } },
+      ],
+      rules: [
+        { id: "github-domain", groupId: "github", match: { fromDomainIncludes: "github.com" } },
+      ],
+    }, "memory");
+
+    expect(ruleset.groups.find((group) => group.id === "github")?.target).toEqual({
+      folder: "其他文件夹/GitHub通知",
+    });
+  });
+
   it("rejects rulesets without rules", () => {
     expect(() => parseClassificationRuleset({
       version: "empty",

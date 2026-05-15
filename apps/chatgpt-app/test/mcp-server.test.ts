@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -1161,6 +1161,99 @@ describe("QFerry ChatGPT App MCP server", () => {
       },
       mutationsAttempted: 0,
     });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("accepts 50-message pages for rules-based cleanup previews", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "preview_cleanup_batch",
+      arguments: {
+        runId: "run-mcp-batch-preview-50",
+        folder: "INBOX",
+        pageSize: 50,
+        maxPages: 1,
+        maxMessageRefs: 50,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedGroupIds: ["archive"],
+        rules: [
+          { id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } },
+        ],
+      },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      preview: {
+        pageSize: 50,
+        maxMessageRefs: 50,
+      },
+    });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("uses ruleset group target folders in MCP cleanup previews", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mcp-rules-target-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "mcp-target",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "newsletter", label: "订阅摘要", target: { folder: "其他文件夹/订阅摘要" } },
+      ],
+      rules: [{ id: "newsletter", groupId: "newsletter", match: { fromIncludes: "newsletter@" } }],
+    }), "utf8");
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "preview_cleanup_batch",
+      arguments: {
+        runId: "run-mcp-rules-target",
+        folder: "INBOX",
+        pageSize: 10,
+        maxPages: 1,
+        maxMessageRefs: 10,
+        action: "move",
+        rulesFile,
+        selectedGroupIds: ["newsletter"],
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      preview: {
+        selectedGroupTargets: {
+          newsletter: { folder: "其他文件夹/订阅摘要" },
+        },
+      },
+      plan: {
+        target: { folder: "其他文件夹/订阅摘要" },
+      },
+    });
+    const content = result.structuredContent as { audit?: { summaryPath?: string } };
+    const summary = await readFile(content.audit?.summaryPath ?? "", "utf8");
+    expect(summary).toContain("- target: {\"folder\":\"其他文件夹/订阅摘要\"}");
+    expect(summary).toContain("- selectedGroupTargets: {\"newsletter\":{\"folder\":\"其他文件夹/订阅摘要\"}}");
 
     await client.close();
     await server.close();

@@ -289,7 +289,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       inputSchema: {
         runId: z.string(),
         folder: z.string(),
-        pageSize: z.number().int().min(1).max(20),
+        pageSize: z.number().int().min(1).max(50),
         maxPages: z.number().int().min(1).max(200),
         maxMessageRefs: z.number().int().min(1).max(200),
         action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
@@ -554,6 +554,7 @@ async function writeMcpAudit(
       `- operationPlanId: ${summary.operationPlanId ?? "<none>"}`,
       `- status: ${summary.status ?? "<none>"}`,
       `- action: ${summary.action ?? "<none>"}`,
+      `- target: ${formatSummaryJson(summary.target)}`,
       `- selectedMessageRefs: ${summary.selectedMessageRefs ?? "<none>"}`,
       `- totalPlanMessages: ${summary.totalPlanMessages ?? "<none>"}`,
       `- attemptedMessages: ${summary.attemptedMessages ?? "<none>"}`,
@@ -562,6 +563,8 @@ async function writeMcpAudit(
       `- mutationsAttempted: ${summary.mutationsAttempted}`,
       `- mailboxSnapshot: ${formatSummaryJson(summary.mailboxSnapshot)}`,
       `- categoryCounts: ${formatSummaryJson(summary.categoryCounts)}`,
+      `- groupCounts: ${formatSummaryJson(summary.groupCounts)}`,
+      `- selectedGroupTargets: ${formatSummaryJson(summary.selectedGroupTargets)}`,
       `- trace: ${tracePath}`,
       "",
     ].join("\n"),
@@ -613,6 +616,8 @@ function summarizeMcpToolResult(structuredContent: object): Record<string, unkno
     reconciliations: result?.reconciliations,
     mailboxSnapshot: preview?.mailboxSnapshot ?? report?.mailboxSnapshot,
     categoryCounts: preview?.categoryCounts,
+    groupCounts: preview?.groupCounts,
+    selectedGroupTargets: preview?.selectedGroupTargets,
   };
 }
 

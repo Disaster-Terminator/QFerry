@@ -1826,4 +1826,50 @@ describe("mail tools", () => {
     ]);
     expect(result.mutationsAttempted).toBe(0);
   });
+
+  it("uses a selected ruleset group target folder when previewing cleanup without an explicit target", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-target-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-target",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "github", label: "GitHub 通知", target: { folder: "其他文件夹/GitHub通知" } },
+      ],
+      rules: [{ id: "github-domain", groupId: "github", match: { fromDomainIncludes: "github.com" } }],
+    }), "utf8");
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => [{
+          ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+          from: "GitHub <notifications@github.com>",
+          subject: "Repository notification",
+          date: "2026-05-15T00:00:00.000Z",
+          snippet: "Issue update",
+          flags: [],
+        }],
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.previewCleanupBatch({
+      runId: "rules-target-folder",
+      folder: "INBOX",
+      pageSize: 10,
+      maxPages: 1,
+      maxMessageRefs: 10,
+      action: "move",
+      rulesFile,
+      selectedGroupIds: ["github"],
+    });
+
+    expect(result.plan.target).toEqual({ folder: "其他文件夹/GitHub通知" });
+    expect(result.preview.selectedGroupTargets).toEqual({
+      github: { folder: "其他文件夹/GitHub通知" },
+    });
+  });
 });
