@@ -855,6 +855,99 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("allows 50-message cleanup execution batches through the MCP server", async () => {
+    const messages: MessageSummary[] = Array.from({ length: 60 }, (_, index) => ({
+      ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: String(index + 1) },
+      from: "Codeforces <noreply@codeforces.com>",
+      subject: `Codeforces notification ${index + 1}`,
+      date: new Date(Date.UTC(2020, 0, index + 1)).toISOString(),
+      snippet: "",
+      flags: [],
+    }));
+    const movedBatches: unknown[] = [];
+    const counts = new Map([
+      ["INBOX", 60],
+      ["Archive", 0],
+    ]);
+    const server = createQFerryMcpServer({
+      provider: {
+        listMailboxes: async () => [{ path: "INBOX", name: "INBOX" }, { path: "Archive", name: "Archive" }],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async (ref) => ({
+          ref,
+          from: "Codeforces <noreply@codeforces.com>",
+          subject: "Codeforces notification",
+          date: "2020-01-01T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+          bodyText: "",
+        }),
+        getMailboxSummary: async (folder) => ({ path: folder, exists: counts.get(folder) ?? 0 }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 50,
+        }),
+        moveMessages: async (refs, targetFolder) => {
+          movedBatches.push(refs);
+          const sourceFolder = refs[0]?.folder ?? "";
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
+          return { moved: refs.length };
+        },
+      },
+    });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const preview = await client.callTool({
+      name: "bulk_governance_preview",
+      arguments: {
+        runId: "run-50-message-execute",
+        folder: "INBOX",
+        pageSize: 50,
+        maxPages: 2,
+        maxMessageRefs: 60,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedCategoryIds: ["developer_community"],
+      },
+    });
+    const previewContent = preview.structuredContent as { plan?: { operationPlanId?: string } } | undefined;
+    const operationPlanId = String(previewContent?.plan?.operationPlanId);
+    await client.callTool({ name: "confirm_cleanup_plan", arguments: { operationPlanId } });
+
+    const firstExecute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId, maxMessages: 50 },
+    });
+
+    expect(firstExecute.structuredContent).toMatchObject({
+      result: {
+        operationPlanId,
+        status: "partially_executed",
+        attemptedMessages: 50,
+        moved: 50,
+        remainingMessages: 10,
+      },
+    });
+    expect(movedBatches).toHaveLength(1);
+    expect((movedBatches[0] as unknown[])).toHaveLength(50);
+
+    await client.close();
+    await server.close();
+  });
+
   it("writes trace artifacts for confirmed MCP cleanup execution", async () => {
     const traceRoot = await mkdtemp(join(tmpdir(), "qferry-mcp-trace-"));
     process.env.QFERRY_MCP_TRACE_ROOT = traceRoot;
