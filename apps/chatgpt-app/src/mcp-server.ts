@@ -472,7 +472,12 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
           planRegistry.delete(input.operationPlanId);
           consumedPlanIds.add(input.operationPlanId);
         }
-        return toToolResult(await withMcpAudit("execute_cleanup", stored.plan.runId, input, result));
+        return toToolResult(
+          await withMcpAudit("execute_cleanup", stored.plan.runId, input, result, {
+            ...result,
+            plan: { target: stored.plan.target },
+          }),
+        );
       } catch (error) {
         planRegistry.delete(input.operationPlanId);
         consumedPlanIds.add(input.operationPlanId);
@@ -519,8 +524,9 @@ async function withMcpAudit<T extends object>(
   runId: string,
   input: object,
   structuredContent: T,
+  auditStructuredContent: object = structuredContent,
 ): Promise<T & { audit: McpAuditInfo }> {
-  const audit = await writeMcpAudit(toolName, runId, input, structuredContent);
+  const audit = await writeMcpAudit(toolName, runId, input, auditStructuredContent);
   return { ...structuredContent, audit };
 }
 
@@ -565,6 +571,7 @@ async function writeMcpAudit(
       `- categoryCounts: ${formatSummaryJson(summary.categoryCounts)}`,
       `- groupCounts: ${formatSummaryJson(summary.groupCounts)}`,
       `- selectedGroupTargets: ${formatSummaryJson(summary.selectedGroupTargets)}`,
+      `- reconciliations: ${formatSummaryJson(summary.reconciliations)}`,
       `- trace: ${tracePath}`,
       "",
     ].join("\n"),

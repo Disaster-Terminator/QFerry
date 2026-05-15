@@ -1110,6 +1110,8 @@ describe("QFerry ChatGPT App MCP server", () => {
     const summary = await readFile(audit.audit?.summaryPath ?? "", "utf8");
     expect(summary).toContain("# QFerry MCP Audit run-mcp-trace-execute");
     expect(summary).toContain("- lastTool: execute_cleanup");
+    expect(summary).toContain('- target: {"folder":"Archive"}');
+    expect(summary).toContain("- reconciliations:");
 
     await client.close();
     await server.close();
