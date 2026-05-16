@@ -57,8 +57,11 @@ const classificationRuleSchema = z.object({
 
 const rulesetPatchSchema = z.object({
   groupToEnsure: z.object({
-    id: z.literal("sender_governance"),
-    label: z.literal("Sender governance"),
+    id: z.string(),
+    label: z.string(),
+    target: z.object({
+      folder: z.string(),
+    }).optional(),
   }),
   candidateRuleCount: z.number().int().min(0),
   rulesToAdd: z.array(classificationRuleSchema),
@@ -332,6 +335,13 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         selectedSenderDomains: z.array(z.string()).optional(),
         selectedFromIncludes: z.array(z.string()).optional(),
         maxDomainCandidates: z.number().int().min(0).max(100).optional(),
+        ruleGroup: z.object({
+          id: z.string(),
+          label: z.string(),
+          target: z.object({
+            folder: z.string(),
+          }).optional(),
+        }).optional(),
         rules: z.array(classificationRuleSchema).optional(),
         rulesFile: z.string().optional(),
       },

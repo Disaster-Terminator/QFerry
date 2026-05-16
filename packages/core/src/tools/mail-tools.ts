@@ -162,6 +162,7 @@ export interface PlanSenderGovernanceInput {
   selectedSenderDomains?: string[];
   selectedFromIncludes?: string[];
   maxDomainCandidates?: number;
+  ruleGroup?: ClassificationGroup;
   rules?: ClassificationRule[];
   rulesFile?: string;
 }
@@ -873,7 +874,8 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         .slice(0, maxMessageRefs);
       const provider = selectedRefs[0]?.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
 
-      const allDomainCandidates = buildSenderGovernanceCandidates(messages);
+      const ruleGroup = governanceInput.ruleGroup ?? { id: "sender_governance", label: "Sender governance" };
+      const allDomainCandidates = buildSenderGovernanceCandidates(messages, ruleGroup);
       const maxDomainCandidates = Math.max(governanceInput.maxDomainCandidates ?? DEFAULT_SENDER_GOVERNANCE_CANDIDATE_LIMIT, 0);
       const domainCandidates = limitSenderGovernanceCandidates(
         allDomainCandidates,
@@ -890,6 +892,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         selectedSenderDomains,
         selectedFromIncludes,
         existingRules,
+        ruleGroup,
         ruleset: existingRuleset?.metadata,
       });
       const renderedDraft = renderRulesetPatchDraft(rulesetPatch, existingRuleset);
@@ -1411,7 +1414,10 @@ function groupSpamCandidates(messages: MessageSummary[], classifications: Messag
   return Object.fromEntries(Object.entries(groups).sort(([left], [right]) => left.localeCompare(right)));
 }
 
-function buildSenderGovernanceCandidates(messages: MessageSummary[]): SenderGovernanceCandidate[] {
+function buildSenderGovernanceCandidates(
+  messages: MessageSummary[],
+  ruleGroup: ClassificationGroup = { id: "sender_governance", label: "Sender governance" },
+): SenderGovernanceCandidate[] {
   const byDomain = new Map<string, MessageSummary[]>();
   for (const message of messages) {
     const domain = extractSenderDomain(message.from);
@@ -1426,7 +1432,7 @@ function buildSenderGovernanceCandidates(messages: MessageSummary[]): SenderGove
       const senders = [...new Set(domainMessages.map((message) => message.from))].slice(0, 5);
       const suggestedRule: ClassificationRule = {
         id: `sender-domain-${slugifyRuleId(domain)}`,
-        groupId: "sender_governance",
+        groupId: ruleGroup.id,
         match: { fromDomainIncludes: domain },
         priority: {
           bucketId: "bulk",
@@ -1826,6 +1832,7 @@ function buildRulesetPatchDraft(input: {
   selectedSenderDomains: string[];
   selectedFromIncludes: string[];
   existingRules: ClassificationRule[];
+  ruleGroup: ClassificationGroup;
   ruleset?: ClassificationRulesetMetadata;
 }): RulesetPatchDraft {
   const selectedRules = [
@@ -1833,7 +1840,7 @@ function buildRulesetPatchDraft(input: {
       .filter((candidate) => input.selectedSenderDomains
         .some((selectedDomain) => includesIgnoreCase(candidate.domain, selectedDomain)))
       .map((candidate) => candidate.suggestedRule),
-    ...input.selectedFromIncludes.map((fromNeedle) => buildSenderRule(fromNeedle)),
+    ...input.selectedFromIncludes.map((fromNeedle) => buildSenderRule(fromNeedle, input.ruleGroup.id)),
   ];
   const rulesToAdd: ClassificationRule[] = [];
   const skippedDuplicateRules: RulesetPatchDraft["skippedDuplicateRules"] = [];
@@ -1852,7 +1859,7 @@ function buildRulesetPatchDraft(input: {
   }
 
   return {
-    groupToEnsure: { id: "sender_governance", label: "Sender governance" },
+    groupToEnsure: input.ruleGroup,
     candidateRuleCount: selectedRules.length,
     rulesToAdd,
     skippedDuplicateRules,
@@ -1860,10 +1867,10 @@ function buildRulesetPatchDraft(input: {
   };
 }
 
-function buildSenderRule(fromNeedle: string): ClassificationRule {
+function buildSenderRule(fromNeedle: string, groupId = "sender_governance"): ClassificationRule {
   return {
     id: `sender-from-${slugifyRuleId(fromNeedle)}`,
-    groupId: "sender_governance",
+    groupId,
     match: { fromIncludes: fromNeedle },
     priority: {
       bucketId: "bulk",

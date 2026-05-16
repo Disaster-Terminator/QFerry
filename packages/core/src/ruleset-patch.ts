@@ -4,7 +4,7 @@ import { realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 
 export interface RulesetPatchDraft {
-  groupToEnsure: { id: "sender_governance"; label: "Sender governance" };
+  groupToEnsure: ClassificationGroup;
   candidateRuleCount: number;
   rulesToAdd: ClassificationRule[];
   skippedDuplicateRules: Array<{

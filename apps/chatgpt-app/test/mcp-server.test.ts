@@ -1381,6 +1381,72 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("plans sender governance rules into a requested classification group through the MCP server", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const ruleGroup = {
+      id: "ai_dev_tools",
+      label: "AI开发工具",
+      target: { folder: "其他文件夹/AI开发工具" },
+    };
+    const result = await client.callTool({
+      name: "plan_sender_governance",
+      arguments: {
+        runId: "run-mcp-sender-target-group",
+        folder: "INBOX",
+        pageSize: 1,
+        maxPages: 2,
+        maxMessageRefs: 1,
+        action: "move",
+        target: { folder: "AI开发工具" },
+        selectedSenderDomains: ["example.com"],
+        ruleGroup,
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      governance: {
+        domainCandidates: [
+          {
+            domain: "example.com",
+            suggestedRule: {
+              groupId: "ai_dev_tools",
+              match: { fromDomainIncludes: "example.com" },
+            },
+          },
+        ],
+        mutationsAttempted: 0,
+      },
+      rulesetPatch: {
+        groupToEnsure: ruleGroup,
+        rulesToAdd: [
+          {
+            id: "sender-domain-example-com",
+            groupId: "ai_dev_tools",
+            match: { fromDomainIncludes: "example.com" },
+          },
+        ],
+        renderedDraft: {
+          groups: [
+            { id: "review", label: "Needs review" },
+            ruleGroup,
+          ],
+        },
+      },
+      mutationsAttempted: 0,
+    });
+
+    await client.close();
+    await server.close();
+  });
+
   it("accepts large sender governance preview windows through the MCP server", async () => {
     const bulkScanInputs: unknown[] = [];
     const provider: MailProvider = {

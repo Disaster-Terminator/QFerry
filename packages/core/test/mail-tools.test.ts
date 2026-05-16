@@ -719,6 +719,72 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("drafts selected sender governance rules into a requested classification group", async () => {
+    const messages = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Qodo <hello@qodo.ai>",
+        subject: "Code review summary",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "review",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "Qodo <updates@qodo.ai>",
+        subject: "Pull request agent update",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "agent",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const ruleGroup = {
+      id: "ai_dev_tools",
+      label: "AI开发工具",
+      target: { folder: "其他文件夹/AI开发工具" },
+    };
+    const result = await tools.planSenderGovernance({
+      runId: "run-sender-target-group",
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      maxMessageRefs: 10,
+      action: "move",
+      target: { folder: "AI开发工具" },
+      selectedSenderDomains: ["qodo.ai"],
+      ruleGroup,
+    });
+
+    expect(result.governance.domainCandidates[0]).toMatchObject({
+      domain: "qodo.ai",
+      suggestedRule: {
+        groupId: "ai_dev_tools",
+        match: { fromDomainIncludes: "qodo.ai" },
+      },
+    });
+    expect(result.rulesetPatch.groupToEnsure).toEqual(ruleGroup);
+    expect(result.rulesetPatch.rulesToAdd).toMatchObject([
+      {
+        id: "sender-domain-qodo-ai",
+        groupId: "ai_dev_tools",
+        match: { fromDomainIncludes: "qodo.ai" },
+      },
+    ]);
+    expect(result.rulesetPatch.renderedDraft?.groups).toContainEqual(ruleGroup);
+    expect(result.plan.messageRefs.map((ref) => ref.uid)).toEqual(["1", "2"]);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
   it("uses provider bulk metadata windows for sender governance plans when available", async () => {
     const scanCalls: unknown[] = [];
     const bulkScanCalls: unknown[] = [];
