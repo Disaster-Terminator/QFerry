@@ -1094,6 +1094,90 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("splits GitHub notifications into actionable governance subcategories", async () => {
+    const messages = [
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "1", uidValidity: "999" },
+        from: "raystorm <notifications@github.com>",
+        subject: "[owner/repo] PR run failed: Claude Code Review - fix(auth)",
+        date: "2026-03-14T01:00:00.000Z",
+        snippet: "workflow failed",
+        flags: ["\\Seen"],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "2", uidValidity: "999" },
+        from: "sourcery-ai[bot] <notifications@github.com>",
+        subject: "Re: [owner/repo] fix(auth): preserve scopes (PR #10)",
+        date: "2026-03-14T02:00:00.000Z",
+        snippet: "code review comments",
+        flags: ["\\Seen"],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "3", uidValidity: "999" },
+        from: "GitHub <notifications@github.com>",
+        subject: "[owner/repo] pull request opened: add feature",
+        date: "2026-03-14T03:00:00.000Z",
+        snippet: "pull request notification",
+        flags: ["\\Seen"],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "4", uidValidity: "999" },
+        from: "GitHub <notifications@github.com>",
+        subject: "New sign-in to your GitHub account",
+        date: "2026-03-14T04:00:00.000Z",
+        snippet: "security alert",
+        flags: ["\\Seen"],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const map = await tools.classificationMap({
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+    });
+
+    expect(map.map.categoryCounts).toEqual({
+      github_account_security: 1,
+      github_ci: 1,
+      github_code_review: 1,
+      github_pr_notification: 1,
+    });
+
+    const preview = await tools.bulkGovernancePreview({
+      runId: "run-github-code-review-preview",
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      maxMessageRefs: 50,
+      action: "move",
+      target: { folder: "GitHub代码审查" },
+      selectedCategoryIds: ["github_code_review"],
+    });
+
+    expect(preview.preview.selectedMessageRefs).toBe(1);
+    expect(preview.preview.categoryCandidates.github_code_review?.[0]).toMatchObject({
+      categoryId: "github_code_review",
+      domain: "github.com",
+      messageCount: 1,
+      selectedMessageRefs: 1,
+    });
+    expect(preview.plan.messageRefs.map((ref) => ref.uid)).toEqual(["2"]);
+    expect(preview.plan.target).toEqual({
+      folder: "其他文件夹/GitHub代码审查",
+      requestedFolder: "GitHub代码审查",
+      targetResolution: "qqmail_classification_folder",
+    });
+  });
+
   it("builds classification-first mailbox maps without creating operation plans", async () => {
     const messages = [
       {

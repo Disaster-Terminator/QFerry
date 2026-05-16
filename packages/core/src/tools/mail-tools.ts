@@ -178,6 +178,10 @@ export type BulkGovernanceCategoryId =
   | "newsletter_or_digest"
   | "security_or_account"
   | "receipt_or_purchase"
+  | "github_ci"
+  | "github_pr_notification"
+  | "github_code_review"
+  | "github_account_security"
   | "developer_community"
   | "review";
 
@@ -1510,6 +1514,11 @@ function classifyBulkGovernanceMessage(message: MessageSummary): {
   const domain = extractSenderDomain(message.from);
   const text = `${message.from}\n${message.subject}\n${message.snippet}`.toLocaleLowerCase();
 
+  if (domain === "github.com") {
+    const githubCategory = classifyGithubNotification(text);
+    if (githubCategory) return githubCategory;
+  }
+
   if (hasAny(text, ["安全代码", "security code", "security alert", "异常登录", "new sign-in", "验证码", "验证", "account", "帐户"])) {
     return { categoryId: "security_or_account", confidence: "high", reason: "metadata indicates account, login, verification, or security mail" };
   }
@@ -1537,6 +1546,94 @@ function classifyBulkGovernanceMessage(message: MessageSummary): {
   return { categoryId: "review", confidence: "low", reason: "no high-confidence bulk governance category matched" };
 }
 
+function classifyGithubNotification(text: string): {
+  categoryId: BulkGovernanceCategoryId;
+  confidence: PriorityConfidence;
+  reason: string;
+} | undefined {
+  if (hasAny(text, [
+    "security alert",
+    "new sign-in",
+    "new sign in",
+    "two-factor",
+    "2fa",
+    "verification",
+    "verify your",
+    "password",
+    "recovery",
+    "personal access token",
+    "oauth",
+    "github account",
+  ])) {
+    return {
+      categoryId: "github_account_security",
+      confidence: "high",
+      reason: "metadata indicates GitHub account, login, token, or security mail",
+    };
+  }
+
+  if (hasAny(text, [
+    "pr run failed",
+    "run failed",
+    "workflow run",
+    "workflow failed",
+    "workflow succeeded",
+    "check run",
+    "checks failed",
+    "build failed",
+    "build succeeded",
+    "deployment failed",
+    "deployment succeeded",
+    "ci",
+  ])) {
+    return {
+      categoryId: "github_ci",
+      confidence: "high",
+      reason: "metadata indicates GitHub CI, workflow, check, build, or deployment result",
+    };
+  }
+
+  if (hasAny(text, [
+    "claude code review",
+    "qodo-code-review",
+    "qodo code review",
+    "sourcery",
+    "coderabbit",
+    "code review",
+    "review requested",
+    "review required",
+    "review comments",
+  ])) {
+    return {
+      categoryId: "github_code_review",
+      confidence: "high",
+      reason: "metadata indicates GitHub code review or review bot activity",
+    };
+  }
+
+  if (hasAny(text, [
+    "pull request",
+    "pr #",
+    "(pr #",
+    "merged",
+    "closed",
+    "opened",
+    "assigned",
+  ])) {
+    return {
+      categoryId: "github_pr_notification",
+      confidence: "medium",
+      reason: "metadata indicates GitHub pull request lifecycle notification",
+    };
+  }
+
+  return {
+    categoryId: "developer_community",
+    confidence: "medium",
+    reason: "metadata indicates GitHub repository activity",
+  };
+}
+
 function countBulkCategories(categoryIds: BulkGovernanceCategoryId[]): Partial<Record<BulkGovernanceCategoryId, number>> {
   const counts: Partial<Record<BulkGovernanceCategoryId, number>> = {};
   for (const categoryId of categoryIds) {
@@ -1552,6 +1649,10 @@ function buildClassificationMapBuckets(
   const categoryOrder: BulkGovernanceCategoryId[] = [
     "security_or_account",
     "receipt_or_purchase",
+    "github_account_security",
+    "github_code_review",
+    "github_ci",
+    "github_pr_notification",
     "developer_community",
     "newsletter_or_digest",
     "high_confidence_marketing",
@@ -1574,11 +1675,15 @@ function buildClassificationMapBuckets(
 }
 
 function recommendedClassificationMapAction(categoryId: BulkGovernanceCategoryId): ClassificationMapAction {
-  if (categoryId === "security_or_account" || categoryId === "receipt_or_purchase") {
+  if (categoryId === "security_or_account" || categoryId === "receipt_or_purchase" || categoryId === "github_account_security") {
     return "keep_for_account_history";
   }
   if (categoryId === "high_confidence_marketing") return "classify_to_folder";
-  if (categoryId === "developer_community" || categoryId === "newsletter_or_digest") return "archive_or_label";
+  if (categoryId === "developer_community"
+    || categoryId === "newsletter_or_digest"
+    || categoryId === "github_ci"
+    || categoryId === "github_pr_notification"
+    || categoryId === "github_code_review") return "archive_or_label";
   return "review";
 }
 
@@ -1588,6 +1693,18 @@ function classificationMapReason(categoryId: BulkGovernanceCategoryId): string {
   }
   if (categoryId === "receipt_or_purchase") {
     return "Receipts, purchases, payments, and subscriptions are account history, not disposable ads.";
+  }
+  if (categoryId === "github_account_security") {
+    return "GitHub account, login, and security notifications should be preserved separately from repository noise.";
+  }
+  if (categoryId === "github_code_review") {
+    return "GitHub code review bot and reviewer messages are useful but should be separated from generic repository notifications.";
+  }
+  if (categoryId === "github_ci") {
+    return "GitHub workflow, check, and CI result notifications should be grouped for build-history review.";
+  }
+  if (categoryId === "github_pr_notification") {
+    return "GitHub pull request lifecycle notifications should be grouped separately from CI and review bots.";
   }
   if (categoryId === "high_confidence_marketing") {
     return "Known marketing senders or promotion subjects can be reviewed as a bucket before moving to a marketing folder.";

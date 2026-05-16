@@ -74,6 +74,10 @@ const bulkGovernanceCategorySchema = z.enum([
   "newsletter_or_digest",
   "security_or_account",
   "receipt_or_purchase",
+  "github_ci",
+  "github_pr_notification",
+  "github_code_review",
+  "github_account_security",
   "developer_community",
   "review",
 ]);
