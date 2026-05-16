@@ -564,6 +564,88 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("uses provider bulk metadata windows for rules preview batches when available", async () => {
+    const scanCalls: unknown[] = [];
+    const bulkScanCalls: unknown[] = [];
+    const messages = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Person <person@example.com>",
+        subject: "Manual review",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "personal mail",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "Steam Team <noreply@steampowered.com>",
+        subject: "Steam login",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "new login",
+        flags: ["\\Seen"],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "3" },
+        from: "Other <other@example.com>",
+        subject: "Other",
+        date: "2026-05-12T00:00:00.000Z",
+        snippet: "not selected",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "4" },
+        from: "Steam Support <noreply@steampowered.com>",
+        subject: "Refund request received",
+        date: "2026-05-13T00:00:00.000Z",
+        snippet: "refund",
+        flags: ["\\Seen"],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async (input) => {
+          scanCalls.push(input);
+          throw new Error("preview_cleanup_batch should use the provider window scanner");
+        },
+        scanMailboxMetadataWindow: async (input) => {
+          bulkScanCalls.push(input);
+          return {
+            pagesScanned: 2,
+            mailboxSnapshot: { folder: "INBOX", exists: 4, uidValidity: "rules-window" },
+            messages,
+          };
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.previewCleanupBatch({
+      runId: "run-batch-window",
+      folder: "INBOX",
+      pageSize: 2,
+      maxPages: 2,
+      maxMessageRefs: 10,
+      action: "move",
+      target: { folder: "Archive/Steam" },
+      selectedGroupIds: ["steam"],
+      rules: [
+        { id: "steam", groupId: "steam", match: { fromDomainIncludes: "steampowered.com" } },
+      ],
+    });
+
+    expect(scanCalls).toEqual([]);
+    expect(bulkScanCalls).toEqual([{ folder: "INBOX", limit: 2, maxPages: 2, order: "oldest", offset: 0 }]);
+    expect(result.preview.mailboxSnapshot).toEqual({ folder: "INBOX", exists: 4, uidValidity: "rules-window" });
+    expect(result.preview.pagesScanned).toBe(2);
+    expect(result.preview.scannedMessages).toBe(4);
+    expect(result.preview.groupCounts).toEqual({ review: 2, steam: 2 });
+    expect(result.plan.messageRefs.map((ref) => ref.uid)).toEqual(["2", "4"]);
+    expect(result.classifications).toHaveLength(4);
+  });
+
   it("plans sender and domain governance without server-side blocklist mutation", async () => {
     const provider = FixtureMailProvider.demo();
     const scanInputs: unknown[] = [];
@@ -635,6 +717,79 @@ describe("mail tools", () => {
       { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
     ]);
     expect(result.mutationsAttempted).toBe(0);
+  });
+
+  it("uses provider bulk metadata windows for sender governance plans when available", async () => {
+    const scanCalls: unknown[] = [];
+    const bulkScanCalls: unknown[] = [];
+    const messages = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Steam Team <noreply@steampowered.com>",
+        subject: "Steam login",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "new login",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "Person <person@example.com>",
+        subject: "Manual review",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "personal mail",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "3" },
+        from: "Steam Support <noreply@steampowered.com>",
+        subject: "Refund",
+        date: "2026-05-12T00:00:00.000Z",
+        snippet: "refund",
+        flags: ["\\Seen"],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async (input) => {
+          scanCalls.push(input);
+          throw new Error("plan_sender_governance should use the provider window scanner");
+        },
+        scanMailboxMetadataWindow: async (input) => {
+          bulkScanCalls.push(input);
+          return {
+            pagesScanned: 2,
+            mailboxSnapshot: { folder: "INBOX", exists: 3, uidValidity: "sender-window" },
+            messages,
+          };
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.planSenderGovernance({
+      runId: "run-sender-window",
+      folder: "INBOX",
+      pageSize: 2,
+      maxPages: 2,
+      maxMessageRefs: 10,
+      action: "move",
+      target: { folder: "Archive/Steam" },
+      selectedSenderDomains: ["steampowered.com"],
+    });
+
+    expect(scanCalls).toEqual([]);
+    expect(bulkScanCalls).toEqual([{ folder: "INBOX", limit: 2, maxPages: 2, order: "oldest", offset: 0 }]);
+    expect(result.governance.pagesScanned).toBe(2);
+    expect(result.governance.scannedMessages).toBe(3);
+    expect(result.governance.selectedMessageRefs).toBe(2);
+    expect(result.plan.messageRefs.map((ref) => ref.uid)).toEqual(["1", "3"]);
+    expect(result.governance.domainCandidates.find((candidate) => candidate.domain === "steampowered.com")).toMatchObject({
+      messageCount: 2,
+      seenCount: 1,
+    });
   });
 
   it("deduplicates sender governance rule drafts against existing rules", async () => {

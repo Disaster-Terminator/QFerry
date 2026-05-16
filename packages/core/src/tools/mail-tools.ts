@@ -744,37 +744,19 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const maxMessageRefs = Math.max(batchInput.maxMessageRefs, 0);
       const scanOffset = Math.max(batchInput.scanOffset ?? 0, 0);
       const scanOrder = batchInput.order ?? "oldest";
-      const mailboxSummary = input.provider.getMailboxSummary
-        ? await input.provider.getMailboxSummary(batchInput.folder)
-        : undefined;
-      const mailboxSnapshot = mailboxSummary
-        ? {
-          folder: mailboxSummary.path,
-          exists: mailboxSummary.exists,
-          uidValidity: mailboxSummary.uidValidity,
-        }
-        : undefined;
-      const messages: MessageSummary[] = [];
-      const classifications: MessageClassification[] = [];
-      let pagesScanned = 0;
-
-      for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-        const page = await input.provider.scanMailboxMetadata({
-          folder: batchInput.folder,
-          limit: pageSize,
-          order: scanOrder,
-          offset: scanOffset + pageIndex * pageSize,
-        });
-        if (page.length === 0) break;
-        pagesScanned += 1;
-        messages.push(...page);
-        classifications.push(...classifyMessages({
-          messages: page,
-          rules: resolvedRules.rules,
-          defaultGroupId: resolvedRules.defaultGroupId,
-        }));
-        if (page.length < pageSize) break;
-      }
+      const scanWindow = await scanMetadataWindow(input.provider, {
+        folder: batchInput.folder,
+        limit: pageSize,
+        maxPages,
+        order: scanOrder,
+        offset: scanOffset,
+      });
+      const messages = scanWindow.messages;
+      const classifications = classifyMessages({
+        messages,
+        rules: resolvedRules.rules,
+        defaultGroupId: resolvedRules.defaultGroupId,
+      });
 
       const selectedClassifications = classifications.filter((classification) =>
         batchInput.selectedGroupIds.includes(classification.groupId));
@@ -794,12 +776,12 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         preview: {
           provider,
           folder: batchInput.folder,
-          mailboxSnapshot,
+          mailboxSnapshot: scanWindow.mailboxSnapshot,
           scanOrder,
           scanOffset,
           pageSize,
           maxPages,
-          pagesScanned,
+          pagesScanned: scanWindow.pagesScanned,
           scannedMessages: messages.length,
           selectedMessageRefs: selectedRefs.length,
           maxMessageRefs,
@@ -833,21 +815,14 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const maxMessageRefs = Math.max(governanceInput.maxMessageRefs, 0);
       const scanOffset = Math.max(governanceInput.scanOffset ?? 0, 0);
       const scanOrder = governanceInput.order ?? "oldest";
-      const messages: MessageSummary[] = [];
-      let pagesScanned = 0;
-
-      for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-        const page = await input.provider.scanMailboxMetadata({
-          folder: governanceInput.folder,
-          limit: pageSize,
-          order: scanOrder,
-          offset: scanOffset + pageIndex * pageSize,
-        });
-        if (page.length === 0) break;
-        pagesScanned += 1;
-        messages.push(...page);
-        if (page.length < pageSize) break;
-      }
+      const scanWindow = await scanMetadataWindow(input.provider, {
+        folder: governanceInput.folder,
+        limit: pageSize,
+        maxPages,
+        order: scanOrder,
+        offset: scanOffset,
+      });
+      const messages = scanWindow.messages;
 
       const selectedSenderDomains = governanceInput.selectedSenderDomains ?? [];
       const selectedFromIncludes = governanceInput.selectedFromIncludes ?? [];
@@ -876,7 +851,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           scanOffset,
           pageSize,
           maxPages,
-          pagesScanned,
+          pagesScanned: scanWindow.pagesScanned,
           scannedMessages: messages.length,
           selectedMessageRefs: selectedRefs.length,
           maxMessageRefs,
@@ -1149,6 +1124,35 @@ async function scanMetadataWindowWithPages(
     messages.push(...page);
   }
   return { messages, pagesScanned };
+}
+
+async function scanMetadataWindow(
+  provider: MailProvider,
+  input: {
+    folder: string;
+    limit: number;
+    maxPages: number;
+    order: "newest" | "oldest";
+    offset: number;
+  },
+): Promise<ScanMailboxMetadataWindowResult> {
+  if (provider.scanMailboxMetadataWindow) {
+    return provider.scanMailboxMetadataWindow(input);
+  }
+  const result = await scanMetadataWindowWithPages(provider, input);
+  const mailboxSummary = provider.getMailboxSummary
+    ? await provider.getMailboxSummary(input.folder)
+    : undefined;
+  return {
+    ...result,
+    mailboxSnapshot: mailboxSummary
+      ? {
+        folder: mailboxSummary.path,
+        exists: mailboxSummary.exists,
+        uidValidity: mailboxSummary.uidValidity,
+      }
+      : undefined,
+  };
 }
 
 function countGroups(classifications: MessageClassification[]): Record<string, number> {

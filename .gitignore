@@ -13,3 +13,20 @@ dist/
 !plugins/qferry/dist/
 !plugins/qferry/dist/**
 coverage/
+
+# Stray TypeScript compiler outputs when tsc is run without a package project.
+apps/chatgpt-app/src/**/*.d.ts
+apps/chatgpt-app/src/**/*.js
+apps/chatgpt-app/src/**/*.js.map
+apps/chatgpt-app/test/**/*.d.ts
+apps/chatgpt-app/test/**/*.js
+apps/chatgpt-app/test/**/*.js.map
+packages/core/src/**/*.d.ts
+packages/core/src/**/*.js
+packages/core/src/**/*.js.map
+packages/core/test/**/*.d.ts
+packages/core/test/**/*.js
+packages/core/test/**/*.js.map
+plugins/qferry/src/**/*.d.ts
+plugins/qferry/src/**/*.js
+plugins/qferry/src/**/*.js.map
