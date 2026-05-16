@@ -167,6 +167,18 @@ export interface PlanSenderGovernanceInput {
   rulesFile?: string;
 }
 
+export interface SenderBreakdownInput {
+  folder: string;
+  pageSize: number;
+  maxPages: number;
+  scanOffset?: number;
+  order?: "newest" | "oldest";
+  fromDomainIncludes?: string;
+  fromIncludes?: string;
+  maxSenderCandidates?: number;
+  ruleGroup?: ClassificationGroup;
+}
+
 export interface MailboxTargetResolution {
   requestedFolder: string;
   resolvedFolder: string;
@@ -389,6 +401,40 @@ export interface CleanupBatchPreview {
   mutationsAttempted: 0;
 }
 
+export interface SenderBreakdownCandidate {
+  sender: string;
+  domain: string;
+  messageCount: number;
+  seenCount: number;
+  unreadCount: number;
+  firstDate: string;
+  lastDate: string;
+  sampleSubjects: string[];
+  suggestedRule: ClassificationRule;
+}
+
+export interface SenderBreakdownReport {
+  provider: string;
+  folder: string;
+  scanOrder: "newest" | "oldest";
+  scanOffset: number;
+  pageSize: number;
+  maxPages: number;
+  pagesScanned: number;
+  scannedMessages: number;
+  matchedMessages: number;
+  fromDomainIncludes?: string;
+  fromIncludes?: string;
+  senderCandidates: SenderBreakdownCandidate[];
+  candidateSummary: {
+    totalSenderCandidates: number;
+    returnedSenderCandidates: number;
+    maxSenderCandidates: number;
+    truncated: boolean;
+  };
+  mutationsAttempted: 0;
+}
+
 export interface MailTools {
   getStatus(): Promise<{
     status: QFerryRuntimeConfig;
@@ -443,6 +489,10 @@ export interface MailTools {
     governance: SenderGovernanceReport;
     rulesetPatch: RulesetPatchDraft;
     plan: OperationPlan;
+    mutationsAttempted: 0;
+  }>;
+  senderBreakdown(input: SenderBreakdownInput): Promise<{
+    breakdown: SenderBreakdownReport;
     mutationsAttempted: 0;
   }>;
   bulkGovernancePreview(input: BulkGovernancePreviewInput): Promise<{
@@ -938,6 +988,59 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           messageRefs: selectedRefs,
           target: targetResolution.target,
         }),
+        mutationsAttempted: 0,
+      };
+    },
+
+    async senderBreakdown(breakdownInput) {
+      const pageSize = Math.max(breakdownInput.pageSize, 0);
+      const maxPages = Math.max(breakdownInput.maxPages, 0);
+      const scanOffset = Math.max(breakdownInput.scanOffset ?? 0, 0);
+      const scanOrder = breakdownInput.order ?? "oldest";
+      const maxSenderCandidates = Math.max(
+        breakdownInput.maxSenderCandidates ?? DEFAULT_SENDER_GOVERNANCE_CANDIDATE_LIMIT,
+        0,
+      );
+      const scanWindow = await scanMetadataWindow(input.provider, {
+        folder: breakdownInput.folder,
+        limit: pageSize,
+        maxPages,
+        order: scanOrder,
+        offset: scanOffset,
+      });
+      const messages = scanWindow.messages;
+      const matchedMessages = messages.filter((message) => {
+        const domain = extractSenderDomain(message.from);
+        return (!breakdownInput.fromDomainIncludes || includesIgnoreCase(domain, breakdownInput.fromDomainIncludes))
+          && (!breakdownInput.fromIncludes || includesIgnoreCase(message.from, breakdownInput.fromIncludes));
+      });
+      const ruleGroup = breakdownInput.ruleGroup ?? { id: "sender_governance", label: "Sender governance" };
+      const allSenderCandidates = buildSenderBreakdownCandidates(matchedMessages, ruleGroup);
+      const senderCandidates = limitSenderBreakdownCandidates(allSenderCandidates, maxSenderCandidates);
+      const provider = matchedMessages[0]?.ref.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
+
+      return {
+        breakdown: {
+          provider,
+          folder: breakdownInput.folder,
+          scanOrder,
+          scanOffset,
+          pageSize,
+          maxPages,
+          pagesScanned: scanWindow.pagesScanned,
+          scannedMessages: messages.length,
+          matchedMessages: matchedMessages.length,
+          fromDomainIncludes: breakdownInput.fromDomainIncludes,
+          fromIncludes: breakdownInput.fromIncludes,
+          senderCandidates,
+          candidateSummary: {
+            totalSenderCandidates: allSenderCandidates.length,
+            returnedSenderCandidates: senderCandidates.length,
+            maxSenderCandidates,
+            truncated: senderCandidates.length < allSenderCandidates.length,
+          },
+          mutationsAttempted: 0,
+        },
         mutationsAttempted: 0,
       };
     },
@@ -1472,6 +1575,45 @@ function limitSenderGovernanceCandidates(
   }
   const remaining = candidates.filter((candidate) => !selectedKeys.has(candidate.domain));
   return [...selected, ...remaining].slice(0, maxCandidates);
+}
+
+function buildSenderBreakdownCandidates(
+  messages: MessageSummary[],
+  ruleGroup: ClassificationGroup = { id: "sender_governance", label: "Sender governance" },
+): SenderBreakdownCandidate[] {
+  const bySender = new Map<string, MessageSummary[]>();
+  for (const message of messages) {
+    if (!message.from.trim()) continue;
+    bySender.set(message.from, [...(bySender.get(message.from) ?? []), message]);
+  }
+
+  return [...bySender.entries()]
+    .map(([sender, senderMessages]) => {
+      const dates = senderMessages.map((message) => message.date).sort();
+      const sampleSubjects = [...new Set(senderMessages.map((message) => message.subject))].slice(0, 5);
+      return {
+        sender,
+        domain: extractSenderDomain(sender) ?? "",
+        messageCount: senderMessages.length,
+        seenCount: senderMessages.filter((message) => message.flags.includes("\\Seen")).length,
+        unreadCount: senderMessages.filter((message) => !message.flags.includes("\\Seen")).length,
+        firstDate: dates[0] ?? "",
+        lastDate: dates[dates.length - 1] ?? "",
+        sampleSubjects,
+        suggestedRule: buildSenderRule(sender, ruleGroup.id),
+      };
+    })
+    .sort((left, right) =>
+      right.messageCount - left.messageCount
+      || right.lastDate.localeCompare(left.lastDate)
+      || left.sender.localeCompare(right.sender));
+}
+
+function limitSenderBreakdownCandidates(
+  candidates: SenderBreakdownCandidate[],
+  maxCandidates: number,
+): SenderBreakdownCandidate[] {
+  return maxCandidates <= 0 ? [] : candidates.slice(0, maxCandidates);
 }
 
 function resolveOperationTarget(input: {

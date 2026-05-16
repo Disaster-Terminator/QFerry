@@ -354,6 +354,33 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
   );
 
   server.registerTool(
+    "sender_breakdown",
+    {
+      title: "Break down senders",
+      description: "Use this to split a noisy domain such as qq.com into concrete sender candidates and local sender-level rule suggestions without creating an operation plan.",
+      inputSchema: {
+        folder: z.string(),
+        pageSize: z.number().int().min(1).max(50),
+        maxPages: z.number().int().min(1).max(200),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+        fromDomainIncludes: z.string().optional(),
+        fromIncludes: z.string().optional(),
+        maxSenderCandidates: z.number().int().min(0).max(100).optional(),
+        ruleGroup: z.object({
+          id: z.string(),
+          label: z.string(),
+          target: z.object({
+            folder: z.string(),
+          }).optional(),
+        }).optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await tools.senderBreakdown(input)),
+  );
+
+  server.registerTool(
     "classification_map",
     {
       title: "Classification map",

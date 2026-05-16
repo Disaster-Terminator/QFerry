@@ -785,6 +785,99 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("breaks a noisy domain down into reusable sender-level governance candidates", async () => {
+    const messages = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "QQ Mail Admin <admin@qq.com>",
+        subject: "Birthday greeting",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "system",
+        flags: ["\\Seen"],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "QQ Mail Admin <admin@qq.com>",
+        subject: "Product update",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "system",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "3" },
+        from: "Friend <friend@qq.com>",
+        subject: "Manual note",
+        date: "2026-05-12T00:00:00.000Z",
+        snippet: "personal",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "4" },
+        from: "GitHub <notifications@github.com>",
+        subject: "Pull request",
+        date: "2026-05-13T00:00:00.000Z",
+        snippet: "dev",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await (tools as any).senderBreakdown({
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      order: "oldest",
+      fromDomainIncludes: "qq.com",
+      maxSenderCandidates: 10,
+      ruleGroup: { id: "qq_mail_system", label: "QQ邮箱系统", target: { folder: "其他文件夹/QQ邮箱系统" } },
+    });
+
+    expect(result.breakdown).toMatchObject({
+      provider: "fixture",
+      folder: "INBOX",
+      scannedMessages: 4,
+      matchedMessages: 3,
+      fromDomainIncludes: "qq.com",
+      mutationsAttempted: 0,
+      candidateSummary: {
+        totalSenderCandidates: 2,
+        returnedSenderCandidates: 2,
+        maxSenderCandidates: 10,
+        truncated: false,
+      },
+    });
+    expect(result.breakdown.senderCandidates).toEqual([
+      expect.objectContaining({
+        sender: "QQ Mail Admin <admin@qq.com>",
+        domain: "qq.com",
+        messageCount: 2,
+        seenCount: 1,
+        unreadCount: 1,
+        sampleSubjects: ["Birthday greeting", "Product update"],
+        suggestedRule: expect.objectContaining({
+          id: "sender-from-qq-mail-admin-admin-qq-com",
+          groupId: "qq_mail_system",
+          match: { fromIncludes: "QQ Mail Admin <admin@qq.com>" },
+        }),
+      }),
+      expect.objectContaining({
+        sender: "Friend <friend@qq.com>",
+        domain: "qq.com",
+        messageCount: 1,
+        sampleSubjects: ["Manual note"],
+      }),
+    ]);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
   it("uses provider bulk metadata windows for sender governance plans when available", async () => {
     const scanCalls: unknown[] = [];
     const bulkScanCalls: unknown[] = [];

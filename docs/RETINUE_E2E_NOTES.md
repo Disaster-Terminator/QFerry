@@ -235,3 +235,20 @@ Findings:
 
 - This is Retinue pressure-test evidence, not QFerry review evidence.
 - QFerry proceeded with TDD coverage for importing `scripts/run-qferry-plugin-qq-move-spam-e2e.mjs` without starting a live mailbox run and for the conservative rule set used by real QQ move-spam e2e.
+
+## 2026-05-16 Sender breakdown review attempt
+
+Context:
+
+- Retinue was used for a narrow read-only review of the staged `sender_breakdown` tool before committing the QFerry change.
+- The main thread kept implementation, verification, plugin cache sync, and mailbox safety decisions.
+
+Observed jobs:
+
+- `job_6e042132-0750-4fca-848e-5d34b0b2ffbc` was closed after the read-only child emitted patch/write intent instead of a usable review.
+- `job_eabf9437-9446-4204-ad46-aa541a868be3` stalled with provider/router zero-progress diagnostics after tool-call rounds and no completed assistant text.
+
+Findings:
+
+- Retinue did not return usable review content for this slice; this is Retinue pressure-test evidence, not QFerry review evidence.
+- QFerry proceeded from TDD coverage, full local gate, real QQ read-only e2e, and installed plugin cache sync.

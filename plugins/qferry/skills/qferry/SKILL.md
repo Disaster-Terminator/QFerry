@@ -47,6 +47,7 @@ Allowed by default:
 - Create operation plans.
 - Preview bounded cross-page cleanup batches.
 - Plan sender/domain governance candidates and local rule suggestions.
+- Break noisy domains down by concrete sender with `sender_breakdown` before moving anything. This is the preferred first step for mixed domains such as `qq.com`, where a domain-level rule would merge system mail, product mail, personal QQ senders, and bounce notices.
 - Write trace artifacts.
 - Confirm an operation plan after explicit user approval.
 
@@ -59,6 +60,8 @@ Rules can match `fromIncludes`, `fromDomainIncludes`, `subjectIncludes`, `snippe
 Rules may include optional `priority` metadata with `bucketId`, `reason`, `confidence`, `weight`, and `nextAction`. Use it to make user-specific senders/domains consistently land in `urgent`, `needs_review`, `waiting`, `fyi`, or `bulk` without changing QQ server state. `weight` is a 0-100 candidate ordering signal inside the selected bucket.
 
 Use `plan_sender_governance` when the user wants Gmail-like sender/domain cleanup. It returns compact domain candidates, `candidateSummary`, suggested local rules, `rulesetPatch.rulesToAdd` for explicitly selected sender/domain filters, duplicate-rule skips, `rulesetPatch.renderedDraft`, `rulesetPatch.changelog`, a preview-only operation plan, and `serverBlocklistCapability.supported: false` when the current provider exposes no QQ server-side blocklist mutation API. Pass `ruleGroup` when the selected senders should become a reusable user classification instead of generic sender governance, for example `{ "id": "ai_dev_tools", "label": "AI开发工具", "target": { "folder": "其他文件夹/AI开发工具" } }`. This drafts rules directly into that user-defined group and keeps the folder binding in the local ruleset draft; it still does not mutate QQ Mail. For QQ Mail classification moves, a bare target such as `{ "folder": "GitHub通知" }` is resolved to the user-folder path under `其他文件夹`; use `folderMode: "literal"` only when deliberately targeting a root-level mailbox.
+
+Use `sender_breakdown` before `plan_sender_governance` when a single domain is too broad. Pass `fromDomainIncludes` such as `qq.com` and a target `ruleGroup`; review the returned concrete `senderCandidates`, `sampleSubjects`, and `suggestedRule.match.fromIncludes`. Then pass only the approved sender strings to `plan_sender_governance.selectedFromIncludes` for preview and execution. `sender_breakdown` is read-only and does not create an operation plan.
 
 For high-throughput sender or rule cleanup, prefer one window-backed preview over manual offset stitching. Pass enough `pageSize * maxPages` to cover the target mailbox window, then use `plan_sender_governance` with `ruleGroup` to draft reusable classification rules for recurring domains, dry-run the patch with `apply_ruleset_patch`, and use `preview_cleanup_batch` against the ruleset for all matching messages. These tools use the provider bulk metadata window when available, so they should produce a single UID-ref operation plan for a category such as Steam instead of requiring multiple `scanOffset` retries.
 
