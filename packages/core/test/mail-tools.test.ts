@@ -1094,6 +1094,79 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("recognizes common Chinese account and receipt metadata in bulk governance", async () => {
+    const messages = [
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "1", uidValidity: "999" },
+        from: "pixiv事务局 <no-reply@pixiv.net>",
+        subject: "[pixiv] 新登录通知（登录地点：香港）",
+        date: "2026-02-14T08:19:55.000Z",
+        snippet: "size=100",
+        flags: ["\\Seen"],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "2", uidValidity: "999" },
+        from: "4399 <service_79@4399mail.com>",
+        subject: "4399用户找回密码校验",
+        date: "2015-03-28T11:58:01.000Z",
+        snippet: "size=100",
+        flags: ["\\Seen"],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "3", uidValidity: "999" },
+        from: "航旅纵横 <umetrip-cjpz@travelsky.com>",
+        subject: "航旅纵横-个人乘机凭证",
+        date: "2026-03-03T14:46:28.000Z",
+        snippet: "size=100",
+        flags: ["\\Seen"],
+      },
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "25***@qq.com", folder: "INBOX", uid: "4", uidValidity: "999" },
+        from: "Epic Games <help@acct.epicgames.com>",
+        subject: "您的 Epic Games 收据 F2411040226457881",
+        date: "2024-11-04T02:29:21.000Z",
+        snippet: "size=100",
+        flags: ["\\Seen"],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        getMailboxSummary: async (folder) => ({ path: folder, exists: messages.length, uidValidity: "999" }),
+        getCapabilitySnapshot: async () => ({
+          provider: "qqmail",
+          accountAlias: "25***@qq.com",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 50,
+        }),
+        scanMailboxMetadata: async (input) => {
+          const offset = input.offset ?? 0;
+          return messages.slice(offset, offset + input.limit);
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.classificationSweep({
+      folder: "INBOX",
+      pageSize: 4,
+      maxPages: 1,
+      chunkPages: 1,
+      order: "oldest",
+    });
+
+    expect(result.sweep.categoryCounts).toEqual({
+      receipt_or_purchase: 2,
+      security_or_account: 2,
+    });
+  });
+
   it("splits GitHub notifications into actionable governance subcategories", async () => {
     const messages = [
       {

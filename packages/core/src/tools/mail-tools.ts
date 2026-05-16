@@ -1519,11 +1519,30 @@ function classifyBulkGovernanceMessage(message: MessageSummary): {
     if (githubCategory) return githubCategory;
   }
 
-  if (hasAny(text, ["安全代码", "security code", "security alert", "异常登录", "new sign-in", "验证码", "验证", "account", "帐户"])) {
+  if (hasAny(text, [
+    "安全代码",
+    "security code",
+    "security alert",
+    "异常登录",
+    "新登录",
+    "登录通知",
+    "login attempt",
+    "new sign-in",
+    "verify your email",
+    "验证码",
+    "验证",
+    "校验",
+    "找回密码",
+    "密码重置",
+    "密码已更改",
+    "绑定成功",
+    "account",
+    "帐户",
+  ])) {
     return { categoryId: "security_or_account", confidence: "high", reason: "metadata indicates account, login, verification, or security mail" };
   }
 
-  if (hasAny(text, ["购买", "receipt", "invoice", "账单", "订单", "payment", "支付", "subscription"])) {
+  if (hasAny(text, ["购买", "receipt", "invoice", "账单", "订单", "payment", "支付", "subscription", "收据", "凭证"])) {
     return { categoryId: "receipt_or_purchase", confidence: "high", reason: "metadata indicates a receipt, purchase, payment, or subscription" };
   }
 
