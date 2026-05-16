@@ -327,6 +327,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         order: z.enum(["newest", "oldest"]).optional(),
         selectedSenderDomains: z.array(z.string()).optional(),
         selectedFromIncludes: z.array(z.string()).optional(),
+        maxDomainCandidates: z.number().int().min(0).max(100).optional(),
         rules: z.array(classificationRuleSchema).optional(),
         rulesFile: z.string().optional(),
       },

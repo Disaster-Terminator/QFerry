@@ -792,6 +792,151 @@ describe("mail tools", () => {
     });
   });
 
+  it("resolves bare QQ sender governance targets to classification folder paths", async () => {
+    const messages = [
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "real", folder: "INBOX", uid: "1", uidValidity: "uv" },
+        from: "GitHub <notifications@github.com>",
+        subject: "Review requested",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "pull request",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [{ path: "INBOX" }, { path: "其他文件夹/GitHub通知" }],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+      runtimeConfig: {
+        provider: "qqmail",
+        accountAlias: "real",
+        configSource: "test",
+        mutationAllowed: false,
+        mutationCapable: true,
+        mutationOperationallyReady: true,
+        mutationRequiresConfirmation: true,
+        authConfigured: true,
+        providerReady: true,
+        metadataSampleLimit: 50,
+        statusWarnings: [],
+      },
+    });
+
+    const result = await tools.planSenderGovernance({
+      runId: "run-sender-target-resolution",
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      maxMessageRefs: 10,
+      action: "move",
+      target: { folder: "GitHub通知" },
+      selectedSenderDomains: ["github.com"],
+    });
+
+    expect(result.plan.target).toEqual({
+      folder: "其他文件夹/GitHub通知",
+      requestedFolder: "GitHub通知",
+      targetResolution: "qqmail_classification_folder",
+    });
+    expect(result.governance.targetResolution).toEqual({
+      requestedFolder: "GitHub通知",
+      resolvedFolder: "其他文件夹/GitHub通知",
+      parentPath: "其他文件夹",
+      strategy: "qqmail_classification_folder",
+    });
+  });
+
+  it("truncates sender governance candidates by default while keeping selected domains", async () => {
+    const messages = Array.from({ length: 12 }, (_, index) => {
+      const domain = `sender-${String(index + 1).padStart(2, "0")}.example.com`;
+      return {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: `${index + 1}` },
+        from: `Sender ${index + 1} <mail@${domain}>`,
+        subject: `Subject ${index + 1}`,
+        date: `2026-05-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "metadata only",
+        flags: [],
+      };
+    });
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.planSenderGovernance({
+      runId: "run-sender-compact",
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      maxMessageRefs: 10,
+      action: "move",
+      target: { folder: "Archive" },
+      selectedSenderDomains: ["sender-12.example.com"],
+    });
+
+    expect(result.governance.candidateSummary).toEqual({
+      totalDomainCandidates: 12,
+      returnedDomainCandidates: 10,
+      maxDomainCandidates: 10,
+      truncated: true,
+    });
+    expect(result.governance.domainCandidates).toHaveLength(10);
+    expect(result.governance.domainCandidates.map((candidate) => candidate.domain)).toContain("sender-12.example.com");
+  });
+
+  it("keeps all explicitly selected sender domains even when they exceed the compact candidate limit", async () => {
+    const messages = Array.from({ length: 12 }, (_, index) => {
+      const domain = `selected-${String(index + 1).padStart(2, "0")}.example.com`;
+      return {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: `${index + 1}` },
+        from: `Sender ${index + 1} <mail@${domain}>`,
+        subject: `Subject ${index + 1}`,
+        date: `2026-05-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "metadata only",
+        flags: [],
+      };
+    });
+    const selectedSenderDomains = messages.map((message) => message.from.match(/@(.*)>/)?.[1] ?? "");
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.planSenderGovernance({
+      runId: "run-sender-selected-over-limit",
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      maxMessageRefs: 10,
+      action: "move",
+      target: { folder: "Archive" },
+      selectedSenderDomains,
+      maxDomainCandidates: 3,
+    });
+
+    expect(result.governance.domainCandidates.map((candidate) => candidate.domain)).toEqual(selectedSenderDomains);
+    expect(result.governance.candidateSummary).toEqual({
+      totalDomainCandidates: 12,
+      returnedDomainCandidates: 12,
+      maxDomainCandidates: 3,
+      truncated: false,
+    });
+  });
+
   it("deduplicates sender governance rule drafts against existing rules", async () => {
     const tools = createMailTools({ provider: FixtureMailProvider.demo() });
 
@@ -1661,6 +1806,64 @@ describe("mail tools", () => {
         { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
         { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
       ],
+    ]);
+  });
+
+  it("marks source deltas as advisory when target reconciliation succeeds but source changed concurrently", async () => {
+    const provider = FixtureMailProvider.demo();
+    const counts = new Map([
+      ["INBOX", 2],
+      ["Archive", 0],
+    ]);
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        scanMailboxMetadata: provider.scanMailboxMetadata.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        getMailboxSummary: async (folder) => ({
+          path: folder,
+          exists: counts.get(folder) ?? 0,
+        }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async (refs, targetFolder) => {
+          const sourceFolder = refs[0]?.folder ?? "";
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length - 1);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
+          return { moved: refs.length };
+        },
+      },
+    });
+    const previewPlan = createOperationPlan({
+      runId: "run-execute-concurrent-source",
+      provider: "fixture",
+      action: "move",
+      messageRefs: [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }],
+      target: { folder: "Archive" },
+    });
+    const plan = confirmOperationPlan(previewPlan, previewPlan.operationPlanId);
+
+    const result = await tools.executeCleanup({ plan });
+
+    expect(result.result.reconciliations).toEqual([
+      expect.objectContaining({
+        sourceDelta: -2,
+        expectedSourceDelta: -1,
+        targetDelta: 1,
+        expectedTargetDelta: 1,
+        targetDeltaReconciled: true,
+        sourceDeltaReliable: false,
+        sourceDeltaStatus: "concurrent_or_external_change",
+      }),
     ]);
   });
 

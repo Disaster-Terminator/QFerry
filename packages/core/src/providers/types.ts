@@ -82,6 +82,9 @@ export interface MoveMessagesReconciliation {
   targetDelta: number;
   expectedSourceDelta: number;
   expectedTargetDelta: number;
+  targetDeltaReconciled: boolean;
+  sourceDeltaReliable: boolean;
+  sourceDeltaStatus: "matched" | "concurrent_or_external_change";
 }
 
 export interface MoveMessagesResult {

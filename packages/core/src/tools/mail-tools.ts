@@ -8,6 +8,8 @@ import type { QFerryRuntimeConfig } from "../runtime-config.js";
 const CLIENT_REFS_PLAN_LIMIT = 20;
 const MOVE_RECONCILE_ATTEMPTS = 10;
 const MOVE_RECONCILE_DELAY_MS = 1_000;
+const DEFAULT_CLASSIFICATION_PARENT_PATH = "其他文件夹";
+const DEFAULT_SENDER_GOVERNANCE_CANDIDATE_LIMIT = 10;
 
 export interface CreateMailToolsInput {
   provider: MailProvider;
@@ -80,6 +82,9 @@ export interface ExecuteCleanupResult {
     targetDelta: number;
     expectedSourceDelta: number;
     expectedTargetDelta: number;
+    targetDeltaReconciled: boolean;
+    sourceDeltaReliable: boolean;
+    sourceDeltaStatus: "matched" | "concurrent_or_external_change";
   }>;
   createdFolder?: string;
 }
@@ -156,8 +161,16 @@ export interface PlanSenderGovernanceInput {
   order?: "newest" | "oldest";
   selectedSenderDomains?: string[];
   selectedFromIncludes?: string[];
+  maxDomainCandidates?: number;
   rules?: ClassificationRule[];
   rulesFile?: string;
+}
+
+export interface MailboxTargetResolution {
+  requestedFolder: string;
+  resolvedFolder: string;
+  parentPath: string;
+  strategy: "qqmail_classification_folder" | "explicit_classification_folder";
 }
 
 export type BulkGovernanceCategoryId =
@@ -337,6 +350,13 @@ export interface SenderGovernanceReport {
   domainCandidates: SenderGovernanceCandidate[];
   selectedSenderDomains: string[];
   selectedFromIncludes: string[];
+  candidateSummary: {
+    totalDomainCandidates: number;
+    returnedDomainCandidates: number;
+    maxDomainCandidates: number;
+    truncated: boolean;
+  };
+  targetResolution?: MailboxTargetResolution;
   serverBlocklistCapability: {
     supported: false;
     reason: string;
@@ -645,7 +665,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async ensureClassificationFolder(folderInput) {
-      const parentPath = folderInput.parentPath ?? "其他文件夹";
+      const parentPath = folderInput.parentPath ?? DEFAULT_CLASSIFICATION_PARENT_PATH;
       const displayName = normalizeFolderDisplayName(folderInput.displayName);
       const fullPath = joinMailboxPath(parentPath, displayName);
       const mailboxes = await input.provider.listMailboxes();
@@ -689,13 +709,19 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         if (planInput.messageRefs.length > CLIENT_REFS_PLAN_LIMIT) {
           throw new Error(`client_refs cleanup plans are limited to ${CLIENT_REFS_PLAN_LIMIT} message refs`);
         }
+        const provider = planInput.messageRefs[0]?.provider ?? input.runtimeConfig?.provider ?? "fixture";
+        const targetResolution = resolveOperationTarget({
+          provider,
+          action: planInput.action,
+          target: planInput.target,
+        });
         return {
           plan: createOperationPlan({
             runId: planInput.runId,
-            provider: planInput.messageRefs[0]?.provider ?? input.runtimeConfig?.provider ?? "fixture",
+            provider,
             action: planInput.action,
             messageRefs: planInput.messageRefs,
-            target: planInput.target,
+            target: targetResolution.target,
             source: "client_refs",
           }),
           classifications: [],
@@ -719,14 +745,20 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const selectedRefs = classifications
         .filter((classification) => planInput.selectedGroupIds.includes(classification.groupId))
         .map((classification) => classification.messageRef);
+      const provider = selectedRefs[0]?.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
+      const targetResolution = resolveOperationTarget({
+        provider,
+        action: planInput.action,
+        target: planInput.target,
+      });
 
       return {
         plan: createOperationPlan({
           runId: planInput.runId,
-          provider: selectedRefs[0]?.provider ?? "fixture",
+          provider,
           action: planInput.action,
           messageRefs: selectedRefs,
-          target: planInput.target,
+          target: targetResolution.target,
         }),
         classifications,
         ruleset: resolvedRules.ruleset,
@@ -771,6 +803,11 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const selectedGroupTargets = resolveSelectedGroupTargets(resolvedRules.groups, batchInput.selectedGroupIds);
       const target = batchInput.target ?? inferSingleSelectedTarget(selectedGroupTargets);
       const provider = selectedRefs[0]?.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
+      const targetResolution = resolveOperationTarget({
+        provider,
+        action: batchInput.action,
+        target,
+      });
 
       return {
         preview: {
@@ -797,7 +834,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           provider,
           action: batchInput.action,
           messageRefs: selectedRefs,
-          target,
+          target: targetResolution.target,
         }),
         classifications,
         ruleset: resolvedRules.ruleset,
@@ -832,9 +869,20 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         .slice(0, maxMessageRefs);
       const provider = selectedRefs[0]?.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
 
-      const domainCandidates = buildSenderGovernanceCandidates(messages);
+      const allDomainCandidates = buildSenderGovernanceCandidates(messages);
+      const maxDomainCandidates = Math.max(governanceInput.maxDomainCandidates ?? DEFAULT_SENDER_GOVERNANCE_CANDIDATE_LIMIT, 0);
+      const domainCandidates = limitSenderGovernanceCandidates(
+        allDomainCandidates,
+        maxDomainCandidates,
+        new Set(selectedSenderDomains),
+      );
+      const targetResolution = resolveOperationTarget({
+        provider,
+        action: governanceInput.action,
+        target: governanceInput.target,
+      });
       const rulesetPatch = buildRulesetPatchDraft({
-        candidates: domainCandidates,
+        candidates: allDomainCandidates,
         selectedSenderDomains,
         selectedFromIncludes,
         existingRules,
@@ -858,6 +906,13 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           domainCandidates,
           selectedSenderDomains,
           selectedFromIncludes,
+          candidateSummary: {
+            totalDomainCandidates: allDomainCandidates.length,
+            returnedDomainCandidates: domainCandidates.length,
+            maxDomainCandidates,
+            truncated: domainCandidates.length < allDomainCandidates.length,
+          },
+          targetResolution: targetResolution.resolution,
           serverBlocklistCapability: {
             supported: false,
             reason: "Provider capability exposes move only; server-side blocklist or filter mutation is not available through QFerry.",
@@ -874,7 +929,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           provider,
           action: governanceInput.action,
           messageRefs: selectedRefs,
-          target: governanceInput.target,
+          target: targetResolution.target,
         }),
         mutationsAttempted: 0,
       };
@@ -1058,6 +1113,11 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         .map((entry) => entry.message.ref)
         .slice(0, maxMessageRefs);
       const provider = selectedRefs[0]?.provider ?? messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
+      const targetResolution = resolveOperationTarget({
+        provider,
+        action: bulkInput.action,
+        target: bulkInput.target,
+      });
 
       return {
         preview: {
@@ -1082,7 +1142,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           provider,
           action: bulkInput.action,
           messageRefs: selectedRefs,
-          target: bulkInput.target,
+          target: targetResolution.target,
           source: "bulk_governance",
         }),
         mutationsAttempted: 0,
@@ -1385,6 +1445,61 @@ function buildSenderGovernanceCandidates(messages: MessageSummary[]): SenderGove
       };
     })
     .sort((left, right) => right.messageCount - left.messageCount || left.domain.localeCompare(right.domain));
+}
+
+function limitSenderGovernanceCandidates(
+  candidates: SenderGovernanceCandidate[],
+  maxCandidates: number,
+  selectedDomains: Set<string>,
+): SenderGovernanceCandidate[] {
+  if (maxCandidates <= 0) {
+    return candidates.filter((candidate) => selectedDomains.has(candidate.domain));
+  }
+  const selected = candidates.filter((candidate) => selectedDomains.has(candidate.domain));
+  const selectedKeys = new Set(selected.map((candidate) => candidate.domain));
+  if (selected.length >= maxCandidates) {
+    return selected;
+  }
+  const remaining = candidates.filter((candidate) => !selectedKeys.has(candidate.domain));
+  return [...selected, ...remaining].slice(0, maxCandidates);
+}
+
+function resolveOperationTarget(input: {
+  provider: string;
+  action: OperationAction;
+  target?: Record<string, string>;
+}): { target?: Record<string, string>; resolution?: MailboxTargetResolution } {
+  if (!input.target || input.action !== "move") {
+    return { target: input.target };
+  }
+  const requestedFolder = input.target.folder?.trim();
+  if (!requestedFolder || requestedFolder.includes("/") || input.target.folderMode === "literal") {
+    return { target: input.target };
+  }
+
+  const explicitClassification = input.target.displayName || input.target.parentPath;
+  if (input.provider !== "qqmail" && !explicitClassification) {
+    return { target: input.target };
+  }
+
+  const parentPath = input.target.parentPath ?? DEFAULT_CLASSIFICATION_PARENT_PATH;
+  const displayName = normalizeFolderDisplayName(input.target.displayName ?? requestedFolder);
+  const resolvedFolder = joinMailboxPath(parentPath, displayName);
+  const resolution: MailboxTargetResolution = {
+    requestedFolder,
+    resolvedFolder,
+    parentPath,
+    strategy: input.provider === "qqmail" ? "qqmail_classification_folder" : "explicit_classification_folder",
+  };
+  return {
+    target: {
+      ...input.target,
+      folder: resolvedFolder,
+      requestedFolder,
+      targetResolution: resolution.strategy,
+    },
+    resolution,
+  };
 }
 
 function classifyBulkGovernanceMessage(message: MessageSummary): {
@@ -1729,6 +1844,11 @@ async function waitForFreshReconciliation(input: {
       targetDelta: targetAfter.exists - input.targetBefore,
       expectedSourceDelta: input.expectedSourceDelta,
       expectedTargetDelta: input.expectedTargetDelta,
+      targetDeltaReconciled: targetAfter.exists - input.targetBefore === input.expectedTargetDelta,
+      sourceDeltaReliable: sourceAfter.exists - input.sourceBefore === input.expectedSourceDelta,
+      sourceDeltaStatus: sourceAfter.exists - input.sourceBefore === input.expectedSourceDelta
+        ? "matched"
+        : "concurrent_or_external_change",
     };
     if (isMoveReconciled(latest)) {
       return latest;
