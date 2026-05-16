@@ -1381,6 +1381,84 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("accepts large sender governance preview windows through the MCP server", async () => {
+    const bulkScanInputs: unknown[] = [];
+    const provider: MailProvider = {
+      listMailboxes: async () => [],
+      scanMailboxMetadata: async () => {
+        throw new Error("plan_sender_governance should use the window scanner");
+      },
+      scanMailboxMetadataWindow: async (input) => {
+        bulkScanInputs.push(input);
+        return {
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "INBOX", exists: 2, uidValidity: "mcp-sender-window" },
+          messages: [
+            {
+              ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+              from: "Steam Team <noreply@steampowered.com>",
+              subject: "Steam login",
+              date: "2026-05-10T00:00:00.000Z",
+              snippet: "new login",
+              flags: [],
+            },
+            {
+              ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+              from: "Other <other@example.com>",
+              subject: "Manual review",
+              date: "2026-05-11T00:00:00.000Z",
+              snippet: "personal mail",
+              flags: [],
+            },
+          ],
+        };
+      },
+      fetchMessage: async () => {
+        throw new Error("not used");
+      },
+    };
+    const server = createQFerryMcpServer({ provider });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "plan_sender_governance",
+      arguments: {
+        runId: "run-mcp-sender-window-50",
+        folder: "INBOX",
+        pageSize: 50,
+        maxPages: 1,
+        maxMessageRefs: 50,
+        action: "move",
+        target: { folder: "Steam" },
+        selectedSenderDomains: ["steampowered.com"],
+      },
+    });
+
+    expect(bulkScanInputs).toEqual([{ folder: "INBOX", limit: 50, maxPages: 1, order: "oldest", offset: 0 }]);
+    expect(result.structuredContent).toMatchObject({
+      governance: {
+        scannedMessages: 2,
+        selectedMessageRefs: 1,
+      },
+      plan: {
+        status: "preview",
+        messageRefs: [
+          { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        ],
+      },
+      mutationsAttempted: 0,
+    });
+
+    await client.close();
+    await server.close();
+  });
+
   it("dry-runs ruleset patch application through the MCP server", async () => {
     const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
     const { join } = await import("node:path");

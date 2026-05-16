@@ -318,7 +318,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       inputSchema: {
         runId: z.string(),
         folder: z.string(),
-        pageSize: z.number().int().min(1).max(20),
+        pageSize: z.number().int().min(1).max(50),
         maxPages: z.number().int().min(1).max(200),
         maxMessageRefs: z.number().int().min(0).max(200),
         action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
