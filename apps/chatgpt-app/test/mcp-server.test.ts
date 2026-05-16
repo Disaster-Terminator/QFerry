@@ -1511,6 +1511,14 @@ describe("QFerry ChatGPT App MCP server", () => {
 
   it("accepts large sender governance preview windows through the MCP server", async () => {
     const bulkScanInputs: unknown[] = [];
+    const selectedMessages: MessageSummary[] = Array.from({ length: 210 }, (_, index) => ({
+      ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: `steam-${index + 1}` },
+      from: "Steam Team <noreply@steampowered.com>",
+      subject: `Steam login ${index + 1}`,
+      date: `2026-05-${String((index % 20) + 1).padStart(2, "0")}T00:00:00.000Z`,
+      snippet: "new login",
+      flags: [],
+    }));
     const provider: MailProvider = {
       listMailboxes: async () => [],
       scanMailboxMetadata: async () => {
@@ -1519,17 +1527,10 @@ describe("QFerry ChatGPT App MCP server", () => {
       scanMailboxMetadataWindow: async (input) => {
         bulkScanInputs.push(input);
         return {
-          pagesScanned: 1,
-          mailboxSnapshot: { folder: "INBOX", exists: 2, uidValidity: "mcp-sender-window" },
+          pagesScanned: 5,
+          mailboxSnapshot: { folder: "INBOX", exists: 211, uidValidity: "mcp-sender-window" },
           messages: [
-            {
-              ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
-              from: "Steam Team <noreply@steampowered.com>",
-              subject: "Steam login",
-              date: "2026-05-10T00:00:00.000Z",
-              snippet: "new login",
-              flags: [],
-            },
+            ...selectedMessages,
             {
               ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
               from: "Other <other@example.com>",
@@ -1560,28 +1561,30 @@ describe("QFerry ChatGPT App MCP server", () => {
         runId: "run-mcp-sender-window-50",
         folder: "INBOX",
         pageSize: 50,
-        maxPages: 1,
-        maxMessageRefs: 50,
+        maxPages: 5,
+        maxMessageRefs: 250,
         action: "move",
         target: { folder: "Steam" },
         selectedSenderDomains: ["steampowered.com"],
       },
     });
 
-    expect(bulkScanInputs).toEqual([{ folder: "INBOX", limit: 50, maxPages: 1, order: "oldest", offset: 0 }]);
+    expect(bulkScanInputs).toEqual([{ folder: "INBOX", limit: 50, maxPages: 5, order: "oldest", offset: 0 }]);
     expect(result.structuredContent).toMatchObject({
       governance: {
-        scannedMessages: 2,
-        selectedMessageRefs: 1,
+        scannedMessages: 211,
+        selectedMessageRefs: 210,
       },
       plan: {
         status: "preview",
-        messageRefs: [
-          { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
-        ],
+        messageRefs: expect.arrayContaining([
+          { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "steam-1" },
+          { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "steam-210" },
+        ]),
       },
       mutationsAttempted: 0,
     });
+    expect((result.structuredContent as { plan: { messageRefs: unknown[] } }).plan.messageRefs).toHaveLength(210);
 
     await client.close();
     await server.close();
