@@ -2719,4 +2719,110 @@ describe("mail tools", () => {
       github: { folder: "其他文件夹/GitHub通知" },
     });
   });
+
+  it("previews ruleset governance by user-defined groups and targets", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-ruleset-governance-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-governance",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "group_alpha", label: "Group Alpha", target: { folder: "Folders/Group Alpha" } },
+        { id: "group_beta", label: "Group Beta", target: { folder: "Folders/Group Beta" } },
+      ],
+      rules: [
+        { id: "alpha-domain", groupId: "group_alpha", match: { fromDomainIncludes: "alpha.example" } },
+        { id: "beta-domain", groupId: "group_beta", match: { fromDomainIncludes: "beta.example" } },
+      ],
+    }), "utf8");
+    const messages = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Alpha One <one@alpha.example>",
+        subject: "Alpha one",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "Alpha Two <two@alpha.example>",
+        subject: "Alpha two",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "3" },
+        from: "Beta <notice@beta.example>",
+        subject: "Beta",
+        date: "2026-05-12T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "4" },
+        from: "Friend <friend@example.net>",
+        subject: "Manual review",
+        date: "2026-05-13T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        scanMailboxMetadataWindow: async () => ({
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "INBOX", exists: messages.length },
+          messages,
+        }),
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.rulesetGovernancePreview({
+      runId: "ruleset-governance",
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      maxMessageRefsPerGroup: 50,
+      action: "move",
+      rulesFile,
+      selectedGroupIds: ["group_alpha", "group_beta"],
+    });
+
+    expect(result.preview.groupCounts).toEqual({
+      group_alpha: 2,
+      group_beta: 1,
+      review: 1,
+    });
+    expect(result.preview.groupPlans).toEqual([
+      expect.objectContaining({
+        groupId: "group_alpha",
+        label: "Group Alpha",
+        target: { folder: "Folders/Group Alpha" },
+        selectedMessageRefs: 2,
+        totalMatchedMessages: 2,
+      }),
+      expect.objectContaining({
+        groupId: "group_beta",
+        label: "Group Beta",
+        target: { folder: "Folders/Group Beta" },
+        selectedMessageRefs: 1,
+        totalMatchedMessages: 1,
+      }),
+    ]);
+    expect(result.plans).toHaveLength(2);
+    expect(result.plans.map((plan) => plan.target)).toEqual([
+      { folder: "Folders/Group Alpha" },
+      { folder: "Folders/Group Beta" },
+    ]);
+    expect(result.plans.map((plan) => plan.messageRefs.length)).toEqual([2, 1]);
+    expect(result.mutationsAttempted).toBe(0);
+  });
 });

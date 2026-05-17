@@ -213,6 +213,21 @@ export interface BulkGovernancePreviewInput {
   selectedCategoryIds: BulkGovernanceCategoryId[];
 }
 
+export interface RulesetGovernancePreviewInput {
+  runId: string;
+  folder: string;
+  pageSize: number;
+  maxPages: number;
+  maxMessageRefsPerGroup: number;
+  action: OperationAction;
+  defaultGroupId?: string;
+  rules?: ClassificationRule[];
+  rulesFile?: string;
+  selectedGroupIds?: string[];
+  scanOffset?: number;
+  order?: "newest" | "oldest";
+}
+
 export interface EnsureClassificationFolderInput {
   runId: string;
   displayName: string;
@@ -255,6 +270,43 @@ export interface BulkGovernancePreview {
   selectedCategoryIds: BulkGovernanceCategoryId[];
   categoryCounts: Partial<Record<BulkGovernanceCategoryId, number>>;
   categoryCandidates: Partial<Record<BulkGovernanceCategoryId, BulkGovernanceCandidate[]>>;
+  mutationsAttempted: 0;
+}
+
+export interface RulesetGovernanceGroupPlan {
+  groupId: string;
+  label: string;
+  target: Record<string, string>;
+  selectedMessageRefs: number;
+  totalMatchedMessages: number;
+  operationPlanId: string;
+  runId: string;
+  targetResolution?: MailboxTargetResolution;
+}
+
+export interface RulesetGovernanceSkippedGroup {
+  groupId: string;
+  label: string;
+  totalMatchedMessages: number;
+  reason: "missing_target_folder" | "no_matched_messages";
+}
+
+export interface RulesetGovernancePreview {
+  provider: string;
+  folder: string;
+  mailboxSnapshot?: MailboxWindowSnapshot;
+  scanOrder: "newest" | "oldest";
+  scanOffset: number;
+  pageSize: number;
+  maxPages: number;
+  pagesScanned: number;
+  scannedMessages: number;
+  maxMessageRefsPerGroup: number;
+  selectedGroupIds: string[];
+  groupCounts: Record<string, number>;
+  groupPlans: RulesetGovernanceGroupPlan[];
+  skippedGroups: RulesetGovernanceSkippedGroup[];
+  ruleset?: ClassificationRulesetMetadata;
   mutationsAttempted: 0;
 }
 
@@ -500,6 +552,13 @@ export interface MailTools {
   bulkGovernancePreview(input: BulkGovernancePreviewInput): Promise<{
     preview: BulkGovernancePreview;
     plan: OperationPlan;
+    mutationsAttempted: 0;
+  }>;
+  rulesetGovernancePreview(input: RulesetGovernancePreviewInput): Promise<{
+    preview: RulesetGovernancePreview;
+    plans: OperationPlan[];
+    classifications: MessageClassification[];
+    ruleset?: ClassificationRulesetMetadata;
     mutationsAttempted: 0;
   }>;
   classificationMap(input: ClassificationMapInput): Promise<{
@@ -1264,6 +1323,109 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           target: targetResolution.target,
           source: "bulk_governance",
         }),
+        mutationsAttempted: 0,
+      };
+    },
+
+    async rulesetGovernancePreview(rulesetInput) {
+      const resolvedRules = await resolveRules({
+        ...rulesetInput,
+        defaultGroupId: rulesetInput.defaultGroupId,
+      });
+      const pageSize = Math.max(rulesetInput.pageSize, 0);
+      const maxPages = Math.max(rulesetInput.maxPages, 0);
+      const maxMessageRefsPerGroup = Math.max(rulesetInput.maxMessageRefsPerGroup, 0);
+      const scanOffset = Math.max(rulesetInput.scanOffset ?? 0, 0);
+      const scanOrder = rulesetInput.order ?? "oldest";
+      const scanWindow = await scanMetadataWindow(input.provider, {
+        folder: rulesetInput.folder,
+        limit: pageSize,
+        maxPages,
+        order: scanOrder,
+        offset: scanOffset,
+      });
+      const messages = scanWindow.messages;
+      const classifications = classifyMessages({
+        messages,
+        rules: resolvedRules.rules,
+        defaultGroupId: resolvedRules.defaultGroupId,
+      });
+      const groupsById = new Map((resolvedRules.groups ?? []).map((group) => [group.id, group]));
+      const selectedGroupIds = rulesetInput.selectedGroupIds ?? (resolvedRules.groups ?? [])
+        .filter((group) => group.id !== resolvedRules.defaultGroupId && group.target?.folder)
+        .map((group) => group.id);
+      const provider = messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
+      const plans: OperationPlan[] = [];
+      const groupPlans: RulesetGovernanceGroupPlan[] = [];
+      const skippedGroups: RulesetGovernanceSkippedGroup[] = [];
+
+      for (const groupId of selectedGroupIds) {
+        const group = groupsById.get(groupId);
+        const label = group?.label ?? groupId;
+        const groupClassifications = classifications.filter((classification) => classification.groupId === groupId);
+        const totalMatchedMessages = groupClassifications.length;
+
+        if (totalMatchedMessages === 0) {
+          skippedGroups.push({ groupId, label, totalMatchedMessages, reason: "no_matched_messages" });
+          continue;
+        }
+        if (!group?.target?.folder) {
+          skippedGroups.push({ groupId, label, totalMatchedMessages, reason: "missing_target_folder" });
+          continue;
+        }
+
+        const targetResolution = resolveOperationTarget({
+          provider,
+          action: rulesetInput.action,
+          target: group.target,
+          classificationParentPath,
+        });
+        const messageRefs = groupClassifications
+          .map((classification) => classification.messageRef)
+          .slice(0, maxMessageRefsPerGroup);
+        const plan = createOperationPlan({
+          runId: `${rulesetInput.runId}-${slugifyRuleId(groupId)}`,
+          provider,
+          action: rulesetInput.action,
+          messageRefs,
+          target: targetResolution.target,
+          source: "rules_preview",
+        });
+        plans.push(plan);
+        groupPlans.push({
+          groupId,
+          label,
+          target: targetResolution.target ?? group.target,
+          selectedMessageRefs: messageRefs.length,
+          totalMatchedMessages,
+          operationPlanId: plan.operationPlanId,
+          runId: plan.runId,
+          targetResolution: targetResolution.resolution,
+        });
+      }
+
+      return {
+        preview: {
+          provider,
+          folder: rulesetInput.folder,
+          mailboxSnapshot: scanWindow.mailboxSnapshot,
+          scanOrder,
+          scanOffset,
+          pageSize,
+          maxPages,
+          pagesScanned: scanWindow.pagesScanned,
+          scannedMessages: messages.length,
+          maxMessageRefsPerGroup,
+          selectedGroupIds,
+          groupCounts: countGroups(classifications),
+          groupPlans,
+          skippedGroups,
+          ruleset: resolvedRules.ruleset,
+          mutationsAttempted: 0,
+        },
+        plans,
+        classifications,
+        ruleset: resolvedRules.ruleset,
         mutationsAttempted: 0,
       };
     },
