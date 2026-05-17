@@ -455,6 +455,33 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
   );
 
   server.registerTool(
+    "ruleset_governance_preview",
+    {
+      title: "Ruleset governance preview",
+      description: "Use this for user-defined batch governance: apply a ruleset, group matching metadata by user-defined groups, and create preview operation plans per target group.",
+      inputSchema: {
+        runId: z.string(),
+        folder: z.string(),
+        pageSize: z.number().int().min(1).max(50),
+        maxPages: z.number().int().min(1).max(500),
+        maxMessageRefsPerGroup: z.number().int().min(0).max(500),
+        action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
+        defaultGroupId: z.string().optional(),
+        rules: z.array(classificationRuleSchema).optional(),
+        rulesFile: z.string().optional(),
+        selectedGroupIds: z.array(z.string()).optional(),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => {
+      const result = registerOperationPlans(await tools.rulesetGovernancePreview(input), planRegistry);
+      return toToolResult(await withMcpAudit("ruleset_governance_preview", input.runId, input, result));
+    },
+  );
+
+  server.registerTool(
     "apply_ruleset_patch",
     {
       title: "Apply ruleset patch",
@@ -572,11 +599,22 @@ function registerPlan<T extends { plan: OperationPlan }>(
   result: T,
   registry: Map<string, StoredPlan>,
 ): T {
-  registry.set(result.plan.operationPlanId, {
-    plan: result.plan,
-    expiresAt: Date.now() + PLAN_TTL_MS,
-    previewSummary: summarizeMcpToolResult(result),
-  });
+  return registerOperationPlans(result, registry);
+}
+
+function registerOperationPlans<T extends { plan?: OperationPlan; plans?: OperationPlan[] }>(
+  result: T,
+  registry: Map<string, StoredPlan>,
+): T {
+  const plans = result.plans ?? (result.plan ? [result.plan] : []);
+  const previewSummary = summarizeMcpToolResult(result);
+  for (const plan of plans) {
+    registry.set(plan.operationPlanId, {
+      plan,
+      expiresAt: Date.now() + PLAN_TTL_MS,
+      previewSummary,
+    });
+  }
   return result;
 }
 
@@ -638,6 +676,7 @@ async function writeMcpAudit(
       "",
       `- lastTool: ${toolName}`,
       `- operationPlanId: ${summary.operationPlanId ?? "<none>"}`,
+      `- operationPlanIds: ${formatSummaryJson(summary.operationPlanIds)}`,
       `- status: ${summary.status ?? "<none>"}`,
       `- action: ${summary.action ?? "<none>"}`,
       `- target: ${formatSummaryJson(summary.target)}`,
@@ -652,6 +691,8 @@ async function writeMcpAudit(
       `- mailboxSnapshot: ${formatSummaryJson(summary.mailboxSnapshot)}`,
       `- categoryCounts: ${formatSummaryJson(summary.categoryCounts)}`,
       `- groupCounts: ${formatSummaryJson(summary.groupCounts)}`,
+      `- groupPlans: ${formatSummaryJson(summary.groupPlans)}`,
+      `- skippedGroups: ${formatSummaryJson(summary.skippedGroups)}`,
       `- selectedGroupTargets: ${formatSummaryJson(summary.selectedGroupTargets)}`,
       `- reconciliations: ${formatSummaryJson(summary.reconciliations)}`,
       `- trace: ${tracePath}`,
@@ -675,6 +716,7 @@ function summarizeMcpToolInput(input: object): Record<string, unknown> {
     pageSize: raw.pageSize,
     maxPages: raw.maxPages,
     maxMessageRefs: raw.maxMessageRefs,
+    maxMessageRefsPerGroup: raw.maxMessageRefsPerGroup,
     maxMessages: raw.maxMessages,
     selectedGroupIds: raw.selectedGroupIds,
     selectedCategoryIds: raw.selectedCategoryIds,
@@ -686,13 +728,18 @@ function summarizeMcpToolInput(input: object): Record<string, unknown> {
 function summarizeMcpToolResult(structuredContent: object): Record<string, unknown> {
   const content = structuredContent as Record<string, unknown>;
   const plan = content.plan as Record<string, unknown> | undefined;
+  const plans = content.plans as Array<Record<string, unknown>> | undefined;
   const result = content.result as Record<string, unknown> | undefined;
   const preview = content.preview as Record<string, unknown> | undefined;
   const report = content.report as Record<string, unknown> | undefined;
+  const operationPlanIds = Array.isArray(plans)
+    ? plans.map((entry) => entry.operationPlanId).filter((entry) => typeof entry === "string")
+    : undefined;
 
   return {
     provider: result?.provider ?? plan?.provider ?? preview?.provider ?? report?.provider,
     operationPlanId: result?.operationPlanId ?? plan?.operationPlanId,
+    operationPlanIds,
     status: result?.status ?? plan?.status,
     action: result?.action ?? plan?.action,
     target: plan?.target,
@@ -708,6 +755,8 @@ function summarizeMcpToolResult(structuredContent: object): Record<string, unkno
     mailboxSnapshot: preview?.mailboxSnapshot ?? report?.mailboxSnapshot,
     categoryCounts: preview?.categoryCounts,
     groupCounts: preview?.groupCounts,
+    groupPlans: preview?.groupPlans,
+    skippedGroups: preview?.skippedGroups,
     selectedGroupTargets: preview?.selectedGroupTargets,
   };
 }

@@ -49,6 +49,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "classification_map",
       "classification_sweep",
       "bulk_governance_preview",
+      "ruleset_governance_preview",
       "apply_ruleset_patch",
       "confirm_cleanup_plan",
       "execute_cleanup",
@@ -67,6 +68,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "plan_sender_governance")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "sender_breakdown")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "bulk_governance_preview")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "ruleset_governance_preview")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "apply_ruleset_patch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "confirm_cleanup_plan")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_cleanup")?.annotations?.destructiveHint).toBe(true);
@@ -196,6 +198,97 @@ describe("QFerry ChatGPT App MCP server", () => {
       },
       mutationsAttempted: 0,
     });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("calls ruleset governance preview through the MCP server", async () => {
+    const traceRoot = await mkdtemp(join(tmpdir(), "qferry-mcp-ruleset-governance-"));
+    process.env.QFERRY_MCP_TRACE_ROOT = traceRoot;
+    const rulesFile = join(traceRoot, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-governance",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "group_alpha", label: "Group Alpha", target: { folder: "Folders/Group Alpha" } },
+        { id: "group_beta", label: "Group Beta", target: { folder: "Folders/Group Beta" } },
+      ],
+      rules: [
+        { id: "alpha-domain", groupId: "group_alpha", match: { fromDomainIncludes: "alpha.example" } },
+        { id: "beta-domain", groupId: "group_beta", match: { fromDomainIncludes: "beta.example" } },
+      ],
+    }), "utf8");
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Alpha One <one@alpha.example>",
+        subject: "Alpha one",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "Beta <notice@beta.example>",
+        subject: "Beta",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const provider: MailProvider = {
+      async listMailboxes() {
+        return [];
+      },
+      async scanMailboxMetadata() {
+        return messages;
+      },
+      async scanMailboxMetadataWindow() {
+        return {
+          messages,
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "INBOX", exists: messages.length },
+        };
+      },
+      async fetchMessage() {
+        throw new Error("not used");
+      },
+    };
+    const server = createQFerryMcpServer({ provider });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "ruleset_governance_preview",
+      arguments: {
+        runId: "mcp-ruleset-governance",
+        folder: "INBOX",
+        pageSize: 50,
+        maxPages: 1,
+        maxMessageRefsPerGroup: 50,
+        action: "move",
+        rulesFile,
+        selectedGroupIds: ["group_alpha", "group_beta"],
+      },
+    });
+
+    const content = result.structuredContent as {
+      plans?: Array<{ operationPlanId: string }>;
+      audit?: { summaryPath: string };
+      preview?: { groupPlans?: Array<{ groupId: string; operationPlanId: string }> };
+    };
+    expect(content.plans).toHaveLength(2);
+    expect(content.preview?.groupPlans?.map((plan) => plan.groupId)).toEqual(["group_alpha", "group_beta"]);
+    const summary = await readFile(String(content.audit?.summaryPath), "utf8");
+    expect(summary).toContain("- operationPlanIds: [");
+    expect(summary).toContain("- groupPlans: [");
 
     await client.close();
     await server.close();
