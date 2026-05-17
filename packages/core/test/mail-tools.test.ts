@@ -242,6 +242,37 @@ describe("mail tools", () => {
     expect(JSON.stringify(result)).not.toContain("fixture full body");
   });
 
+  it("parses Gmail-like query filters while explicit fields win", async () => {
+    const tools = createMailTools({ provider: FixtureMailProvider.demo() });
+
+    const result = await tools.search({
+      folder: "INBOX",
+      limit: 10,
+      query: "from:example.com subject:(digest) after:2026/05/10 before:2026/05/12 in:INBOX label:news",
+      subjectIncludes: "Weekly",
+    });
+
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.subject).toBe("Weekly digest");
+    expect(result.parsedQuery).toEqual({
+      filters: {
+        fromDomainIncludes: "example.com",
+        subjectIncludes: "digest",
+        dateAfter: "2026-05-10",
+        dateBefore: "2026-05-12",
+        folder: "INBOX",
+      },
+      remainder: "",
+      warnings: [
+        {
+          code: "unsupported_operator",
+          operator: "label",
+          token: "label:news",
+        },
+      ],
+    });
+  });
+
   it("fetches a single message detail by provider ref", async () => {
     const tools = createMailTools({ provider: FixtureMailProvider.demo() });
 

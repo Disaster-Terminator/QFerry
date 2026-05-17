@@ -4,8 +4,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const repoRoot = path.resolve("../..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const scriptPath = path.join(repoRoot, "scripts/sync-installed-plugin-cache.mjs");
 
 describe("sync-installed-plugin-cache script", () => {

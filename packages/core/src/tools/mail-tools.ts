@@ -4,6 +4,7 @@ import type { MailboxInfo, MailboxSummary, MailProvider, MailboxWindowSnapshot, 
 import { loadClassificationRuleset, type ClassificationGroup, type ClassificationRulesetMetadata } from "../ruleset.js";
 import { formatRulesetPatchChangelog, renderRulesetPatchDraft, type RulesetPatchDraft } from "../ruleset-patch.js";
 import type { QFerryRuntimeConfig } from "../runtime-config.js";
+import { parseSearchQuery, type ParsedSearchQuery } from "../search-query.js";
 
 const CLIENT_REFS_PLAN_LIMIT = 20;
 const MOVE_RECONCILE_ATTEMPTS = 10;
@@ -29,6 +30,11 @@ export interface SearchMessagesInput {
   hasFlag?: string;
   dateAfter?: string;
   dateBefore?: string;
+}
+
+export interface SearchMessagesResult {
+  messages: MessageSummary[];
+  parsedQuery?: ParsedSearchQuery;
 }
 
 export interface ClassifyMessagesToolInput {
@@ -496,7 +502,7 @@ export interface MailTools {
   listMailboxes(): Promise<{ mailboxes: MailboxInfo[] }>;
   getMailboxSummary(input: GetMailboxSummaryInput): Promise<{ mailbox: MailboxSummary }>;
   getCapabilitySnapshot(): Promise<{ capability: ProviderCapabilitySnapshot }>;
-  search(input: SearchMessagesInput): Promise<{ messages: MessageSummary[] }>;
+  search(input: SearchMessagesInput): Promise<SearchMessagesResult>;
   fetch(ref: MessageRef): Promise<{ message: MessageDetail }>;
   classifyMessages(input: ClassifyMessagesToolInput): Promise<{
     classifications: MessageClassification[];
@@ -617,15 +623,17 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async search(searchInput) {
+      const normalizedInput = normalizeSearchMessagesInput(searchInput);
       const messages = await input.provider.scanMailboxMetadata({
-        folder: searchInput.folder,
-        limit: searchInput.limit,
-        order: searchInput.order,
-        offset: searchInput.offset,
+        folder: normalizedInput.folder,
+        limit: normalizedInput.limit,
+        order: normalizedInput.order,
+        offset: normalizedInput.offset,
       });
 
       return {
-        messages: messages.filter((message) => matchesSearchInput(message, searchInput)),
+        messages: messages.filter((message) => matchesSearchInput(message, normalizedInput)),
+        ...(normalizedInput.parsedQuery ? { parsedQuery: normalizedInput.parsedQuery } : {}),
       };
     },
 
@@ -2451,6 +2459,25 @@ async function resolveRules(input: {
   return {
     rules: input.rules,
     defaultGroupId: input.defaultGroupId,
+  };
+}
+
+function normalizeSearchMessagesInput(input: SearchMessagesInput): SearchMessagesInput & { parsedQuery?: ParsedSearchQuery } {
+  if (!input.query) return input;
+  const parsedQuery = parseSearchQuery(input.query);
+  const parsedFilters = parsedQuery.filters;
+  return {
+    ...input,
+    folder: input.folder,
+    query: parsedQuery.remainder || undefined,
+    fromIncludes: input.fromIncludes ?? parsedFilters.fromIncludes,
+    fromDomainIncludes: input.fromDomainIncludes ?? parsedFilters.fromDomainIncludes,
+    subjectIncludes: input.subjectIncludes ?? parsedFilters.subjectIncludes,
+    snippetIncludes: input.snippetIncludes ?? parsedFilters.snippetIncludes,
+    hasFlag: input.hasFlag ?? parsedFilters.hasFlag,
+    dateAfter: input.dateAfter ?? parsedFilters.dateAfter,
+    dateBefore: input.dateBefore ?? parsedFilters.dateBefore,
+    parsedQuery,
   };
 }
 

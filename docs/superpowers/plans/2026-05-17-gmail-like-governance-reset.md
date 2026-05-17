@@ -471,7 +471,7 @@ Expected: no behavior regression.
 - Modify: `packages/core/src/tools/mail-tools.ts`
 - Test: `packages/core/test/search-query.test.ts`
 
-- [ ] **Step 1: Add tests for Gmail-like query parsing**
+- [x] **Step 1: Add tests for Gmail-like query parsing**
 
 Cover these inputs:
 
@@ -494,15 +494,15 @@ Expected parsed form:
 }
 ```
 
-- [ ] **Step 2: Implement a minimal parser**
+- [x] **Step 2: Implement a minimal parser**
 
 Keep the first parser small and deterministic. Unsupported Gmail operators should return a structured warning rather than being silently ignored.
 
-- [ ] **Step 3: Wire search tools to the parser**
+- [x] **Step 3: Wire search tools to the parser**
 
 Allow `search.query` to be parsed into existing structured filters. Existing explicit fields still win over parsed fields.
 
-- [ ] **Step 4: Commit search parser**
+- [x] **Step 4: Commit search parser**
 
 Run:
 
