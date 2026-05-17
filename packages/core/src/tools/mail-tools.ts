@@ -1689,21 +1689,65 @@ function classifyBulkGovernanceMessage(message: MessageSummary): {
     "绑定成功",
     "account",
     "帐户",
+    "账号安全",
+    "master password",
+    "multi-factor authentication",
+    "mfa",
+    "申诉",
   ])) {
     return { categoryId: "security_or_account", confidence: "high", reason: "metadata indicates account, login, verification, or security mail" };
+  }
+  if (hasAny(domain, [
+    "authy.com",
+    "bitwarden.com",
+    "mongodb.com",
+    "passport.xiaomi.com",
+    "tm.openai.com",
+  ])) {
+    return { categoryId: "security_or_account", confidence: "high", reason: "metadata matches known account or security sender domain" };
+  }
+  if (domain === "google.com" && hasAny(text, ["申诉", "appeal", "forwarding", "转发确认"])) {
+    return { categoryId: "security_or_account", confidence: "high", reason: "metadata matches Google account or forwarding notification" };
   }
 
   if (hasAny(text, ["购买", "receipt", "invoice", "账单", "订单", "payment", "支付", "subscription", "收据", "凭证"])) {
     return { categoryId: "receipt_or_purchase", confidence: "high", reason: "metadata indicates a receipt, purchase, payment, or subscription" };
   }
 
-  if (hasAny(domain, ["dlsite.com", "mail.nikke-official.com", "wargaming.net", "postermaster.sony.com.cn"])
+  if (hasAny(domain, [
+    "best.wondershare.com",
+    "blackmagic-design.com",
+    "dlsite.com",
+    "em1.cloudflare.com",
+    "mail.nikke-official.com",
+    "wargaming.net",
+    "postermaster.sony.com.cn",
+  ])
     || (hasAny(domain, ["epicgames.com"]) && hasAny(text, ["sale", "off", "free", "discount", "特卖", "优惠"]))
     || hasAny(text, ["广告", "(ad)", "优惠", "促销", "特卖", "礼物已到位", "登录游戏即可", "promotion", "promo", "campaign"])) {
     return { categoryId: "high_confidence_marketing", confidence: "high", reason: "metadata matches known marketing sender or promotion subject pattern" };
   }
 
-  if (hasAny(domain, ["github.com", "codeforces.com", "gitee.com", "oschina.net", "edmsend.csdn.net", "hyperskill.org", "openrouter.ai", "mail.trae.ai", "system.trae.ai"])
+  if (hasAny(domain, [
+    "appwrite.io",
+    "codeforces.com",
+    "email.openai.com",
+    "fwwb.org.cn",
+    "github.com",
+    "githubsupport.com",
+    "gitkraken.com",
+    "gitee.com",
+    "lanqiao.cn",
+    "mail.trae.ai",
+    "openrouter.ai",
+    "oschina.net",
+    "qodo.ai",
+    "system.trae.ai",
+    "tab.digital",
+    "team.mongodb.com",
+    "edmsend.csdn.net",
+    "hyperskill.org",
+  ])
     || hasAny(text, ["codeforces round", "pull request", "issue", "commit"])) {
     return { categoryId: "developer_community", confidence: "medium", reason: "metadata indicates developer community or repository activity" };
   }

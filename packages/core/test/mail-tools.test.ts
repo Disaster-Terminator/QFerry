@@ -1712,6 +1712,128 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("classifies real dogfood sender domains before falling back to review", async () => {
+    const messages = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Bitwarden <no-reply@bitwarden.com>",
+        subject: "Your Master Password Hint",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "Account security notification",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "notify-noreply <notify-noreply@google.com>",
+        subject: "申诉已获批准",
+        date: "2026-05-12T00:00:00.000Z",
+        snippet: "Google account appeal result",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "3" },
+        from: "Grant Petty <mailout@blackmagic-design.com>",
+        subject: "NAB 2024新品资讯！",
+        date: "2026-05-13T00:00:00.000Z",
+        snippet: "Product news",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "4" },
+        from: "community @ Qodo <community@qodo.ai>",
+        subject: "What's new in Qodo",
+        date: "2026-05-14T00:00:00.000Z",
+        snippet: "AI code review platform update",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "5" },
+        from: "Nextcloud Provider | TAB.DIGITAL <no-reply@tab.digital>",
+        subject: "Your secure cloud is live",
+        date: "2026-05-15T00:00:00.000Z",
+        snippet: "Developer cloud service",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "6" },
+        from: "中国大学生服务外包创新创业大赛 <fwwbds@fwwb.org.cn>",
+        subject: "A21赛题不提供任何数据的提醒",
+        date: "2026-05-16T00:00:00.000Z",
+        snippet: "contest problem notice",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "7" },
+        from: "Cloudflare <hello@em1.cloudflare.com>",
+        subject: "Boost performance with our newest plan",
+        date: "2026-05-17T00:00:00.000Z",
+        snippet: "Product campaign",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "8" },
+        from: "Security Team <security@example.org>",
+        subject: "MFA setup is required",
+        date: "2026-05-17T00:00:00.000Z",
+        snippet: "Multi-factor authentication reminder",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "9" },
+        from: "Baidu <notice@baidu.com>",
+        subject: "普通通知",
+        date: "2026-05-17T00:00:00.000Z",
+        snippet: "generic service notice",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "10" },
+        from: "Xiaomi <notice@xiaomi.com>",
+        subject: "新品提醒",
+        date: "2026-05-17T00:00:00.000Z",
+        snippet: "generic product notice",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "11" },
+        from: "Friend <friend@example.net>",
+        subject: "hello",
+        date: "2026-05-17T00:00:00.000Z",
+        snippet: "personal mail",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => {
+          throw new Error("not used");
+        },
+        scanMailboxMetadataWindow: async () => ({
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "INBOX", exists: messages.length },
+          messages,
+        }),
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.classificationSweep({
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+    });
+
+    expect(result.sweep.categoryCounts).toEqual({
+      developer_community: 3,
+      high_confidence_marketing: 2,
+      review: 3,
+      security_or_account: 3,
+    });
+  });
+
   it("returns a resume token when a classification sweep reaches the requested window limit", async () => {
     const messages = Array.from({ length: 4 }, (_, index) => ({
       ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: String(index + 1) },
