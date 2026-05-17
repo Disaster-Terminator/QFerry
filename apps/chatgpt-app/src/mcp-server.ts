@@ -117,6 +117,20 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
   const tools = createMailTools({ provider, runtimeConfig });
   const planRegistry = new Map<string, StoredPlan>();
   const consumedPlanIds = new Set<string>();
+  let mutationExecutionQueue: Promise<void> = Promise.resolve();
+  const enqueueMutationExecution = async <T>(run: () => Promise<T>): Promise<T> => {
+    const previous = mutationExecutionQueue;
+    let release!: () => void;
+    mutationExecutionQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => {});
+    try {
+      return await run();
+    } finally {
+      release();
+    }
+  };
 
   server.registerTool(
     "get_status",
@@ -497,38 +511,57 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
     async (input) => {
-      const stored = getStoredPlan(planRegistry, consumedPlanIds, input.operationPlanId);
-      if (stored.plan.status !== "confirmed") {
-        throw new Error(`Operation plan is not confirmed: ${input.operationPlanId}`);
-      }
-      const maxMessages = input.maxMessages ?? (stored.plan.action === "move" ? DEFAULT_MOVE_EXECUTION_MAX_MESSAGES : undefined);
-      try {
-        const result = await tools.executeCleanup({ plan: stored.plan, maxMessages });
-        if (result.result.status === "partially_executed") {
-          planRegistry.set(input.operationPlanId, {
-            plan: {
-              ...stored.plan,
-              messageRefs: stored.plan.messageRefs.slice(result.result.attemptedMessages),
-            },
-            expiresAt: Date.now() + PLAN_TTL_MS,
-            previewSummary: stored.previewSummary,
-          });
-        } else {
-          planRegistry.delete(input.operationPlanId);
-          consumedPlanIds.add(input.operationPlanId);
+      return enqueueMutationExecution(async () => {
+        const stored = getStoredPlan(planRegistry, consumedPlanIds, input.operationPlanId);
+        if (stored.plan.status !== "confirmed") {
+          throw new Error(`Operation plan is not confirmed: ${input.operationPlanId}`);
         }
-        return toToolResult(
-          await withMcpAudit("execute_cleanup", stored.plan.runId, input, result, {
-            ...result,
+        const maxMessages = input.maxMessages ?? (stored.plan.action === "move" ? DEFAULT_MOVE_EXECUTION_MAX_MESSAGES : undefined);
+        try {
+          const result = await tools.executeCleanup({ plan: stored.plan, maxMessages });
+          if (result.result.status === "partially_executed") {
+            planRegistry.set(input.operationPlanId, {
+              plan: {
+                ...stored.plan,
+                messageRefs: stored.plan.messageRefs.slice(result.result.attemptedMessages),
+              },
+              expiresAt: Date.now() + PLAN_TTL_MS,
+              previewSummary: stored.previewSummary,
+            });
+          } else {
+            planRegistry.delete(input.operationPlanId);
+            consumedPlanIds.add(input.operationPlanId);
+          }
+          return toToolResult(
+            await withMcpAudit("execute_cleanup", stored.plan.runId, input, result, {
+              ...result,
+              preview: stored.previewSummary,
+              plan: { target: stored.plan.target },
+            }),
+          );
+        } catch (error) {
+          const attemptedMessages = maxMessages === undefined
+            ? stored.plan.messageRefs.length
+            : Math.min(maxMessages, stored.plan.messageRefs.length);
+          await withMcpAudit("execute_cleanup", stored.plan.runId, input, {
+            result: {
+              operationPlanId: stored.plan.operationPlanId,
+              status: "failed",
+              action: stored.plan.action,
+              attemptedMessages,
+              mutationsAttempted: attemptedMessages,
+              totalPlanMessages: stored.plan.messageRefs.length,
+              remainingMessages: stored.plan.messageRefs.length,
+              errorMessage: errorToMessage(error),
+            },
             preview: stored.previewSummary,
             plan: { target: stored.plan.target },
-          }),
-        );
-      } catch (error) {
-        planRegistry.delete(input.operationPlanId);
-        consumedPlanIds.add(input.operationPlanId);
-        throw error;
-      }
+          }).catch(() => {});
+          planRegistry.delete(input.operationPlanId);
+          consumedPlanIds.add(input.operationPlanId);
+          throw error;
+        }
+      });
     },
   );
 
@@ -613,6 +646,7 @@ async function writeMcpAudit(
       `- attemptedMessages: ${summary.attemptedMessages ?? "<none>"}`,
       `- moved: ${summary.moved ?? "<none>"}`,
       `- reconciliationStatus: ${summary.reconciliationStatus ?? "<none>"}`,
+      `- errorMessage: ${summary.errorMessage ?? "<none>"}`,
       `- remainingMessages: ${summary.remainingMessages ?? "<none>"}`,
       `- mutationsAttempted: ${summary.mutationsAttempted}`,
       `- mailboxSnapshot: ${formatSummaryJson(summary.mailboxSnapshot)}`,
@@ -667,6 +701,7 @@ function summarizeMcpToolResult(structuredContent: object): Record<string, unkno
     attemptedMessages: result?.attemptedMessages,
     moved: result?.moved,
     reconciliationStatus: result?.reconciliationStatus,
+    errorMessage: result?.errorMessage,
     remainingMessages: result?.remainingMessages,
     mutationsAttempted: content.mutationsAttempted ?? result?.mutationsAttempted ?? 0,
     reconciliations: result?.reconciliations,
@@ -679,6 +714,10 @@ function summarizeMcpToolResult(structuredContent: object): Record<string, unkno
 
 function formatSummaryJson(value: unknown): string {
   return value === undefined ? "<none>" : JSON.stringify(value);
+}
+
+function errorToMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function createProviderFromConfig(runtimeConfig: QFerryRuntimeConfig): MailProvider {

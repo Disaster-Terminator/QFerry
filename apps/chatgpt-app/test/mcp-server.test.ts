@@ -1161,6 +1161,172 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("writes trace artifacts for failed MCP cleanup execution", async () => {
+    const traceRoot = await mkdtemp(join(tmpdir(), "qferry-mcp-execute-failure-audit-"));
+    process.env.QFERRY_MCP_TRACE_ROOT = traceRoot;
+    const messages: MessageSummary[] = [{
+      ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+      from: "newsletter@example.com",
+      subject: "Promo",
+      date: "2020-01-01T00:00:00.000Z",
+      snippet: "",
+      flags: [],
+    }];
+    const server = createQFerryMcpServer({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async (ref) => ({ ...messages[0], ref, bodyText: "" }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async () => {
+          throw new Error("simulated provider move failure");
+        },
+      },
+    });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const preview = await client.callTool({
+      name: "plan_cleanup",
+      arguments: {
+        runId: "run-mcp-trace-execute-failed",
+        folder: "INBOX",
+        limit: 10,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedGroupIds: ["archive"],
+        rules: [{ id: "promo", groupId: "archive", match: { subjectIncludes: "Promo" } }],
+      },
+    });
+    const previewContent = preview.structuredContent as { plan?: { operationPlanId?: string } } | undefined;
+    const operationPlanId = String(previewContent?.plan?.operationPlanId);
+    await client.callTool({ name: "confirm_cleanup_plan", arguments: { operationPlanId } });
+
+    const failedExecute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId, maxMessages: 1 },
+    });
+    expect(failedExecute.isError).toBe(true);
+    expect(failedExecute.content).toContainEqual({
+      type: "text",
+      text: "simulated provider move failure",
+    });
+
+    const tracePath = join(traceRoot, "logs", "runs", "run-mcp-trace-execute-failed.jsonl");
+    const summaryPath = join(traceRoot, "artifacts", "e2e", "run-mcp-trace-execute-failed", "summary.md");
+    const trace = await readFile(tracePath, "utf8");
+    expect(trace).toContain("\"toolName\":\"execute_cleanup\"");
+    expect(trace).toContain("\"status\":\"failed\"");
+    expect(trace).toContain("simulated provider move failure");
+    const summary = await readFile(summaryPath, "utf8");
+    expect(summary).toContain("- lastTool: execute_cleanup");
+    expect(summary).toContain("- status: failed");
+    expect(summary).toContain("- attemptedMessages: 1");
+    expect(summary).toContain("- errorMessage: simulated provider move failure");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("serializes concurrent MCP cleanup execution", async () => {
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "newsletter@example.com",
+        subject: "Promo one",
+        date: "2020-01-01T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "newsletter@example.com",
+        subject: "Promo two",
+        date: "2020-01-02T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    let activeMoves = 0;
+    let maxActiveMoves = 0;
+    const server = createQFerryMcpServer({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async (ref) => ({ ...messages[0], ref, bodyText: "" }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async (refs) => {
+          activeMoves += 1;
+          maxActiveMoves = Math.max(maxActiveMoves, activeMoves);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          activeMoves -= 1;
+          return { moved: refs.length };
+        },
+      },
+    });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const makePlan = async (runId: string, uid: string) => {
+      const preview = await client.callTool({
+        name: "plan_cleanup",
+        arguments: {
+          runId,
+          folder: "INBOX",
+          limit: 10,
+          action: "move",
+          target: { folder: "Archive" },
+          messageRefs: [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid }],
+          selectedGroupIds: [],
+        },
+      });
+      const previewContent = preview.structuredContent as { plan?: { operationPlanId?: string } } | undefined;
+      const operationPlanId = String(previewContent?.plan?.operationPlanId);
+      await client.callTool({ name: "confirm_cleanup_plan", arguments: { operationPlanId } });
+      return operationPlanId;
+    };
+    const firstPlanId = await makePlan("run-mcp-serialized-execute-1", "1");
+    const secondPlanId = await makePlan("run-mcp-serialized-execute-2", "2");
+
+    await Promise.all([
+      client.callTool({ name: "execute_cleanup", arguments: { operationPlanId: firstPlanId, maxMessages: 1 } }),
+      client.callTool({ name: "execute_cleanup", arguments: { operationPlanId: secondPlanId, maxMessages: 1 } }),
+    ]);
+
+    expect(maxActiveMoves).toBe(1);
+
+    await client.close();
+    await server.close();
+  });
+
   it("previews cleanup batches through the MCP server", async () => {
     const server = createQFerryMcpServer();
     const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
