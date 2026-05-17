@@ -15,16 +15,17 @@ For real mailbox work, call tools in this order:
 2. `list_mailboxes` to discover available folders.
 3. `get_mailbox_summary` to get read-only folder counts before scanning.
 4. `search` with structured filters when the task can be narrowed by sender, domain, subject, snippet, flag, date, order, or offset.
-5. `classification_sweep` for Gmail-like large mailbox governance. Use it to progressively scan chunks and return compact aggregate category counts plus `hasMore` / `resumeToken` / `nextScanOffset`, without message refs or an operation plan.
-6. `classification_map` for bounded classification detail. Use it on a selected window when you need category buckets, recommended actions, and sender/domain candidates.
-7. `ensure_classification_folder` after a bucket is selected and before planning moves. Pass a short user-facing folder name such as `广告营销` or `开发社区`; QFerry maps it to the QQ IMAP path such as `其他文件夹/广告营销` and returns a preview `create_folder` plan if the folder is missing.
-8. `bulk_governance_preview` only after the user or workflow has selected one or more classification buckets and a target classification folder for a dry-run operation plan.
-9. `triage_inbox` for a small inbox review summary and urgency buckets.
-10. `group_spam_candidates` only for narrow spam/ad spot checks. Present the grouped candidates for confirmation before any real operation.
-11. `preview_cleanup_batch` when the user already has explicit rules and wants a cross-page bounded operation plan.
-12. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups or already reviewed message refs. Direct `messageRefs` plans are limited and marked as `source: "client_refs"`.
-12. `confirm_cleanup_plan` only after the user explicitly approves one specific preview plan.
-13. `execute_cleanup` only with the confirmed `operationPlanId`; never pass or fabricate a `status: "confirmed"` plan object. For move plans, the installed MCP server executes at most 5 messages by default and keeps a partially executed plan resumable under the same `operationPlanId`; call `execute_cleanup` again to continue remaining messages. You may pass `maxMessages` from 1 to 50 for controlled experiments. Use 20 for real QQ Mail while validating a new category, and use 50 only after target-folder reconciliation has been stable for that workflow.
+5. Build or reuse a persisted `qferry.rules.json` ruleset when the work is repeatable. Groups should be user-defined and may bind `target.folder`; do not invent hardcoded product categories as the durable model.
+6. `ruleset_governance_preview` for high-throughput Gmail-like governance. It applies the ruleset, groups matching metadata by user-defined group, and creates preview operation plans per target group.
+7. `classification_sweep` and `classification_map` only for exploratory built-in heuristic discovery when the ruleset is not yet clear. Treat their `workflowWarning.code: "legacy_discovery_helper"` as a prompt to convert discoveries into rules.
+8. `ensure_classification_folder` after a user group or target folder is selected and before planning moves. Pass a short user-facing folder name such as `广告营销` or `开发社区`; QFerry maps it to the QQ IMAP path such as `其他文件夹/广告营销` and returns a preview `create_folder` plan if the folder is missing.
+9. `bulk_governance_preview` only for legacy built-in category preview. Prefer `ruleset_governance_preview` for repeatable governance.
+10. `triage_inbox` for a small inbox review summary and urgency buckets.
+11. `group_spam_candidates` only for narrow spam/ad spot checks. Present the grouped candidates for confirmation before any real operation.
+12. `preview_cleanup_batch` when the user already has explicit rules and wants a single bounded operation plan.
+13. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups or already reviewed message refs. Direct `messageRefs` plans are limited and marked as `source: "client_refs"`.
+14. `confirm_cleanup_plan` only after the user explicitly approves one specific preview plan.
+15. `execute_cleanup` only with the confirmed `operationPlanId`; never pass or fabricate a `status: "confirmed"` plan object. For move plans, the installed MCP server executes at most 5 messages by default and keeps a partially executed plan resumable under the same `operationPlanId`; call `execute_cleanup` again to continue remaining messages. You may pass `maxMessages` from 1 to 50 for controlled experiments. Use 20 for real QQ Mail while validating a new category, and use 50 only after target-folder reconciliation has been stable for that workflow.
 
 Use `classify_messages` when debugging rules or doing focused classification. Prefer `triage_inbox` for normal inbox organization because it returns group counts, priority buckets (`urgent`, `needs_review`, `waiting`, `fyi`, `bulk`), sampled message count, recommended next action, and `mutationsAttempted`.
 
@@ -39,10 +40,10 @@ Allowed by default:
 - Search with metadata filters before considering body fetches.
 - Fetch a single selected message when needed.
 - Classify messages into QFerry-local groups.
-- Build a classification-first mailbox sweep with `classification_sweep`; treat this as the default starting point for large cleanup work. Continue with `resumeToken.offset` or `nextScanOffset` until the sweep is complete.
-- Use `classification_map` for bounded detail after the sweep has identified a window or category worth inspecting.
+- Use `ruleset_governance_preview` as the default high-throughput governance entry once a ruleset exists.
+- Use `classification_sweep` and `classification_map` as legacy discovery helpers only; convert useful discoveries into user rules and folders before repeatable execution.
 - Preview missing classification folders with `ensure_classification_folder`. Do not expose meaningless prefixes in the suggested display name; use `其他文件夹/...` only as the IMAP execution path.
-- Dry-run large mailbox windows with `bulk_governance_preview`; prefer categories such as `high_confidence_marketing`, `newsletter_or_digest`, `security_or_account`, `receipt_or_purchase`, GitHub-specific buckets (`github_ci`, `github_pr_notification`, `github_code_review`, `github_account_security`), and `developer_community` over manual UID picking. Do not default advertising or marketing mail to `Junk`; classify it into a reviewable folder such as `广告营销` unless the user explicitly asks for Junk.
+- Dry-run legacy built-in category windows with `bulk_governance_preview` only when discovery output is still being reviewed. For repeatable mailbox cleanup, prefer ruleset-backed group targets over built-in category IDs. Do not default advertising or marketing mail to `Junk`; classify it into a reviewable folder such as `广告营销` unless the user explicitly asks for Junk.
 - Group oldest obvious spam or ads for confirmation.
 - Create operation plans.
 - Preview bounded cross-page cleanup batches.
@@ -63,13 +64,13 @@ Use `plan_sender_governance` when the user wants Gmail-like sender/domain cleanu
 
 Use `sender_breakdown` before `plan_sender_governance` when a single domain is too broad. Pass `fromDomainIncludes` such as `qq.com` and a target `ruleGroup`; review the returned concrete `senderCandidates`, `sampleSubjects`, and `suggestedRule.match.fromIncludes`. Then pass only the approved sender strings to `plan_sender_governance.selectedFromIncludes` for preview and execution. `sender_breakdown` is read-only and does not create an operation plan.
 
-For high-throughput sender or rule cleanup, prefer one window-backed preview over manual offset stitching. Pass enough `pageSize * maxPages` to cover the target mailbox window, then use `plan_sender_governance` with `ruleGroup` to draft reusable classification rules for recurring domains, dry-run the patch with `apply_ruleset_patch`, and use `preview_cleanup_batch` against the ruleset for all matching messages. These tools use the provider bulk metadata window when available, so they should produce a single UID-ref operation plan for a category such as Steam instead of requiring multiple `scanOffset` retries.
+For high-throughput sender or rule cleanup, prefer one window-backed preview over manual offset stitching. Pass enough `pageSize * maxPages` to cover the target mailbox window, then use `plan_sender_governance` with `ruleGroup` to draft reusable classification rules for recurring domains, dry-run the patch with `apply_ruleset_patch`, and use `ruleset_governance_preview` against the ruleset for all matching groups. These tools use the provider bulk metadata window when available, so they should produce UID-ref operation plans for user-defined groups instead of requiring multiple `scanOffset` retries.
 
-Use `classification_sweep` before high-throughput mailbox治理. It returns compact aggregate category counts, chunk summaries, bucket summaries, and `nextScanOffset` without message refs or a plan, so large real mailboxes can be classified first without flooding context. Use `classification_map` only when you need bounded window details. After selecting buckets such as `high_confidence_marketing`, `newsletter_or_digest`, `security_or_account`, `receipt_or_purchase`, GitHub-specific buckets, and `developer_community`, call `ensure_classification_folder` for the target folder name, then use `bulk_governance_preview` with the same display name or the returned full folder path. For real QQ Mail, execute only a confirmed subset after reviewing the categories, folder plan, and move plan.
+Use `classification_sweep` and `classification_map` only before the ruleset is mature enough to govern repeatably. They return compact built-in heuristic signals without creating durable user categories. After a useful pattern is found, express it as a rule group with a target folder and switch to `ruleset_governance_preview`. For real QQ Mail, execute only a confirmed subset after reviewing the rules, folder plan, and move plan.
 
 For GitHub-heavy inbox治理, do not put all `github.com` mail into one broad folder. Prefer `github_ci` -> `GitHub CI`, `github_pr_notification` -> `GitHub PR通知`, `github_code_review` -> `GitHub代码审查`, and `github_account_security` -> `GitHub账号安全`, then move only reviewed preview plans.
 
-For real QQ Mail after any move batch, treat `classification_sweep` counts and `nextScanOffset` as advisory only. QQ IMAP sequence windows and `INBOX exists` can fold after moves, so a later `scanOffset: 0` preview may see a different current front window. Use `bulk_governance_preview.selectedMessageRefs`, `preview.mailboxSnapshot`, and the generated UID refs as the authoritative execution input. Do not claim a category tail is fully exhausted solely from a prior sweep; re-preview the chosen category and rely on target-folder reconciliation after execution.
+For real QQ Mail after any move batch, treat `classification_sweep` counts and `nextScanOffset` as advisory only. QQ IMAP sequence windows and `INBOX exists` can fold after moves, so a later `scanOffset: 0` preview may see a different current front window. Use `ruleset_governance_preview` or `bulk_governance_preview` `selectedMessageRefs`, `preview.mailboxSnapshot`, and generated UID refs as the authoritative execution input. Do not claim a category tail is fully exhausted solely from a prior sweep; re-preview the chosen group/category and rely on target-folder reconciliation after execution.
 
 Use `apply_ruleset_patch` only for local QFerry rules files. Default to `apply: false` for review. `apply: true` writes the local rules file but does not mutate QQ Mail, labels, folders, messages, or server-side blocklists.
 

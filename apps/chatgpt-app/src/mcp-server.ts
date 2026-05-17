@@ -100,6 +100,10 @@ export interface CreateQFerryMcpServerOptions {
 
 const DEFAULT_MOVE_EXECUTION_MAX_MESSAGES = 5;
 const MAX_MOVE_EXECUTION_MAX_MESSAGES = 50;
+const LEGACY_DISCOVERY_WORKFLOW_WARNING = {
+  code: "legacy_discovery_helper",
+  message: "For repeatable batch governance, prefer a user ruleset and ruleset_governance_preview.",
+} as const;
 
 interface McpAuditInfo {
   runId: string;
@@ -398,7 +402,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     "classification_map",
     {
       title: "Classification map",
-      description: "Use this first for Gmail-like mailbox governance: scan a bounded window, classify it into action buckets, and return no operation plan.",
+      description: "Use this only for exploratory built-in heuristic discovery. For repeatable user-defined batch governance, prefer ruleset_governance_preview.",
       inputSchema: {
         folder: z.string(),
         pageSize: z.number().int().min(1).max(50),
@@ -408,14 +412,14 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => toToolResult(await tools.classificationMap(input)),
+    async (input) => toToolResult(withLegacyDiscoveryWarning(await tools.classificationMap(input))),
   );
 
   server.registerTool(
     "classification_sweep",
     {
       title: "Classification sweep",
-      description: "Use this for Gmail-like full-mailbox governance: progressively scan classification chunks and return compact aggregate counts plus nextScanOffset, without message refs or an operation plan.",
+      description: "Use this only for exploratory built-in heuristic discovery over mailbox chunks. For repeatable user-defined batch governance, prefer ruleset_governance_preview.",
       inputSchema: {
         folder: z.string(),
         pageSize: z.number().int().min(1).max(50),
@@ -426,14 +430,14 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => toToolResult(await tools.classificationSweep(input)),
+    async (input) => toToolResult(withLegacyDiscoveryWarning(await tools.classificationSweep(input))),
   );
 
   server.registerTool(
     "bulk_governance_preview",
     {
       title: "Bulk governance preview",
-      description: "Use this for Gmail-like large-window dry-run classification by sender/domain/content category and a bounded preview cleanup plan. Use small confirmed mutation only after review.",
+      description: "Use this only for previewing built-in heuristic category actions. For repeatable user-defined batch governance, prefer ruleset_governance_preview.",
       inputSchema: {
         runId: z.string(),
         folder: z.string(),
@@ -450,7 +454,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     },
     async (input) => {
       const result = registerPlan(await tools.bulkGovernancePreview(input), planRegistry);
-      return toToolResult(await withMcpAudit("bulk_governance_preview", input.runId, input, result));
+      return toToolResult(await withMcpAudit("bulk_governance_preview", input.runId, input, withLegacyDiscoveryWarning(result)));
     },
   );
 
@@ -832,6 +836,13 @@ function toToolResult<T extends object>(structuredContent: T) {
         text: JSON.stringify(content),
       },
     ],
+  };
+}
+
+function withLegacyDiscoveryWarning<T extends object>(structuredContent: T) {
+  return {
+    workflowWarning: LEGACY_DISCOVERY_WORKFLOW_WARNING,
+    ...structuredContent,
   };
 }
 

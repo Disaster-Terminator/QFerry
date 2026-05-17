@@ -98,6 +98,9 @@ describe("QFerry ChatGPT App MCP server", () => {
     });
 
     expect(result.structuredContent).toMatchObject({
+      workflowWarning: {
+        code: "legacy_discovery_helper",
+      },
       map: {
         scannedMessages: 2,
         categoryCounts: {
@@ -140,6 +143,9 @@ describe("QFerry ChatGPT App MCP server", () => {
     });
 
     expect(result.structuredContent).toMatchObject({
+      workflowWarning: {
+        code: "legacy_discovery_helper",
+      },
       sweep: {
         scannedMessages: 2,
         categoryCounts: {
@@ -186,6 +192,9 @@ describe("QFerry ChatGPT App MCP server", () => {
     });
 
     expect(result.structuredContent).toMatchObject({
+      workflowWarning: {
+        code: "legacy_discovery_helper",
+      },
       preview: {
         scannedMessages: 2,
         selectedMessageRefs: 1,
@@ -286,6 +295,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     };
     expect(content.plans).toHaveLength(2);
     expect(content.preview?.groupPlans?.map((plan) => plan.groupId)).toEqual(["group_alpha", "group_beta"]);
+    expect(JSON.stringify(result.structuredContent)).not.toContain("legacy_discovery_helper");
     const summary = await readFile(String(content.audit?.summaryPath), "utf8");
     expect(summary).toContain("- operationPlanIds: [");
     expect(summary).toContain("- groupPlans: [");

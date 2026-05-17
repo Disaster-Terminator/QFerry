@@ -99,11 +99,15 @@ examples/qferry.rules.json
 
 工具仍兼容直接传入内联 `rules`。真实 QQ 路径使用规则文件时仍然只生成 preview plan，不执行邮箱写操作。
 
-## 分类扫描、分类地图与批量整理预览
+## 规则集治理预览与 legacy discovery
 
-`classification_sweep` 是 Gmail-like 大批量治理的默认入口。它按 chunk 渐进扫描 bounded metadata，按 sender/domain/content 分类为 `security_or_account`、`receipt_or_purchase`、`developer_community`、`newsletter_or_digest`、`high_confidence_marketing` 和 `review`，只返回聚合计数、chunk 摘要、bucket 摘要、`hasMore`、`resumeToken` 和 `nextScanOffset`，不返回 message refs，也不生成 operation plan。
+`ruleset_governance_preview` 是 Gmail-like 大批量治理的默认入口。它读取内联 `rules` 或 `rulesFile`，按用户定义的 group 匹配 bounded metadata，并为带 `target.folder` 的 group 生成 preview-only operation plans。验收重点不是内置分类名，而是规则、group、目标文件夹、UID refs 和审计日志是否能支撑批量可追踪治理。
 
-真实 QQ 邮箱发生移动后，IMAP sequence 窗口和 `INBOX exists` 可能重新折叠；因此 sweep 的分类计数和 `nextScanOffset` 只能作为 advisory 导航信号，不能作为“该类别已清空”的证明。真实执行前必须重新调用 `bulk_governance_preview`，以 preview 实际返回的 UID refs、`selectedMessageRefs` 和 `mailboxSnapshot` 为准；执行验收以目标文件夹增量为硬判据，源文件夹 delta 只记录为审计信息。
+`classification_sweep`、`classification_map` 和 `bulk_governance_preview` 是 legacy discovery helpers。它们保留内置启发式分类，用于探索未知邮箱结构；MCP 输出必须包含 `workflowWarning.code: "legacy_discovery_helper"`，提醒后续应沉淀成用户规则集，而不是把内置类别当成产品抽象。
+
+`classification_sweep` 按 chunk 渐进扫描 bounded metadata，按 sender/domain/content 分类为 `security_or_account`、`receipt_or_purchase`、`developer_community`、`newsletter_or_digest`、`high_confidence_marketing` 和 `review`，只返回聚合计数、chunk 摘要、bucket 摘要、`hasMore`、`resumeToken` 和 `nextScanOffset`，不返回 message refs，也不生成 operation plan。
+
+真实 QQ 邮箱发生移动后，IMAP sequence 窗口和 `INBOX exists` 可能重新折叠；因此 sweep 的分类计数和 `nextScanOffset` 只能作为 advisory 导航信号，不能作为“该类别已清空”的证明。真实执行前必须重新调用 `ruleset_governance_preview` 或 legacy `bulk_governance_preview`，以 preview 实际返回的 UID refs、`selectedMessageRefs` 和 `mailboxSnapshot` 为准；执行验收以目标文件夹增量为硬判据，源文件夹 delta 只记录为审计信息。
 
 验收时必须关注这些字段：
 
@@ -129,6 +133,8 @@ examples/qferry.rules.json
 - `map.mutationsAttempted`
 
 真实 QQ read-only e2e 调用该工具时必须保持 `mutationsAttempted: 0`，并确认输出里没有 `plan` 或 `operationPlanId`。后续只有在用户选定分类桶后，才先进入 `ensure_classification_folder` 预览目标分类文件夹，再进入 `bulk_governance_preview` 或更窄的规则化 preview plan。用户界面和 summary 使用短文件夹名，例如 `广告营销`、`开发社区`；IMAP 执行路径可以是 `其他文件夹/广告营销`。
+
+`ruleset_governance_preview` 用于规则化批量整理。它返回 `preview.groupPlans`、`plans[]`、`operationPlanIds[]`、`skippedGroups[]` 和 `mutationsAttempted: 0`。当一个 ruleset 中多个 group 带有目标文件夹时，验收应确认每个 group 生成独立 preview plan，summary 中保留 `groupPlans` 和 `operationPlanIds`。
 
 `preview_cleanup_batch` 是 Codex 插件侧的规则化批量整理入口。它跨页扫描 bounded metadata，应用 `rules` 或 `rulesFile`，按 `selectedGroupIds` 选出候选邮件，并生成 `status: "preview"` 的 operation plan。
 
@@ -245,7 +251,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 QQ provider 的 `fetch` 必须按 `folder + uid + uidValidity` 精确读取选中邮件 metadata，不能依赖最新 bounded scan 回查 UID。
 
-Gmail-like 大批量治理验收优先走 `classification_sweep`，先把大邮箱按 chunk 分成可解释分类桶并记录聚合计数；需要窗口级候选细节时再调用 `classification_map`。`bulk_governance_preview` 只在选定具体分类桶和目标文件夹后生成 dry-run preview plan；真实 QQ mutation 只允许在用户明确授权后，对高置信广告/营销等小范围子集执行。
+Gmail-like 大批量治理验收优先走 `ruleset_governance_preview`，先确认用户规则集能把稳定 sender/domain/subject/snippet 特征映射到自定义 group 和目标文件夹，再生成可审计 preview plans。`classification_sweep` 和 `classification_map` 只作为 discovery 信号；`bulk_governance_preview` 只在临时使用内置分类桶时生成 dry-run preview plan。真实 QQ mutation 只允许在用户明确授权后，对已确认 plan 的子集执行。
 
 ## 自动化门控
 

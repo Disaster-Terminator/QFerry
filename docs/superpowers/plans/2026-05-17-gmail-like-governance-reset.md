@@ -411,7 +411,7 @@ Expected: one focused commit.
 - Modify: `README.md`
 - Modify: `docs/CODEX_PLUGIN_ACCEPTANCE.md`
 
-- [ ] **Step 1: Rename documentation language, not APIs**
+- [x] **Step 1: Rename documentation language, not APIs**
 
 Keep existing tool names for compatibility, but describe them as "built-in discovery heuristics" rather than "the Gmail-like default workflow".
 
@@ -422,7 +422,7 @@ Preferred governance path: ruleset_governance_preview
 Legacy/discovery path: classification_sweep, classification_map, bulk_governance_preview
 ```
 
-- [ ] **Step 2: Add deprecation metadata and response warnings where safe**
+- [x] **Step 2: Add deprecation metadata and response warnings where safe**
 
 Do not break clients. Add wording to tool descriptions:
 
