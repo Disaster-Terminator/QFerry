@@ -443,7 +443,7 @@ Add structured response warnings for legacy discovery tools when applicable:
 
 The warning must not fail existing calls or change mutation safety.
 
-- [ ] **Step 3: Run docs and MCP tests**
+- [x] **Step 3: Run docs and MCP tests**
 
 Run:
 
@@ -453,7 +453,7 @@ rtk pnpm run check
 
 Expected: pass.
 
-- [ ] **Step 4: Commit compatibility docs**
+- [x] **Step 4: Commit compatibility docs**
 
 Run:
 
