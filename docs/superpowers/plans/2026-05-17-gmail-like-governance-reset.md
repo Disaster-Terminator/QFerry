@@ -520,7 +520,7 @@ Expected: query parsing is useful without becoming a full Gmail clone.
 - Verify: `plugins/qferry/dist/mcp.cjs`
 - Verify: installed QFerry plugin cache
 
-- [ ] **Step 1: Run full checks**
+- [x] **Step 1: Run full checks**
 
 Run:
 
@@ -537,7 +537,7 @@ real QQ readonly e2e writes logs/runs and artifacts/e2e
 mutationsAttempted: 0
 ```
 
-- [ ] **Step 2: Sync plugin cache**
+- [x] **Step 2: Sync plugin cache**
 
 Run:
 
@@ -547,7 +547,7 @@ rtk pnpm run dev:sync-plugin-cache:all -- --apply
 
 Expected: Windows plugin cache and detectable WSL cache are updated.
 
-- [ ] **Step 3: Commit generated distribution**
+- [x] **Step 3: Commit generated distribution**
 
 Run:
 
