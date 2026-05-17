@@ -89,6 +89,21 @@ describe("runtime config", () => {
     expect(JSON.stringify(config)).not.toContain("secret-auth-code");
   });
 
+  it("loads QQ classification parent path from env", async () => {
+    const config = await loadQFerryRuntimeConfig({
+      env: {
+        QFERRY_PROVIDER: "qqmail",
+        QQMAIL_EMAIL: "25abc@qq.com",
+        QQMAIL_KEY: "secret-auth-code",
+        QQMAIL_CLASSIFICATION_PARENT_PATH: "User Folders",
+      },
+      readFile: async () => undefined,
+    });
+
+    expect(config.qqmail?.classificationParentPath).toBe("User Folders");
+    expect(JSON.stringify(config)).not.toContain("secret-auth-code");
+  });
+
   it("loads QQ auth code from the same local env source without adding it to status config", () => {
     const dir = mkdtempSync(join(tmpdir(), "qferry-runtime-secrets-"));
     const envFile = join(dir, ".env");
@@ -114,6 +129,7 @@ describe("runtime config", () => {
             imapHost: "imap.qq.com",
             imapPort: 993,
             metadataSampleLimit: 7,
+            classificationParentPath: "Local Folders",
           },
         });
       },
@@ -123,6 +139,7 @@ describe("runtime config", () => {
     expect(config.accountAlias).toBe("lo***@qq.com");
     expect(config.configSource).toBe("file:G:\\local\\qferry-config.json");
     expect(config.metadataSampleLimit).toBe(7);
+    expect(config.qqmail?.classificationParentPath).toBe("Local Folders");
     expect(config.authConfigured).toBe(false);
     expect(config.providerReady).toBe(false);
     expect(config.mutationOperationallyReady).toBe(false);

@@ -22,6 +22,7 @@ export interface QFerryRuntimeConfig {
     authCodePresent: boolean;
     imapHost: string;
     imapPort: number;
+    classificationParentPath?: string;
   };
 }
 
@@ -41,6 +42,7 @@ interface LocalConfigFile {
     imapHost?: string;
     imapPort?: number;
     metadataSampleLimit?: number;
+    classificationParentPath?: string;
   };
 }
 
@@ -79,6 +81,10 @@ export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInpu
   const authCode = env.QQMAIL_KEY;
   const imapHost = env.QQMAIL_IMAP_HOST?.trim() || localConfig.config?.qqmail?.imapHost?.trim() || "imap.qq.com";
   const imapPort = parseInteger(env.QQMAIL_IMAP_PORT) ?? localConfig.config?.qqmail?.imapPort ?? 993;
+  const classificationParentPath =
+    normalizeOptional(env.QQMAIL_CLASSIFICATION_PARENT_PATH)
+    ?? normalizeOptional(env.QFERRY_CLASSIFICATION_PARENT_PATH)
+    ?? normalizeOptional(localConfig.config?.qqmail?.classificationParentPath);
   const metadataSampleLimit = clampSampleLimit(
     parseInteger(env.QQMAIL_METADATA_SAMPLE_LIMIT)
       ?? parseInteger(env.QFERRY_METADATA_SAMPLE_LIMIT)
@@ -107,6 +113,7 @@ export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInpu
       authCodePresent: Boolean(authCode),
       imapHost,
       imapPort,
+      ...(classificationParentPath ? { classificationParentPath } : {}),
     },
   };
 }
@@ -202,6 +209,10 @@ function buildRuntimeConfig(
   const authCode = env.QQMAIL_KEY;
   const imapHost = env.QQMAIL_IMAP_HOST?.trim() || localConfig.config?.qqmail?.imapHost?.trim() || "imap.qq.com";
   const imapPort = parseInteger(env.QQMAIL_IMAP_PORT) ?? localConfig.config?.qqmail?.imapPort ?? 993;
+  const classificationParentPath =
+    normalizeOptional(env.QQMAIL_CLASSIFICATION_PARENT_PATH)
+    ?? normalizeOptional(env.QFERRY_CLASSIFICATION_PARENT_PATH)
+    ?? normalizeOptional(localConfig.config?.qqmail?.classificationParentPath);
   const metadataSampleLimit = clampSampleLimit(
     parseInteger(env.QQMAIL_METADATA_SAMPLE_LIMIT)
       ?? parseInteger(env.QFERRY_METADATA_SAMPLE_LIMIT)
@@ -230,6 +241,7 @@ function buildRuntimeConfig(
       authCodePresent: Boolean(authCode),
       imapHost,
       imapPort,
+      ...(classificationParentPath ? { classificationParentPath } : {}),
     },
   };
 }
@@ -270,6 +282,11 @@ function parseInteger(value: string | undefined): number | undefined {
   if (value === undefined || value.trim() === "") return undefined;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normalizeOptional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function clampSampleLimit(value: number): number {

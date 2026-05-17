@@ -513,6 +513,7 @@ export interface MailTools {
 }
 
 export function createMailTools(input: CreateMailToolsInput): MailTools {
+  const classificationParentPath = resolveClassificationParentPath(input.runtimeConfig);
   return {
     async getStatus() {
       if (input.runtimeConfig) {
@@ -723,7 +724,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async ensureClassificationFolder(folderInput) {
-      const parentPath = folderInput.parentPath ?? DEFAULT_CLASSIFICATION_PARENT_PATH;
+      const parentPath = folderInput.parentPath ?? classificationParentPath;
       const displayName = normalizeFolderDisplayName(folderInput.displayName);
       const fullPath = joinMailboxPath(parentPath, displayName);
       const mailboxes = await input.provider.listMailboxes();
@@ -772,6 +773,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           provider,
           action: planInput.action,
           target: planInput.target,
+          classificationParentPath,
         });
         return {
           plan: createOperationPlan({
@@ -808,6 +810,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         provider,
         action: planInput.action,
         target: planInput.target,
+        classificationParentPath,
       });
 
       return {
@@ -865,6 +868,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         provider,
         action: batchInput.action,
         target,
+        classificationParentPath,
       });
 
       return {
@@ -939,6 +943,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         provider,
         action: governanceInput.action,
         target: governanceInput.target,
+        classificationParentPath,
       });
       const rulesetPatch = buildRulesetPatchDraft({
         candidates: allDomainCandidates,
@@ -1230,6 +1235,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         provider,
         action: bulkInput.action,
         target: bulkInput.target,
+        classificationParentPath,
       });
 
       return {
@@ -1623,6 +1629,7 @@ function resolveOperationTarget(input: {
   provider: string;
   action: OperationAction;
   target?: Record<string, string>;
+  classificationParentPath?: string;
 }): { target?: Record<string, string>; resolution?: MailboxTargetResolution } {
   if (!input.target || input.action !== "move") {
     return { target: input.target };
@@ -1637,7 +1644,7 @@ function resolveOperationTarget(input: {
     return { target: input.target };
   }
 
-  const parentPath = input.target.parentPath ?? DEFAULT_CLASSIFICATION_PARENT_PATH;
+  const parentPath = input.target.parentPath ?? input.classificationParentPath ?? DEFAULT_CLASSIFICATION_PARENT_PATH;
   const displayName = normalizeFolderDisplayName(input.target.displayName ?? requestedFolder);
   const resolvedFolder = joinMailboxPath(parentPath, displayName);
   const resolution: MailboxTargetResolution = {
@@ -1655,6 +1662,10 @@ function resolveOperationTarget(input: {
     },
     resolution,
   };
+}
+
+function resolveClassificationParentPath(runtimeConfig: QFerryRuntimeConfig | undefined): string {
+  return runtimeConfig?.qqmail?.classificationParentPath?.trim() || DEFAULT_CLASSIFICATION_PARENT_PATH;
 }
 
 function classifyBulkGovernanceMessage(message: MessageSummary): {

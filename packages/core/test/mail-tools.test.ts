@@ -2484,6 +2484,50 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("uses runtime classification parent path for classification folders", async () => {
+    const provider = FixtureMailProvider.demo();
+    const tools = createMailTools({
+      provider,
+      runtimeConfig: {
+        provider: "qqmail",
+        accountAlias: "25***@qq.com",
+        configSource: "test",
+        mutationAllowed: true,
+        mutationCapable: true,
+        mutationOperationallyReady: true,
+        mutationRequiresConfirmation: true,
+        authConfigured: true,
+        providerReady: true,
+        metadataSampleLimit: 1,
+        statusWarnings: [],
+        qqmail: {
+          email: "25abc@qq.com",
+          authCodePresent: true,
+          imapHost: "imap.qq.com",
+          imapPort: 993,
+          classificationParentPath: "User Folders",
+        },
+      },
+    });
+
+    const result = await tools.ensureClassificationFolder({
+      runId: "run-folder-strategy",
+      displayName: "Group Alpha",
+    });
+
+    expect(result.folder).toEqual({
+      displayName: "Group Alpha",
+      fullPath: "User Folders/Group Alpha",
+      exists: false,
+      parentPath: "User Folders",
+    });
+    expect(result.plan?.target).toEqual({
+      folder: "User Folders/Group Alpha",
+      displayName: "Group Alpha",
+      parentPath: "User Folders",
+    });
+  });
+
   it("returns existing classification folders without a create plan", async () => {
     const provider = FixtureMailProvider.demo();
     const tools = createMailTools({ provider });
