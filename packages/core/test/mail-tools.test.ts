@@ -2113,8 +2113,9 @@ describe("mail tools", () => {
       attemptedMessages: 2,
       mutationsAttempted: 2,
       moved: 2,
+      reconciliationStatus: "target_reconciled_source_unreliable",
       reconciliations: [
-        { sourceDelta: 1, targetDelta: 2 },
+        { sourceDelta: 1, targetDelta: 2, reconciliationStatus: "target_reconciled_source_unreliable" },
       ],
     });
     expect(movedRefs).toEqual([
@@ -2170,6 +2171,7 @@ describe("mail tools", () => {
 
     const result = await tools.executeCleanup({ plan });
 
+    expect(result.result.reconciliationStatus).toBe("target_reconciled_source_unreliable");
     expect(result.result.reconciliations).toEqual([
       expect.objectContaining({
         sourceDelta: -2,
@@ -2179,6 +2181,7 @@ describe("mail tools", () => {
         targetDeltaReconciled: true,
         sourceDeltaReliable: false,
         sourceDeltaStatus: "concurrent_or_external_change",
+        reconciliationStatus: "target_reconciled_source_unreliable",
       }),
     ]);
   });
@@ -2241,11 +2244,12 @@ describe("mail tools", () => {
       attemptedMessages: 2,
       mutationsAttempted: 2,
       moved: 2,
+      reconciliationStatus: "matched",
       totalPlanMessages: 3,
       remainingMessages: 1,
       executionBatch: { requestedMaxMessages: 2, executedMessages: 2 },
       reconciliations: [
-        { sourceDelta: -2, targetDelta: 2 },
+        { sourceDelta: -2, targetDelta: 2, reconciliationStatus: "matched" },
       ],
     });
     expect(movedRefs).toEqual([
@@ -2322,7 +2326,8 @@ describe("mail tools", () => {
       attemptedMessages: 1,
       mutationsAttempted: 1,
       moved: 1,
-      reconciliations: [{ sourceDelta: -1, targetDelta: 1 }],
+      reconciliationStatus: "matched",
+      reconciliations: [{ sourceDelta: -1, targetDelta: 1, reconciliationStatus: "matched" }],
     });
     expect(movedRefs).toEqual([[{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" }]]);
   });

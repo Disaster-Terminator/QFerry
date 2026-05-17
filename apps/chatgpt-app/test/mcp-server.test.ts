@@ -1141,6 +1141,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       result: {
         status: "executed",
         moved: 1,
+        reconciliationStatus: "matched",
       },
     });
     const audit = execute.structuredContent as { audit?: { tracePath?: string; summaryPath?: string } };
@@ -1153,6 +1154,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(summary).toContain("# QFerry MCP Audit run-mcp-trace-execute");
     expect(summary).toContain("- lastTool: execute_cleanup");
     expect(summary).toContain('- target: {"folder":"Archive"}');
+    expect(summary).toContain("- reconciliationStatus: matched");
     expect(summary).toContain("- reconciliations:");
 
     await client.close();

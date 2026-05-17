@@ -65,6 +65,7 @@ export interface ExecuteCleanupResult {
   attemptedMessages: number;
   mutationsAttempted: number;
   moved?: number;
+  reconciliationStatus?: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "unavailable";
   totalPlanMessages?: number;
   remainingMessages?: number;
   executionBatch?: {
@@ -85,6 +86,7 @@ export interface ExecuteCleanupResult {
     targetDeltaReconciled: boolean;
     sourceDeltaReliable: boolean;
     sourceDeltaStatus: "matched" | "concurrent_or_external_change";
+    reconciliationStatus: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled";
   }>;
   createdFolder?: string;
 }
@@ -709,6 +711,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           attemptedMessages: messageRefsToMove.length,
           mutationsAttempted: messageRefsToMove.length,
           moved: moveResult.moved,
+          reconciliationStatus: summarizeMoveReconciliationStatus(moveResult.reconciliations),
           totalPlanMessages: plan.messageRefs.length,
           remainingMessages,
           ...(executionLimit === undefined
@@ -2118,22 +2121,27 @@ async function waitForFreshReconciliation(input: {
   for (let attempt = 0; attempt < MOVE_RECONCILE_ATTEMPTS; attempt += 1) {
     const sourceAfter = await input.provider.getMailboxSummary(input.sourceFolder);
     const targetAfter = await input.provider.getMailboxSummary(input.targetFolder);
+    const targetDelta = targetAfter.exists - input.targetBefore;
+    const sourceDelta = sourceAfter.exists - input.sourceBefore;
+    const targetDeltaReconciled = targetDelta === input.expectedTargetDelta;
+    const sourceDeltaReliable = sourceDelta === input.expectedSourceDelta;
     latest = {
       sourceFolder: input.sourceFolder,
       targetFolder: input.targetFolder,
       sourceBefore: input.sourceBefore,
       sourceAfter: sourceAfter.exists,
-      sourceDelta: sourceAfter.exists - input.sourceBefore,
+      sourceDelta,
       targetBefore: input.targetBefore,
       targetAfter: targetAfter.exists,
-      targetDelta: targetAfter.exists - input.targetBefore,
+      targetDelta,
       expectedSourceDelta: input.expectedSourceDelta,
       expectedTargetDelta: input.expectedTargetDelta,
-      targetDeltaReconciled: targetAfter.exists - input.targetBefore === input.expectedTargetDelta,
-      sourceDeltaReliable: sourceAfter.exists - input.sourceBefore === input.expectedSourceDelta,
-      sourceDeltaStatus: sourceAfter.exists - input.sourceBefore === input.expectedSourceDelta
+      targetDeltaReconciled,
+      sourceDeltaReliable,
+      sourceDeltaStatus: sourceDeltaReliable
         ? "matched"
         : "concurrent_or_external_change",
+      reconciliationStatus: classifyMoveReconciliationStatus(targetDeltaReconciled, sourceDeltaReliable),
     };
     if (isMoveReconciled(latest)) {
       return latest;
@@ -2151,6 +2159,35 @@ async function waitForFreshReconciliation(input: {
 
 function isMoveReconciled(reconciliation: MoveMessagesReconciliation): boolean {
   return reconciliation.targetDelta === reconciliation.expectedTargetDelta;
+}
+
+function classifyMoveReconciliationStatus(
+  targetDeltaReconciled: boolean,
+  sourceDeltaReliable: boolean,
+): MoveMessagesReconciliation["reconciliationStatus"] {
+  if (!targetDeltaReconciled) {
+    return "target_unreconciled";
+  }
+  return sourceDeltaReliable ? "matched" : "target_reconciled_source_unreliable";
+}
+
+function summarizeMoveReconciliationStatus(
+  reconciliations: MoveMessagesReconciliation[] | undefined,
+): ExecuteCleanupResult["reconciliationStatus"] {
+  if (!reconciliations) {
+    return "unavailable";
+  }
+  if (reconciliations.some((reconciliation) => reconciliation.reconciliationStatus === "target_unreconciled")) {
+    return "target_unreconciled";
+  }
+  if (
+    reconciliations.some(
+      (reconciliation) => reconciliation.reconciliationStatus === "target_reconciled_source_unreliable",
+    )
+  ) {
+    return "target_reconciled_source_unreliable";
+  }
+  return "matched";
 }
 
 function assertMoveReconciled(reconciliation: MoveMessagesReconciliation): void {
