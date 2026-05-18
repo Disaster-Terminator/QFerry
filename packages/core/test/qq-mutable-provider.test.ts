@@ -89,6 +89,27 @@ describe("QQ mutable provider", () => {
     ]);
   });
 
+  it("reports partial QQ UID move counts without treating already-moved messages as a hard failure", async () => {
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => ({
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async () => ({ exists: 3, uidValidity: 888n }),
+        fetch: async function* () {},
+        messageMove: async () => ({ uidMap: new Map([[1, 1001], [2, 1002]]) }),
+      }),
+    });
+
+    await expect(provider.moveMessages([
+      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
+      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "2", uidValidity: "888" },
+      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "3", uidValidity: "888" },
+    ], "垃圾箱")).resolves.toEqual({ moved: 2 });
+  });
+
   it("rejects stale refs when UIDVALIDITY no longer matches the opened mailbox", async () => {
     const provider = new QqMutableProvider({
       accountAlias: "masked@qq.com",

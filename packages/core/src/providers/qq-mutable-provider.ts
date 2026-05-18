@@ -69,10 +69,7 @@ export class QqMutableProvider extends QqReadOnlyProvider {
           throw new Error(`QQ IMAP move failed for folder: ${folder}`);
         }
         const resultCount = result.uidMap?.size;
-        if (resultCount !== undefined && resultCount !== folderRefs.length) {
-          throw new Error(`QQ IMAP move count mismatch for folder ${folder}: expected ${folderRefs.length}, got ${resultCount}`);
-        }
-        moved += folderRefs.length;
+        moved += resultCount ?? folderRefs.length;
       }
       return { moved };
     });

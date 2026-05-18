@@ -763,7 +763,6 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const messageRefsToMove = executionLimit === undefined
         ? plan.messageRefs
         : plan.messageRefs.slice(0, executionLimit);
-      const remainingMessages = plan.messageRefs.length - messageRefsToMove.length;
       const moveResult = input.provider.getMailboxSummary
         ? await moveMessagesWithFreshReconciliation(
             input.provider as MailProvider & { getMailboxSummary(folder: string): Promise<MailboxSummary> },
@@ -771,6 +770,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
             targetFolder,
           )
         : await input.provider.moveMessages(messageRefsToMove, targetFolder);
+      const remainingMessages = plan.messageRefs.length - moveResult.moved;
       return {
         result: {
           operationPlanId: plan.operationPlanId,
@@ -784,7 +784,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           remainingMessages,
           ...(executionLimit === undefined
             ? {}
-            : { executionBatch: { requestedMaxMessages: executionLimit, executedMessages: messageRefsToMove.length } }),
+            : { executionBatch: { requestedMaxMessages: executionLimit, executedMessages: moveResult.moved } }),
           reconciliations: moveResult.reconciliations,
         },
       };
@@ -2305,8 +2305,8 @@ async function moveMessagesWithFreshReconciliation(
     const sourceBefore = await provider.getMailboxSummary(sourceFolder);
     const targetBefore = await provider.getMailboxSummary(targetFolder);
     const result = await provider.moveMessages?.(folderRefs, targetFolder);
-    if (!result || result.moved !== folderRefs.length) {
-      throw new Error(`QQ IMAP batch move failed for ${sourceFolder}: expected ${folderRefs.length}, got ${result?.moved ?? 0}`);
+    if (!result || result.moved < 0 || result.moved > folderRefs.length) {
+      throw new Error(`QQ IMAP batch move returned invalid count for ${sourceFolder}: expected 0..${folderRefs.length}, got ${result?.moved ?? 0}`);
     }
     const reconciliation = await waitForFreshReconciliation({
       provider,
@@ -2314,11 +2314,11 @@ async function moveMessagesWithFreshReconciliation(
       targetFolder,
       sourceBefore: sourceBefore.exists,
       targetBefore: targetBefore.exists,
-      expectedSourceDelta: -folderRefs.length,
-      expectedTargetDelta: folderRefs.length,
+      expectedSourceDelta: -result.moved,
+      expectedTargetDelta: result.moved,
     });
     reconciliations.push(reconciliation);
-    moved += folderRefs.length;
+    moved += result.moved;
   }
   return { moved, reconciliations };
 }

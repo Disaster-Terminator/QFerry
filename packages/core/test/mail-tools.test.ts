@@ -2339,6 +2339,78 @@ describe("mail tools", () => {
     ]);
   });
 
+  it("reports partial provider move counts as partially executed after target reconciliation", async () => {
+    const provider = FixtureMailProvider.demo();
+    const counts = new Map([
+      ["INBOX", 3],
+      ["Archive", 0],
+    ]);
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        scanMailboxMetadata: provider.scanMailboxMetadata.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        getMailboxSummary: async (folder) => ({
+          path: folder,
+          exists: counts.get(folder) ?? 0,
+        }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async (refs, targetFolder) => {
+          const actuallyMoved = refs.slice(0, 2);
+          const sourceFolder = refs[0]?.folder ?? "";
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - actuallyMoved.length);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + actuallyMoved.length);
+          return { moved: actuallyMoved.length };
+        },
+      },
+    });
+    const previewPlan = createOperationPlan({
+      runId: "run-execute-partial-provider-count",
+      provider: "fixture",
+      action: "move",
+      messageRefs: [
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "3" },
+      ],
+      target: { folder: "Archive" },
+    });
+    const plan = confirmOperationPlan(previewPlan, previewPlan.operationPlanId);
+
+    const result = await tools.executeCleanup({ plan });
+
+    expect(result.result).toMatchObject({
+      operationPlanId: plan.operationPlanId,
+      status: "partially_executed",
+      action: "move",
+      attemptedMessages: 3,
+      mutationsAttempted: 3,
+      moved: 2,
+      reconciliationStatus: "matched",
+      totalPlanMessages: 3,
+      remainingMessages: 1,
+      reconciliations: [
+        {
+          sourceDelta: -2,
+          targetDelta: 2,
+          expectedSourceDelta: -2,
+          expectedTargetDelta: 2,
+          reconciliationStatus: "matched",
+        },
+      ],
+    });
+  });
+
   it("executes only the requested move chunk and reports remaining messages", async () => {
     const provider = FixtureMailProvider.demo();
     const movedRefs: unknown[] = [];
