@@ -1345,6 +1345,96 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("does not resume a partial move plan when moved refs cannot be identified", async () => {
+    const messages: MessageSummary[] = ["1", "2", "3"].map((uid) => ({
+      ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid },
+      from: "newsletter@example.com",
+      subject: `Promo ${uid}`,
+      date: "2020-01-01T00:00:00.000Z",
+      snippet: "",
+      flags: [],
+    }));
+    let inboxCount = 3;
+    let archiveCount = 0;
+    const server = createQFerryMcpServer({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async (ref) => ({ ...messages[0], ref, bodyText: "" }),
+        getMailboxSummary: async (folder) => ({
+          path: folder,
+          exists: folder === "Archive" ? archiveCount : inboxCount,
+        }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async () => {
+          inboxCount -= 1;
+          archiveCount += 1;
+          return { moved: 1 };
+        },
+      },
+    });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const preview = await client.callTool({
+      name: "plan_cleanup",
+      arguments: {
+        runId: "run-mcp-partial-move-repreview",
+        folder: "INBOX",
+        limit: 10,
+        action: "move",
+        target: { folder: "Archive" },
+        messageRefs: messages.map((message) => message.ref),
+        selectedGroupIds: [],
+      },
+    });
+    const previewContent = preview.structuredContent as { plan?: { operationPlanId?: string } } | undefined;
+    const operationPlanId = String(previewContent?.plan?.operationPlanId);
+    await client.callTool({ name: "confirm_cleanup_plan", arguments: { operationPlanId } });
+
+    const firstExecute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId, maxMessages: 3 },
+    });
+
+    expect(firstExecute.structuredContent).toMatchObject({
+      result: {
+        status: "partially_executed",
+        attemptedMessages: 3,
+        moved: 1,
+        remainingMessages: 2,
+      },
+    });
+
+    const secondExecute = await client.callTool({
+      name: "execute_cleanup",
+      arguments: { operationPlanId, maxMessages: 3 },
+    });
+
+    expect(secondExecute.isError).toBe(true);
+    expect(secondExecute.content).toContainEqual({
+      type: "text",
+      text: `Operation plan already consumed: ${operationPlanId}`,
+    });
+
+    await client.close();
+    await server.close();
+  });
+
   it("serializes concurrent MCP cleanup execution", async () => {
     const messages: MessageSummary[] = [
       {

@@ -551,14 +551,20 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         try {
           const result = await tools.executeCleanup({ plan: stored.plan, maxMessages });
           if (result.result.status === "partially_executed") {
-            planRegistry.set(input.operationPlanId, {
-              plan: {
-                ...stored.plan,
-                messageRefs: stored.plan.messageRefs.slice(result.result.attemptedMessages),
-              },
-              expiresAt: Date.now() + PLAN_TTL_MS,
-              previewSummary: stored.previewSummary,
-            });
+            const moved = result.result.moved ?? 0;
+            if (moved === result.result.attemptedMessages) {
+              planRegistry.set(input.operationPlanId, {
+                plan: {
+                  ...stored.plan,
+                  messageRefs: stored.plan.messageRefs.slice(result.result.attemptedMessages),
+                },
+                expiresAt: Date.now() + PLAN_TTL_MS,
+                previewSummary: stored.previewSummary,
+              });
+            } else {
+              planRegistry.delete(input.operationPlanId);
+              consumedPlanIds.add(input.operationPlanId);
+            }
           } else {
             planRegistry.delete(input.operationPlanId);
             consumedPlanIds.add(input.operationPlanId);
