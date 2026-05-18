@@ -1,6 +1,6 @@
 import type { ClassificationRule } from "./classification.js";
-import { loadClassificationRuleset, type ClassificationGroup, type ClassificationRuleset, type ClassificationRulesetMetadata } from "./ruleset.js";
-import { realpath, writeFile } from "node:fs/promises";
+import { loadClassificationRuleset, parseClassificationRuleset, type ClassificationGroup, type ClassificationRuleset, type ClassificationRulesetMetadata } from "./ruleset.js";
+import { readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 
 export interface RulesetPatchDraft {
@@ -87,7 +87,7 @@ export function formatRulesetPatchChangelog(patch: RulesetPatchDraft): string {
 export async function applyRulesetPatchDraft(
   input: ApplyRulesetPatchDraftInput,
 ): Promise<ApplyRulesetPatchDraftResult> {
-  const existing = await loadClassificationRuleset(input.rulesFile);
+  const existing = await loadPatchableRuleset(input.rulesFile);
   const renderedDraft = renderRulesetPatchDraft(input.patch, existing);
   const changelog = formatRulesetPatchChangelog(input.patch);
 
@@ -105,6 +105,43 @@ export async function applyRulesetPatchDraft(
     skippedDuplicateRuleCount: input.patch.skippedDuplicateRules.length,
     renderedDraft,
     changelog,
+  };
+}
+
+async function loadPatchableRuleset(rulesFile: string): Promise<ClassificationRuleset> {
+  try {
+    return await loadClassificationRuleset(rulesFile);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "QFerry ruleset must contain at least one rule") {
+      throw error;
+    }
+  }
+
+  const raw = JSON.parse(await readFile(rulesFile, "utf8")) as unknown;
+  if (raw === null || Array.isArray(raw) || typeof raw !== "object") {
+    throw new Error("QFerry ruleset must be a JSON object");
+  }
+  const draft = raw as Record<string, unknown>;
+  if (!Array.isArray(draft.rules) || draft.rules.length !== 0 || typeof draft.defaultGroupId !== "string") {
+    throw new Error("QFerry ruleset must contain at least one rule");
+  }
+
+  const validated = parseClassificationRuleset({
+    ...draft,
+    rules: [{
+      id: "qferry-bootstrap-placeholder",
+      groupId: draft.defaultGroupId,
+      match: { subjectIncludes: "__qferry_bootstrap_placeholder__" },
+    }],
+  }, rulesFile);
+
+  return {
+    ...validated,
+    rules: [],
+    metadata: {
+      ...validated.metadata,
+      ruleCount: 0,
+    },
   };
 }
 

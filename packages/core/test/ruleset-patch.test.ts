@@ -132,6 +132,45 @@ describe("ruleset patch rendering", () => {
     expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toHaveLength(2);
   });
 
+  it("bootstraps a local rules file that has groups but no rules", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-bootstrap-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, `${JSON.stringify({
+      version: "empty-local",
+      defaultGroupId: "review",
+      groups: [{ id: "review", label: "Review" }],
+      rules: [],
+    }, null, 2)}\n`, "utf8");
+    const patch = {
+      groupToEnsure: { id: "sender_governance", label: "Sender governance" } as const,
+      candidateRuleCount: 1,
+      rulesToAdd: [
+        { id: "sender-domain-example-com", groupId: "sender_governance", match: { fromDomainIncludes: "example.com" } },
+      ],
+      skippedDuplicateRules: [],
+    };
+
+    const applied = await applyRulesetPatchDraft({ rulesFile, patch, apply: true });
+
+    expect(applied).toMatchObject({
+      applied: true,
+      beforeRuleCount: 0,
+      afterRuleCount: 1,
+      addedRuleCount: 1,
+    });
+    expect(JSON.parse(await readFile(rulesFile, "utf8"))).toMatchObject({
+      version: "empty-local",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "sender_governance", label: "Sender governance" },
+      ],
+      rules: [
+        { id: "sender-domain-example-com", groupId: "sender_governance", match: { fromDomainIncludes: "example.com" } },
+      ],
+    });
+  });
+
   it("rejects applying a ruleset patch to a non-standard file name", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-apply-"));
     const rulesFile = join(dir, "not-rules.txt");
