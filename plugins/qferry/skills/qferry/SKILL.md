@@ -66,7 +66,7 @@ Use `sender_breakdown` before `plan_sender_governance` when a single domain is t
 
 For high-throughput sender or rule cleanup, prefer one window-backed preview over manual offset stitching. Pass enough `pageSize * maxPages` to cover the target mailbox window, then use `plan_sender_governance` with `ruleGroup` to draft reusable classification rules for recurring domains, dry-run the patch with `apply_ruleset_patch`, and use `ruleset_governance_preview` against the ruleset for all matching groups. These tools use the provider bulk metadata window when available, so they should produce UID-ref operation plans for user-defined groups instead of requiring multiple `scanOffset` retries.
 
-Keep `ruleset_governance_preview` compact by default during real mailbox治理. Review `campaignReport`, `groupPlans`, `skippedGroups`, and operation plan ids first; request `includeClassifications: true` only for a bounded debug pass when a rule behaves unexpectedly.
+Keep `ruleset_governance_preview` compact by default during real mailbox治理. Review `campaignReport`, `topUnplannedDomains`, `topUnplannedSenders`, `groupPlans`, `skippedGroups`, and operation plan ids first; request `includeClassifications: true` only for a bounded debug pass when a rule behaves unexpectedly.
 
 Use `classification_sweep` and `classification_map` only before the ruleset is mature enough to govern repeatably. They return compact built-in heuristic signals without creating durable user categories. After a useful pattern is found, express it as a rule group with a target folder and switch to `ruleset_governance_preview`. For real QQ Mail, execute only a confirmed subset after reviewing the rules, folder plan, and move plan.
 

@@ -308,6 +308,12 @@ export interface RulesetGovernanceCampaignReport {
     domain: string;
     messageCount: number;
   }>;
+  topUnplannedSenders: Array<{
+    sender: string;
+    domain: string;
+    messageCount: number;
+    sampleSubjects: string[];
+  }>;
   truncatedGroups: Array<{
     groupId: string;
     label: string;
@@ -1564,6 +1570,7 @@ function buildRulesetGovernanceCampaignReport(input: {
       totalMatchedMessages: plan.totalMatchedMessages,
     }));
   const topUnplannedDomains = summarizeTopUnplannedDomains(input.messages, input.plannedRefKeys);
+  const topUnplannedSenders = summarizeTopUnplannedSenders(input.messages, input.plannedRefKeys);
   const nextAction = input.groupPlans.length === 0
     ? "no_action"
     : unplannedMessages > 0 || input.skippedGroups.some((group) => group.totalMatchedMessages > 0) || truncatedGroups.length > 0
@@ -1578,6 +1585,7 @@ function buildRulesetGovernanceCampaignReport(input: {
     coverageRatio,
     planCount: input.groupPlans.length,
     topUnplannedDomains,
+    topUnplannedSenders,
     truncatedGroups,
     nextAction,
   };
@@ -1597,6 +1605,36 @@ function summarizeTopUnplannedDomains(
     .map(([domain, messageCount]) => ({ domain, messageCount }))
     .sort((left, right) => right.messageCount - left.messageCount || left.domain.localeCompare(right.domain))
     .slice(0, 10);
+}
+
+function summarizeTopUnplannedSenders(
+  messages: MessageSummary[],
+  plannedRefKeys: Set<string>,
+): Array<{ sender: string; domain: string; messageCount: number; sampleSubjects: string[] }> {
+  const bySender = new Map<string, MessageSummary[]>();
+  for (const message of messages) {
+    if (plannedRefKeys.has(messageRefKey(message.ref))) continue;
+    const sender = message.from.trim();
+    if (!sender) continue;
+    bySender.set(sender, [...(bySender.get(sender) ?? []), message]);
+  }
+  return [...bySender.entries()]
+    .map(([sender, senderMessages]) => {
+      const lastDate = senderMessages.map((message) => message.date).sort().at(-1) ?? "";
+      return {
+        sender,
+        domain: extractSenderDomain(sender) ?? "",
+        messageCount: senderMessages.length,
+        sampleSubjects: [...new Set(senderMessages.map((message) => message.subject).filter(Boolean))].slice(0, 3),
+        lastDate,
+      };
+    })
+    .sort((left, right) =>
+      right.messageCount - left.messageCount
+      || right.lastDate.localeCompare(left.lastDate)
+      || left.sender.localeCompare(right.sender))
+    .slice(0, 10)
+    .map(({ lastDate: _lastDate, ...candidate }) => candidate);
 }
 
 function buildPriorityBuckets(

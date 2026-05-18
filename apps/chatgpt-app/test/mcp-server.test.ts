@@ -301,6 +301,12 @@ describe("QFerry ChatGPT App MCP server", () => {
           planCount: number;
           truncatedGroups: Array<{ groupId: string; selectedMessageRefs: number; totalMatchedMessages: number }>;
           topUnplannedDomains: Array<{ domain: string; messageCount: number }>;
+          topUnplannedSenders: Array<{
+            sender: string;
+            domain: string;
+            messageCount: number;
+            sampleSubjects: string[];
+          }>;
           nextAction: string;
         };
         groupPlans?: Array<{ groupId: string; operationPlanId: string }>;
@@ -317,6 +323,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       planCount: 2,
       truncatedGroups: [],
       topUnplannedDomains: [],
+      topUnplannedSenders: [],
       nextAction: "confirm_plans",
     });
     expect((result.structuredContent as { classifications?: unknown[] }).classifications).toBeUndefined();
@@ -481,6 +488,20 @@ describe("QFerry ChatGPT App MCP server", () => {
           topUnplannedDomains: [
             { domain: "alpha.example", messageCount: 1 },
             { domain: "other.example", messageCount: 1 },
+          ],
+          topUnplannedSenders: [
+            {
+              sender: "Other <notice@other.example>",
+              domain: "other.example",
+              messageCount: 1,
+              sampleSubjects: ["Other"],
+            },
+            {
+              sender: "Alpha Two <two@alpha.example>",
+              domain: "alpha.example",
+              messageCount: 1,
+              sampleSubjects: ["Alpha two"],
+            },
           ],
           truncatedGroups: [
             {

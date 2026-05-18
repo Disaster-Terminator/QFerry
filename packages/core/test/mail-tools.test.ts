@@ -2988,6 +2988,14 @@ describe("mail tools", () => {
       topUnplannedDomains: [
         { domain: "example.net", messageCount: 1 },
       ],
+      topUnplannedSenders: [
+        {
+          sender: "Friend <friend@example.net>",
+          domain: "example.net",
+          messageCount: 1,
+          sampleSubjects: ["Manual review"],
+        },
+      ],
       nextAction: "review_rules",
     });
     expect(result.preview.groupPlans).toEqual([
