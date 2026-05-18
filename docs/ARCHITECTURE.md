@@ -81,6 +81,7 @@ Ruleset governance previews include a compact campaign report:
 - `unplannedMessages`: messages left outside the generated plans.
 - `coverageBasis`: always `scanned_window`; these metrics describe only the bounded metadata window inspected by this preview, not the whole mailbox unless the preview window covered the whole mailbox.
 - `coverageRatio`: `plannedMessages / scannedMessages`, rounded for human review.
+- `topUnplannedDomains`: top sender domains among messages not selected into any plan, capped for compact agent review.
 - `truncatedGroups`: groups where the rule matched more messages than `maxMessageRefsPerGroup` allowed into the plan.
 - `nextAction`: `confirm_plans` when the plan set covers the window cleanly, `review_rules` when more rules or a wider preview are needed, and `no_action` when no executable plan exists.
 

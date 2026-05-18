@@ -304,6 +304,10 @@ export interface RulesetGovernanceCampaignReport {
   coverageBasis: "scanned_window";
   coverageRatio: number;
   planCount: number;
+  topUnplannedDomains: Array<{
+    domain: string;
+    messageCount: number;
+  }>;
   truncatedGroups: Array<{
     groupId: string;
     label: string;
@@ -1383,6 +1387,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const plans: OperationPlan[] = [];
       const groupPlans: RulesetGovernanceGroupPlan[] = [];
       const skippedGroups: RulesetGovernanceSkippedGroup[] = [];
+      const plannedRefKeys = new Set<string>();
 
       for (const groupId of selectedGroupIds) {
         const group = groupsById.get(groupId);
@@ -1408,6 +1413,9 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         const messageRefs = groupClassifications
           .map((classification) => classification.messageRef)
           .slice(0, maxMessageRefsPerGroup);
+        for (const messageRef of messageRefs) {
+          plannedRefKeys.add(messageRefKey(messageRef));
+        }
         const plan = createOperationPlan({
           runId: `${rulesetInput.runId}-${slugifyRuleId(groupId)}`,
           provider,
@@ -1446,9 +1454,10 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           groupPlans,
           skippedGroups,
           campaignReport: buildRulesetGovernanceCampaignReport({
-            scannedMessages: messages.length,
+            messages,
             groupPlans,
             skippedGroups,
+            plannedRefKeys,
           }),
           ruleset: resolvedRules.ruleset,
           mutationsAttempted: 0,
@@ -1535,15 +1544,17 @@ function countGroups(classifications: MessageClassification[]): Record<string, n
 }
 
 function buildRulesetGovernanceCampaignReport(input: {
-  scannedMessages: number;
+  messages: MessageSummary[];
   groupPlans: RulesetGovernanceGroupPlan[];
   skippedGroups: RulesetGovernanceSkippedGroup[];
+  plannedRefKeys: Set<string>;
 }): RulesetGovernanceCampaignReport {
   const plannedMessages = input.groupPlans.reduce((sum, plan) => sum + plan.selectedMessageRefs, 0);
-  const unplannedMessages = Math.max(input.scannedMessages - plannedMessages, 0);
-  const coverageRatio = input.scannedMessages === 0
+  const scannedMessages = input.messages.length;
+  const unplannedMessages = Math.max(scannedMessages - plannedMessages, 0);
+  const coverageRatio = scannedMessages === 0
     ? 0
-    : Number((plannedMessages / input.scannedMessages).toFixed(3));
+    : Number((plannedMessages / scannedMessages).toFixed(3));
   const truncatedGroups = input.groupPlans
     .filter((plan) => plan.selectedMessageRefs < plan.totalMatchedMessages)
     .map((plan) => ({
@@ -1552,6 +1563,7 @@ function buildRulesetGovernanceCampaignReport(input: {
       selectedMessageRefs: plan.selectedMessageRefs,
       totalMatchedMessages: plan.totalMatchedMessages,
     }));
+  const topUnplannedDomains = summarizeTopUnplannedDomains(input.messages, input.plannedRefKeys);
   const nextAction = input.groupPlans.length === 0
     ? "no_action"
     : unplannedMessages > 0 || input.skippedGroups.some((group) => group.totalMatchedMessages > 0) || truncatedGroups.length > 0
@@ -1559,15 +1571,32 @@ function buildRulesetGovernanceCampaignReport(input: {
       : "confirm_plans";
 
   return {
-    scannedMessages: input.scannedMessages,
+    scannedMessages,
     plannedMessages,
     unplannedMessages,
     coverageBasis: "scanned_window",
     coverageRatio,
     planCount: input.groupPlans.length,
+    topUnplannedDomains,
     truncatedGroups,
     nextAction,
   };
+}
+
+function summarizeTopUnplannedDomains(
+  messages: MessageSummary[],
+  plannedRefKeys: Set<string>,
+): Array<{ domain: string; messageCount: number }> {
+  const counts = new Map<string, number>();
+  for (const message of messages) {
+    if (plannedRefKeys.has(messageRefKey(message.ref))) continue;
+    const domain = extractSenderDomain(message.from) || "<unknown>";
+    counts.set(domain, (counts.get(domain) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([domain, messageCount]) => ({ domain, messageCount }))
+    .sort((left, right) => right.messageCount - left.messageCount || left.domain.localeCompare(right.domain))
+    .slice(0, 10);
 }
 
 function buildPriorityBuckets(

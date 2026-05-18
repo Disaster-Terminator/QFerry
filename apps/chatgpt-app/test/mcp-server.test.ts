@@ -300,6 +300,7 @@ describe("QFerry ChatGPT App MCP server", () => {
           coverageRatio: number;
           planCount: number;
           truncatedGroups: Array<{ groupId: string; selectedMessageRefs: number; totalMatchedMessages: number }>;
+          topUnplannedDomains: Array<{ domain: string; messageCount: number }>;
           nextAction: string;
         };
         groupPlans?: Array<{ groupId: string; operationPlanId: string }>;
@@ -315,6 +316,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       coverageRatio: 1,
       planCount: 2,
       truncatedGroups: [],
+      topUnplannedDomains: [],
       nextAction: "confirm_plans",
     });
     expect(JSON.stringify(result.structuredContent)).not.toContain("legacy_discovery_helper");
@@ -410,6 +412,10 @@ describe("QFerry ChatGPT App MCP server", () => {
           coverageRatio: 0.333,
           planCount: 1,
           nextAction: "review_rules",
+          topUnplannedDomains: [
+            { domain: "alpha.example", messageCount: 1 },
+            { domain: "other.example", messageCount: 1 },
+          ],
           truncatedGroups: [
             {
               groupId: "alpha",

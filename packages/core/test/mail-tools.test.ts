@@ -2985,6 +2985,9 @@ describe("mail tools", () => {
       coverageRatio: 0.75,
       planCount: 2,
       truncatedGroups: [],
+      topUnplannedDomains: [
+        { domain: "example.net", messageCount: 1 },
+      ],
       nextAction: "review_rules",
     });
     expect(result.preview.groupPlans).toEqual([
