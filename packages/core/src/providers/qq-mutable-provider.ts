@@ -53,6 +53,7 @@ export class QqMutableProvider extends QqReadOnlyProvider {
       }
 
       let moved = 0;
+      let movedCountStatus: MoveMessagesResult["movedCountStatus"] = "exact";
       for (const [folder, folderRefs] of groupRefsByFolder(refs)) {
         if (folder === targetFolder) {
           throw new Error(`Move target folder must differ from source folder: ${folder}`);
@@ -66,12 +67,15 @@ export class QqMutableProvider extends QqReadOnlyProvider {
         const uids = folderRefs.map((ref) => parseUid(ref.uid));
         const result = await client.messageMove(uids, targetFolder, { uid: true });
         if (result === false) {
-          throw new Error(`QQ IMAP move failed for folder: ${folder}`);
+          movedCountStatus = "unknown";
+          continue;
         }
         const resultCount = result.uidMap?.size;
         moved += resultCount ?? folderRefs.length;
       }
-      return { moved };
+      return movedCountStatus === "unknown"
+        ? { moved, movedCountStatus }
+        : { moved };
     });
   }
 }

@@ -110,6 +110,26 @@ describe("QQ mutable provider", () => {
     ], "垃圾箱")).resolves.toEqual({ moved: 2 });
   });
 
+  it("reports unknown QQ move counts when IMAP returns false", async () => {
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => ({
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async () => ({ exists: 2, uidValidity: 888n }),
+        fetch: async function* () {},
+        messageMove: async () => false,
+      }),
+    });
+
+    await expect(provider.moveMessages([
+      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
+      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "2", uidValidity: "888" },
+    ], "垃圾箱")).resolves.toEqual({ moved: 0, movedCountStatus: "unknown" });
+  });
+
   it("rejects stale refs when UIDVALIDITY no longer matches the opened mailbox", async () => {
     const provider = new QqMutableProvider({
       accountAlias: "masked@qq.com",

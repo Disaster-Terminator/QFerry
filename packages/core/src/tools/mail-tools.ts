@@ -71,7 +71,7 @@ export interface ExecuteCleanupResult {
   attemptedMessages: number;
   mutationsAttempted: number;
   moved?: number;
-  reconciliationStatus?: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "unavailable";
+  reconciliationStatus?: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "provider_result_unreliable" | "unavailable";
   totalPlanMessages?: number;
   remainingMessages?: number;
   executionBatch?: {
@@ -87,12 +87,12 @@ export interface ExecuteCleanupResult {
     targetBefore: number;
     targetAfter: number;
     targetDelta: number;
-    expectedSourceDelta: number;
-    expectedTargetDelta: number;
+    expectedSourceDelta?: number;
+    expectedTargetDelta?: number;
     targetDeltaReconciled: boolean;
     sourceDeltaReliable: boolean;
     sourceDeltaStatus: "matched" | "concurrent_or_external_change";
-    reconciliationStatus: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled";
+    reconciliationStatus: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "provider_result_unreliable";
   }>;
   createdFolder?: string;
 }
@@ -2314,11 +2314,12 @@ async function moveMessagesWithFreshReconciliation(
       targetFolder,
       sourceBefore: sourceBefore.exists,
       targetBefore: targetBefore.exists,
-      expectedSourceDelta: -result.moved,
-      expectedTargetDelta: result.moved,
+      expectedSourceDelta: result.movedCountStatus === "unknown" ? undefined : -result.moved,
+      expectedTargetDelta: result.movedCountStatus === "unknown" ? undefined : result.moved,
+      maxTargetDelta: folderRefs.length,
     });
     reconciliations.push(reconciliation);
-    moved += result.moved;
+    moved += result.movedCountStatus === "unknown" ? reconciliation.targetDelta : result.moved;
   }
   return { moved, reconciliations };
 }
@@ -2339,8 +2340,9 @@ async function waitForFreshReconciliation(input: {
   targetFolder: string;
   sourceBefore: number;
   targetBefore: number;
-  expectedSourceDelta: number;
-  expectedTargetDelta: number;
+  expectedSourceDelta?: number;
+  expectedTargetDelta?: number;
+  maxTargetDelta: number;
 }): Promise<MoveMessagesReconciliation> {
   let latest: MoveMessagesReconciliation | undefined;
   for (let attempt = 0; attempt < MOVE_RECONCILE_ATTEMPTS; attempt += 1) {
@@ -2348,8 +2350,13 @@ async function waitForFreshReconciliation(input: {
     const targetAfter = await input.provider.getMailboxSummary(input.targetFolder);
     const targetDelta = targetAfter.exists - input.targetBefore;
     const sourceDelta = sourceAfter.exists - input.sourceBefore;
-    const targetDeltaReconciled = targetDelta === input.expectedTargetDelta;
-    const sourceDeltaReliable = sourceDelta === input.expectedSourceDelta;
+    const providerMoveCountKnown = input.expectedTargetDelta !== undefined;
+    const targetDeltaReconciled = providerMoveCountKnown
+      ? targetDelta === input.expectedTargetDelta
+      : targetDelta >= 0 && targetDelta <= input.maxTargetDelta;
+    const sourceDeltaReliable = providerMoveCountKnown
+      ? sourceDelta === input.expectedSourceDelta
+      : sourceDelta === -targetDelta;
     latest = {
       sourceFolder: input.sourceFolder,
       targetFolder: input.targetFolder,
@@ -2366,7 +2373,9 @@ async function waitForFreshReconciliation(input: {
       sourceDeltaStatus: sourceDeltaReliable
         ? "matched"
         : "concurrent_or_external_change",
-      reconciliationStatus: classifyMoveReconciliationStatus(targetDeltaReconciled, sourceDeltaReliable),
+      reconciliationStatus: providerMoveCountKnown
+        ? classifyMoveReconciliationStatus(targetDeltaReconciled, sourceDeltaReliable)
+        : classifyUnknownMoveReconciliationStatus(targetDeltaReconciled),
     };
     if (isMoveReconciled(latest)) {
       return latest;
@@ -2383,7 +2392,7 @@ async function waitForFreshReconciliation(input: {
 }
 
 function isMoveReconciled(reconciliation: MoveMessagesReconciliation): boolean {
-  return reconciliation.targetDelta === reconciliation.expectedTargetDelta;
+  return reconciliation.targetDeltaReconciled;
 }
 
 function classifyMoveReconciliationStatus(
@@ -2394,6 +2403,12 @@ function classifyMoveReconciliationStatus(
     return "target_unreconciled";
   }
   return sourceDeltaReliable ? "matched" : "target_reconciled_source_unreliable";
+}
+
+function classifyUnknownMoveReconciliationStatus(
+  targetDeltaReconciled: boolean,
+): MoveMessagesReconciliation["reconciliationStatus"] {
+  return targetDeltaReconciled ? "provider_result_unreliable" : "target_unreconciled";
 }
 
 function summarizeMoveReconciliationStatus(
@@ -2411,6 +2426,13 @@ function summarizeMoveReconciliationStatus(
     )
   ) {
     return "target_reconciled_source_unreliable";
+  }
+  if (
+    reconciliations.some(
+      (reconciliation) => reconciliation.reconciliationStatus === "provider_result_unreliable",
+    )
+  ) {
+    return "provider_result_unreliable";
   }
   return "matched";
 }

@@ -80,15 +80,16 @@ export interface MoveMessagesReconciliation {
   targetBefore: number;
   targetAfter: number;
   targetDelta: number;
-  expectedSourceDelta: number;
-  expectedTargetDelta: number;
+  expectedSourceDelta?: number;
+  expectedTargetDelta?: number;
   targetDeltaReconciled: boolean;
   sourceDeltaReliable: boolean;
   sourceDeltaStatus: "matched" | "concurrent_or_external_change";
-  reconciliationStatus: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled";
+  reconciliationStatus: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "provider_result_unreliable";
 }
 
 export interface MoveMessagesResult {
   moved: number;
+  movedCountStatus?: "exact" | "unknown";
   reconciliations?: MoveMessagesReconciliation[];
 }
