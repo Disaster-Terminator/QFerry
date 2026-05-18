@@ -669,7 +669,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async classifyMessages(classifyInput) {
-      const resolvedRules = await resolveRules(classifyInput);
+      const resolvedRules = await resolveRules(withRuntimeRulesFile(classifyInput, input.runtimeConfig));
       const messages = await input.provider.scanMailboxMetadata({
         folder: classifyInput.folder,
         limit: classifyInput.limit,
@@ -685,7 +685,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async triageInbox(triageInput) {
-      const resolvedRules = await resolveRules(triageInput);
+      const resolvedRules = await resolveRules(withRuntimeRulesFile(triageInput, input.runtimeConfig));
       const messages = await input.provider.scanMailboxMetadata({
         folder: triageInput.folder,
         limit: triageInput.limit,
@@ -715,10 +715,10 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async groupSpamCandidates(candidateInput) {
-      const resolvedRules = await resolveRules({
+      const resolvedRules = await resolveRules(withRuntimeRulesFile({
         ...candidateInput,
         defaultGroupId: "review",
-      });
+      }, input.runtimeConfig));
       const messages = await input.provider.scanMailboxMetadata({
         folder: candidateInput.folder,
         limit: candidateInput.limit,
@@ -883,10 +883,10 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         };
       }
 
-      const resolvedRules = await resolveRules({
+      const resolvedRules = await resolveRules(withRuntimeRulesFile({
         ...planInput,
         defaultGroupId: planInput.defaultGroupId ?? "review",
-      });
+      }, input.runtimeConfig));
       const messages = await input.provider.scanMailboxMetadata({
         folder: planInput.folder,
         limit: planInput.limit,
@@ -922,10 +922,10 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async previewCleanupBatch(batchInput) {
-      const resolvedRules = await resolveRules({
+      const resolvedRules = await resolveRules(withRuntimeRulesFile({
         ...batchInput,
         defaultGroupId: batchInput.defaultGroupId ?? "review",
-      });
+      }, input.runtimeConfig));
       const pageSize = Math.max(batchInput.pageSize, 0);
       const maxPages = Math.max(batchInput.maxPages, 0);
       const maxMessageRefs = Math.max(batchInput.maxMessageRefs, 0);
@@ -1363,10 +1363,10 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async rulesetGovernancePreview(rulesetInput) {
-      const resolvedRules = await resolveRules({
+      const resolvedRules = await resolveRules(withRuntimeRulesFile({
         ...rulesetInput,
         defaultGroupId: rulesetInput.defaultGroupId,
-      });
+      }, input.runtimeConfig));
       const pageSize = Math.max(rulesetInput.pageSize, 0);
       const maxPages = Math.max(rulesetInput.maxPages, 0);
       const maxMessageRefsPerGroup = Math.max(rulesetInput.maxMessageRefsPerGroup, 0);
@@ -1483,6 +1483,17 @@ function redactRuntimeConfig(config: QFerryRuntimeConfig): QFerryRuntimeConfig {
   return {
     ...config,
     qqmail,
+  };
+}
+
+function withRuntimeRulesFile<T extends { rules?: ClassificationRule[]; rulesFile?: string }>(
+  input: T,
+  runtimeConfig: QFerryRuntimeConfig | undefined,
+): T {
+  if (input.rulesFile || input.rules?.length || !runtimeConfig?.rulesFile) return input;
+  return {
+    ...input,
+    rulesFile: runtimeConfig.rulesFile,
   };
 }
 

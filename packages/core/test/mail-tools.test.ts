@@ -467,6 +467,50 @@ describe("mail tools", () => {
     });
   });
 
+  it("uses the runtime rules file when rules are not passed explicitly", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-default-rules-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "default-rules",
+      defaultGroupId: "review",
+      groups: [
+        { id: "archive", label: "Archive" },
+        { id: "review", label: "Review" },
+      ],
+      rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+    }), "utf8");
+    const tools = createMailTools({
+      provider: FixtureMailProvider.demo(),
+      runtimeConfig: {
+        provider: "fixture",
+        accountAlias: "demo",
+        configSource: "test",
+        mutationAllowed: false,
+        mutationCapable: false,
+        mutationOperationallyReady: false,
+        mutationRequiresConfirmation: false,
+        authConfigured: false,
+        providerReady: true,
+        metadataSampleLimit: 10,
+        statusWarnings: [],
+        rulesFile,
+      },
+    });
+
+    const result = await tools.classifyMessages({
+      folder: "INBOX",
+      limit: 10,
+    });
+
+    expect(result.ruleset?.source).toBe(rulesFile);
+    expect(result.classifications).toContainEqual({
+      messageRef: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+      groupId: "archive",
+      matchedRuleId: "newsletter",
+      explanation: "from includes newsletter@",
+    });
+  });
+
   it("creates preview cleanup plans and does not mutate", async () => {
     const tools = createMailTools({ provider: FixtureMailProvider.demo() });
 

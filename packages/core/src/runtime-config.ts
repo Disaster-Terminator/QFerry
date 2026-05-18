@@ -17,6 +17,7 @@ export interface QFerryRuntimeConfig {
   providerReady: boolean;
   metadataSampleLimit: number;
   statusWarnings: string[];
+  rulesFile?: string;
   qqmail?: {
     email?: string;
     authCodePresent: boolean;
@@ -37,6 +38,7 @@ export interface QFerryRuntimeSecrets {
 
 interface LocalConfigFile {
   provider?: string;
+  rulesFile?: string;
   qqmail?: {
     email?: string;
     imapHost?: string;
@@ -91,6 +93,7 @@ export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInpu
       ?? localConfig.config?.qqmail?.metadataSampleLimit
       ?? 1,
   );
+  const rulesFile = normalizeOptional(env.QFERRY_RULES_FILE) ?? normalizeOptional(localConfig.config?.rulesFile);
   const statusWarnings: string[] = [];
   if (!email) statusWarnings.push("QQMAIL_EMAIL is required for qqmail provider");
   if (!authCode) statusWarnings.push("QQMAIL_KEY is required for qqmail provider");
@@ -108,6 +111,7 @@ export async function loadQFerryRuntimeConfig(input: LoadQFerryRuntimeConfigInpu
     providerReady: authConfigured,
     metadataSampleLimit,
     statusWarnings,
+    ...(rulesFile ? { rulesFile } : {}),
     qqmail: {
       email,
       authCodePresent: Boolean(authCode),
@@ -219,6 +223,7 @@ function buildRuntimeConfig(
       ?? localConfig.config?.qqmail?.metadataSampleLimit
       ?? 1,
   );
+  const rulesFile = normalizeOptional(env.QFERRY_RULES_FILE) ?? normalizeOptional(localConfig.config?.rulesFile);
   const statusWarnings: string[] = [];
   if (!email) statusWarnings.push("QQMAIL_EMAIL is required for qqmail provider");
   if (!authCode) statusWarnings.push("QQMAIL_KEY is required for qqmail provider");
@@ -236,6 +241,7 @@ function buildRuntimeConfig(
     providerReady: authConfigured,
     metadataSampleLimit,
     statusWarnings,
+    ...(rulesFile ? { rulesFile } : {}),
     qqmail: {
       email,
       authCodePresent: Boolean(authCode),

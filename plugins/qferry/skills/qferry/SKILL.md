@@ -15,7 +15,7 @@ For real mailbox work, call tools in this order:
 2. `list_mailboxes` to discover available folders.
 3. `get_mailbox_summary` to get read-only folder counts before scanning.
 4. `search` with structured filters when the task can be narrowed by sender, domain, subject, snippet, flag, date, order, or offset.
-5. Build or reuse a persisted `qferry.rules.json` ruleset when the work is repeatable. Groups should be user-defined and may bind `target.folder`; do not invent hardcoded product categories as the durable model.
+5. Build or reuse a persisted `qferry.rules.json` ruleset when the work is repeatable. Groups should be user-defined and may bind `target.folder`; do not invent hardcoded product categories as the durable model. If `get_status` reports `rulesFile`, governance tools can use it by default when no inline `rules` or explicit `rulesFile` is passed.
 6. `ruleset_governance_preview` for high-throughput Gmail-like governance. It applies the ruleset, groups matching metadata by user-defined group, and creates preview operation plans per target group. It defaults to compact output; pass `includeClassifications: true` only when debugging individual rule matches.
 7. `classification_sweep` and `classification_map` only for exploratory built-in heuristic discovery when the ruleset is not yet clear. Treat their `workflowWarning.code: "legacy_discovery_helper"` as a prompt to convert discoveries into rules.
 8. `ensure_classification_folder` after a user group or target folder is selected and before planning moves. Pass a short user-facing folder name such as `广告营销` or `开发社区`; QFerry maps it to the QQ IMAP path such as `其他文件夹/广告营销` and returns a preview `create_folder` plan if the folder is missing.
@@ -55,6 +55,8 @@ Allowed by default:
 ## Rules
 
 Prefer a persisted `qferry.rules.json` rules file when the user wants repeatable classification. The ruleset includes `version`, `defaultGroupId`, `groups`, and ordered `rules`. A group may include `target.folder` to bind a user-defined classification group to a QQ folder. When `preview_cleanup_batch` selects exactly one group with a configured target and no explicit `target` is provided, QFerry uses that group target and records `selectedGroupTargets` in audit output.
+
+QFerry can discover a default persisted ruleset from `QFERRY_RULES_FILE` or local `config.json` `rulesFile`. Explicit tool `rulesFile` and inline `rules` still take precedence. Use the default ruleset for repeatable mailbox governance so the agent does not have to restate the full rules every turn.
 
 Rules can match `fromIncludes`, `fromDomainIncludes`, `subjectIncludes`, `snippetIncludes`, `folderEquals`, and `hasFlag` without reading message bodies.
 

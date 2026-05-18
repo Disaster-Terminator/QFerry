@@ -96,11 +96,13 @@ describe("runtime config", () => {
         QQMAIL_EMAIL: "25abc@qq.com",
         QQMAIL_KEY: "secret-auth-code",
         QQMAIL_CLASSIFICATION_PARENT_PATH: "User Folders",
+        QFERRY_RULES_FILE: "G:\\local\\qferry.rules.json",
       },
       readFile: async () => undefined,
     });
 
     expect(config.qqmail?.classificationParentPath).toBe("User Folders");
+    expect(config.rulesFile).toBe("G:\\local\\qferry.rules.json");
     expect(JSON.stringify(config)).not.toContain("secret-auth-code");
   });
 
@@ -131,6 +133,7 @@ describe("runtime config", () => {
             metadataSampleLimit: 7,
             classificationParentPath: "Local Folders",
           },
+          rulesFile: "G:\\local\\qferry.rules.json",
         });
       },
     });
@@ -140,6 +143,7 @@ describe("runtime config", () => {
     expect(config.configSource).toBe("file:G:\\local\\qferry-config.json");
     expect(config.metadataSampleLimit).toBe(7);
     expect(config.qqmail?.classificationParentPath).toBe("Local Folders");
+    expect(config.rulesFile).toBe("G:\\local\\qferry.rules.json");
     expect(config.authConfigured).toBe(false);
     expect(config.providerReady).toBe(false);
     expect(config.mutationOperationallyReady).toBe(false);
