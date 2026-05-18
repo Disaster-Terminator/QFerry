@@ -319,11 +319,77 @@ describe("QFerry ChatGPT App MCP server", () => {
       topUnplannedDomains: [],
       nextAction: "confirm_plans",
     });
+    expect((result.structuredContent as { classifications?: unknown[] }).classifications).toBeUndefined();
     expect(JSON.stringify(result.structuredContent)).not.toContain("legacy_discovery_helper");
     const summary = await readFile(String(content.audit?.summaryPath), "utf8");
     expect(summary).toContain("- operationPlanIds: [");
     expect(summary).toContain("- campaignReport: {");
     expect(summary).toContain("- groupPlans: [");
+    expect(summary).not.toContain("classifications");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("returns ruleset governance classifications only when explicitly requested", async () => {
+    const rulesFile = join(await mkdtemp(join(tmpdir(), "qferry-mcp-ruleset-verbose-")), "rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "1",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "alpha", label: "Alpha", target: { folder: "Folders/Alpha" } },
+      ],
+      rules: [
+        { id: "alpha-domain", groupId: "alpha", match: { fromDomainIncludes: "alpha.example" } },
+      ],
+    }), "utf8");
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Alpha One <one@alpha.example>",
+        subject: "Alpha one",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const server = createQFerryMcpServer({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        scanMailboxMetadataWindow: async () => ({
+          messages,
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "INBOX", exists: messages.length },
+        }),
+        fetchMessage: async (ref) => ({ ...messages[0], ref, bodyText: "" }),
+      },
+    });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "ruleset_governance_preview",
+      arguments: {
+        runId: "mcp-ruleset-governance-verbose",
+        folder: "INBOX",
+        pageSize: 50,
+        maxPages: 1,
+        maxMessageRefsPerGroup: 50,
+        action: "move",
+        rulesFile,
+        selectedGroupIds: ["alpha"],
+        includeClassifications: true,
+      },
+    });
+
+    expect((result.structuredContent as { classifications?: unknown[] }).classifications).toHaveLength(1);
 
     await client.close();
     await server.close();

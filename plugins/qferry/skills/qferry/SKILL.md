@@ -16,7 +16,7 @@ For real mailbox work, call tools in this order:
 3. `get_mailbox_summary` to get read-only folder counts before scanning.
 4. `search` with structured filters when the task can be narrowed by sender, domain, subject, snippet, flag, date, order, or offset.
 5. Build or reuse a persisted `qferry.rules.json` ruleset when the work is repeatable. Groups should be user-defined and may bind `target.folder`; do not invent hardcoded product categories as the durable model.
-6. `ruleset_governance_preview` for high-throughput Gmail-like governance. It applies the ruleset, groups matching metadata by user-defined group, and creates preview operation plans per target group.
+6. `ruleset_governance_preview` for high-throughput Gmail-like governance. It applies the ruleset, groups matching metadata by user-defined group, and creates preview operation plans per target group. It defaults to compact output; pass `includeClassifications: true` only when debugging individual rule matches.
 7. `classification_sweep` and `classification_map` only for exploratory built-in heuristic discovery when the ruleset is not yet clear. Treat their `workflowWarning.code: "legacy_discovery_helper"` as a prompt to convert discoveries into rules.
 8. `ensure_classification_folder` after a user group or target folder is selected and before planning moves. Pass a short user-facing folder name such as `广告营销` or `开发社区`; QFerry maps it to the QQ IMAP path such as `其他文件夹/广告营销` and returns a preview `create_folder` plan if the folder is missing.
 9. `bulk_governance_preview` only for legacy built-in category preview. Prefer `ruleset_governance_preview` for repeatable governance.
@@ -65,6 +65,8 @@ Use `plan_sender_governance` when the user wants Gmail-like sender/domain cleanu
 Use `sender_breakdown` before `plan_sender_governance` when a single domain is too broad. Pass `fromDomainIncludes` such as `qq.com` and a target `ruleGroup`; review the returned concrete `senderCandidates`, `sampleSubjects`, and `suggestedRule.match.fromIncludes`. Then pass only the approved sender strings to `plan_sender_governance.selectedFromIncludes` for preview and execution. `sender_breakdown` is read-only and does not create an operation plan.
 
 For high-throughput sender or rule cleanup, prefer one window-backed preview over manual offset stitching. Pass enough `pageSize * maxPages` to cover the target mailbox window, then use `plan_sender_governance` with `ruleGroup` to draft reusable classification rules for recurring domains, dry-run the patch with `apply_ruleset_patch`, and use `ruleset_governance_preview` against the ruleset for all matching groups. These tools use the provider bulk metadata window when available, so they should produce UID-ref operation plans for user-defined groups instead of requiring multiple `scanOffset` retries.
+
+Keep `ruleset_governance_preview` compact by default during real mailbox治理. Review `campaignReport`, `groupPlans`, `skippedGroups`, and operation plan ids first; request `includeClassifications: true` only for a bounded debug pass when a rule behaves unexpectedly.
 
 Use `classification_sweep` and `classification_map` only before the ruleset is mature enough to govern repeatably. They return compact built-in heuristic signals without creating durable user categories. After a useful pattern is found, express it as a rule group with a target folder and switch to `ruleset_governance_preview`. For real QQ Mail, execute only a confirmed subset after reviewing the rules, folder plan, and move plan.
 

@@ -134,7 +134,7 @@ examples/qferry.rules.json
 
 真实 QQ read-only e2e 调用该工具时必须保持 `mutationsAttempted: 0`，并确认输出里没有 `plan` 或 `operationPlanId`。后续只有在用户选定分类桶后，才先进入 `ensure_classification_folder` 预览目标分类文件夹，再进入 `bulk_governance_preview` 或更窄的规则化 preview plan。用户界面和 summary 使用短文件夹名，例如 `广告营销`、`开发社区`；IMAP 执行路径可以是 `其他文件夹/广告营销`。
 
-`ruleset_governance_preview` 用于规则化批量整理。它返回 `preview.groupPlans`、`plans[]`、`operationPlanIds[]`、`skippedGroups[]` 和 `mutationsAttempted: 0`。当一个 ruleset 中多个 group 带有目标文件夹时，验收应确认每个 group 生成独立 preview plan，summary 中保留 `groupPlans` 和 `operationPlanIds`。
+`ruleset_governance_preview` 用于规则化批量整理。它默认返回 compact 输出：`preview.groupPlans`、`preview.campaignReport`、`plans[]`、`operationPlanIds[]`、`skippedGroups[]` 和 `mutationsAttempted: 0`；全量 `classifications` 只应在传入 `includeClassifications: true` 的小范围调试时返回。当一个 ruleset 中多个 group 带有目标文件夹时，验收应确认每个 group 生成独立 preview plan，summary 中保留 `groupPlans` 和 `operationPlanIds`。
 
 `preview_cleanup_batch` 是 Codex 插件侧的规则化批量整理入口。它跨页扫描 bounded metadata，应用 `rules` 或 `rulesFile`，按 `selectedGroupIds` 选出候选邮件，并生成 `status: "preview"` 的 operation plan。
 

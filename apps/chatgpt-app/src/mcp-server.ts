@@ -476,12 +476,14 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         selectedGroupIds: z.array(z.string()).optional(),
         scanOffset: z.number().int().min(0).optional(),
         order: z.enum(["newest", "oldest"]).optional(),
+        includeClassifications: z.boolean().optional(),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => {
       const result = registerOperationPlans(await tools.rulesetGovernancePreview(input), planRegistry);
-      return toToolResult(await withMcpAudit("ruleset_governance_preview", input.runId, input, result));
+      const response = compactRulesetGovernancePreview(result, input.includeClassifications === true);
+      return toToolResult(await withMcpAudit("ruleset_governance_preview", input.runId, input, response));
     },
   );
 
@@ -626,6 +628,17 @@ function registerOperationPlans<T extends { plan?: OperationPlan; plans?: Operat
     });
   }
   return result;
+}
+
+function compactRulesetGovernancePreview<T extends { classifications?: unknown[] }>(
+  result: T,
+  includeClassifications: boolean,
+): T | Omit<T, "classifications"> {
+  if (includeClassifications) {
+    return result;
+  }
+  const { classifications: _classifications, ...compactResult } = result;
+  return compactResult;
 }
 
 function getStoredPlan(
