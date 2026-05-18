@@ -2977,6 +2977,16 @@ describe("mail tools", () => {
       group_beta: 1,
       review: 1,
     });
+    expect(result.preview.campaignReport).toEqual({
+      scannedMessages: 4,
+      plannedMessages: 3,
+      unplannedMessages: 1,
+      coverageBasis: "scanned_window",
+      coverageRatio: 0.75,
+      planCount: 2,
+      truncatedGroups: [],
+      nextAction: "review_rules",
+    });
     expect(result.preview.groupPlans).toEqual([
       expect.objectContaining({
         groupId: "group_alpha",

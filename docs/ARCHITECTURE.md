@@ -14,6 +14,14 @@ scan mailbox metadata -> classify -> explain -> plan cleanup/archive -> preview 
 
 Reply drafting is not the first-class goal. Sending and deletion are outside the MVP.
 
+Current governance work should optimize for framework efficiency instead of conversation-level manual triage. The primary path is:
+
+```text
+load user ruleset -> scan bounded mailbox window -> produce campaign report and grouped plans -> user approves plans -> execute with reconciliation traces
+```
+
+`classification_map`, `classification_sweep`, and `bulk_governance_preview` remain discovery helpers. They are not the durable Gmail-like workflow. Durable governance should be expressed as user-defined rules and folder targets so one preview can cover hundreds of messages without forcing the agent to read or summarize every candidate.
+
 ## Surfaces
 
 QFerry has one shared core and two wrappers.
@@ -65,6 +73,18 @@ classification group
 ```
 
 QQ Mail must be treated as an IMAP folder/mailbox provider until probes prove otherwise. Gmail labels are a product reference, not a QQ implementation assumption.
+
+Ruleset governance previews include a compact campaign report:
+
+- `scannedMessages`: metadata messages inspected in the bounded window.
+- `plannedMessages`: messages selected into operation plans.
+- `unplannedMessages`: messages left outside the generated plans.
+- `coverageBasis`: always `scanned_window`; these metrics describe only the bounded metadata window inspected by this preview, not the whole mailbox unless the preview window covered the whole mailbox.
+- `coverageRatio`: `plannedMessages / scannedMessages`, rounded for human review.
+- `truncatedGroups`: groups where the rule matched more messages than `maxMessageRefsPerGroup` allowed into the plan.
+- `nextAction`: `confirm_plans` when the plan set covers the window cleanly, `review_rules` when more rules or a wider preview are needed, and `no_action` when no executable plan exists.
+
+This report is the agent-facing control surface for large mailbox治理. `nextAction` is deterministic framework output, not model-generated judgment. If `nextAction` is `review_rules`, the next step is to improve the ruleset or increase the preview window, not to manually inspect every UID in the conversation.
 
 ## Provider Contract
 

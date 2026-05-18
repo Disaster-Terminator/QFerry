@@ -297,6 +297,22 @@ export interface RulesetGovernanceSkippedGroup {
   reason: "missing_target_folder" | "no_matched_messages";
 }
 
+export interface RulesetGovernanceCampaignReport {
+  scannedMessages: number;
+  plannedMessages: number;
+  unplannedMessages: number;
+  coverageBasis: "scanned_window";
+  coverageRatio: number;
+  planCount: number;
+  truncatedGroups: Array<{
+    groupId: string;
+    label: string;
+    selectedMessageRefs: number;
+    totalMatchedMessages: number;
+  }>;
+  nextAction: "confirm_plans" | "review_rules" | "no_action";
+}
+
 export interface RulesetGovernancePreview {
   provider: string;
   folder: string;
@@ -312,6 +328,7 @@ export interface RulesetGovernancePreview {
   groupCounts: Record<string, number>;
   groupPlans: RulesetGovernanceGroupPlan[];
   skippedGroups: RulesetGovernanceSkippedGroup[];
+  campaignReport: RulesetGovernanceCampaignReport;
   ruleset?: ClassificationRulesetMetadata;
   mutationsAttempted: 0;
 }
@@ -1428,6 +1445,11 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           groupCounts: countGroups(classifications),
           groupPlans,
           skippedGroups,
+          campaignReport: buildRulesetGovernanceCampaignReport({
+            scannedMessages: messages.length,
+            groupPlans,
+            skippedGroups,
+          }),
           ruleset: resolvedRules.ruleset,
           mutationsAttempted: 0,
         },
@@ -1510,6 +1532,42 @@ function countGroups(classifications: MessageClassification[]): Record<string, n
     counts[classification.groupId] = (counts[classification.groupId] ?? 0) + 1;
   }
   return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function buildRulesetGovernanceCampaignReport(input: {
+  scannedMessages: number;
+  groupPlans: RulesetGovernanceGroupPlan[];
+  skippedGroups: RulesetGovernanceSkippedGroup[];
+}): RulesetGovernanceCampaignReport {
+  const plannedMessages = input.groupPlans.reduce((sum, plan) => sum + plan.selectedMessageRefs, 0);
+  const unplannedMessages = Math.max(input.scannedMessages - plannedMessages, 0);
+  const coverageRatio = input.scannedMessages === 0
+    ? 0
+    : Number((plannedMessages / input.scannedMessages).toFixed(3));
+  const truncatedGroups = input.groupPlans
+    .filter((plan) => plan.selectedMessageRefs < plan.totalMatchedMessages)
+    .map((plan) => ({
+      groupId: plan.groupId,
+      label: plan.label,
+      selectedMessageRefs: plan.selectedMessageRefs,
+      totalMatchedMessages: plan.totalMatchedMessages,
+    }));
+  const nextAction = input.groupPlans.length === 0
+    ? "no_action"
+    : unplannedMessages > 0 || input.skippedGroups.some((group) => group.totalMatchedMessages > 0) || truncatedGroups.length > 0
+      ? "review_rules"
+      : "confirm_plans";
+
+  return {
+    scannedMessages: input.scannedMessages,
+    plannedMessages,
+    unplannedMessages,
+    coverageBasis: "scanned_window",
+    coverageRatio,
+    planCount: input.groupPlans.length,
+    truncatedGroups,
+    nextAction,
+  };
 }
 
 function buildPriorityBuckets(

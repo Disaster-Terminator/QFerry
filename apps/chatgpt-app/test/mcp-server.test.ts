@@ -291,14 +291,136 @@ describe("QFerry ChatGPT App MCP server", () => {
     const content = result.structuredContent as {
       plans?: Array<{ operationPlanId: string }>;
       audit?: { summaryPath: string };
-      preview?: { groupPlans?: Array<{ groupId: string; operationPlanId: string }> };
+      preview?: {
+        campaignReport?: {
+          scannedMessages: number;
+          plannedMessages: number;
+          unplannedMessages: number;
+          coverageBasis: string;
+          coverageRatio: number;
+          planCount: number;
+          truncatedGroups: Array<{ groupId: string; selectedMessageRefs: number; totalMatchedMessages: number }>;
+          nextAction: string;
+        };
+        groupPlans?: Array<{ groupId: string; operationPlanId: string }>;
+      };
     };
     expect(content.plans).toHaveLength(2);
     expect(content.preview?.groupPlans?.map((plan) => plan.groupId)).toEqual(["group_alpha", "group_beta"]);
+    expect(content.preview?.campaignReport).toEqual({
+      scannedMessages: 2,
+      plannedMessages: 2,
+      unplannedMessages: 0,
+      coverageBasis: "scanned_window",
+      coverageRatio: 1,
+      planCount: 2,
+      truncatedGroups: [],
+      nextAction: "confirm_plans",
+    });
     expect(JSON.stringify(result.structuredContent)).not.toContain("legacy_discovery_helper");
     const summary = await readFile(String(content.audit?.summaryPath), "utf8");
     expect(summary).toContain("- operationPlanIds: [");
+    expect(summary).toContain("- campaignReport: {");
     expect(summary).toContain("- groupPlans: [");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("reports incomplete ruleset governance campaigns without extra tool output", async () => {
+    const rulesFile = join(await mkdtemp(join(tmpdir(), "qferry-mcp-ruleset-report-")), "rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "1",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "alpha", label: "Alpha", target: { folder: "Folders/Alpha" } },
+      ],
+      rules: [
+        { id: "alpha-domain", groupId: "alpha", match: { fromDomainIncludes: "alpha.example" } },
+      ],
+    }), "utf8");
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Alpha One <one@alpha.example>",
+        subject: "Alpha one",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+        from: "Alpha Two <two@alpha.example>",
+        subject: "Alpha two",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "3" },
+        from: "Other <notice@other.example>",
+        subject: "Other",
+        date: "2026-05-12T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const server = createQFerryMcpServer({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        scanMailboxMetadataWindow: async () => ({
+          messages,
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "INBOX", exists: messages.length },
+        }),
+        fetchMessage: async (ref) => ({ ...messages[0], ref, bodyText: "" }),
+      },
+    });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "ruleset_governance_preview",
+      arguments: {
+        runId: "mcp-ruleset-campaign-report",
+        folder: "INBOX",
+        pageSize: 50,
+        maxPages: 1,
+        maxMessageRefsPerGroup: 1,
+        action: "move",
+        rulesFile,
+        selectedGroupIds: ["alpha"],
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      preview: {
+        campaignReport: {
+          scannedMessages: 3,
+          plannedMessages: 1,
+          unplannedMessages: 2,
+          coverageBasis: "scanned_window",
+          coverageRatio: 0.333,
+          planCount: 1,
+          nextAction: "review_rules",
+          truncatedGroups: [
+            {
+              groupId: "alpha",
+              label: "Alpha",
+              selectedMessageRefs: 1,
+              totalMatchedMessages: 2,
+            },
+          ],
+        },
+      },
+    });
 
     await client.close();
     await server.close();
