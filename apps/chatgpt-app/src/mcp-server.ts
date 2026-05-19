@@ -372,6 +372,36 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
   );
 
   server.registerTool(
+    "plan_high_yield_governance",
+    {
+      title: "Plan high-yield governance",
+      description: "Use this before mailbox cleanup to rank high-yield sender/domain candidates, draft only low-risk local rules, and stop low-value micro-operations.",
+      inputSchema: {
+        runId: z.string(),
+        folder: z.string(),
+        pageSize: z.number().int().min(1).max(50),
+        maxPages: z.number().int().min(1).max(500),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+        minMessageCount: z.number().int().min(1).max(500).optional(),
+        maxCandidates: z.number().int().min(0).max(100).optional(),
+        maxDistinctSendersForDomainRule: z.number().int().min(1).max(100).optional(),
+        ruleGroup: z.object({
+          id: z.string(),
+          label: z.string(),
+          target: z.object({
+            folder: z.string(),
+          }).optional(),
+        }).optional(),
+        rules: z.array(classificationRuleSchema).optional(),
+        rulesFile: z.string().optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await withMcpAudit("plan_high_yield_governance", input.runId, input, await tools.planHighYieldGovernance(input))),
+  );
+
+  server.registerTool(
     "sender_breakdown",
     {
       title: "Break down senders",

@@ -16,16 +16,17 @@ For real mailbox work, call tools in this order:
 3. `get_mailbox_summary` to get read-only folder counts before scanning.
 4. `search` with structured filters when the task can be narrowed by sender, domain, subject, snippet, flag, date, order, or offset.
 5. Build or reuse a persisted `qferry.rules.json` ruleset when the work is repeatable. Groups should be user-defined and may bind `target.folder`; do not invent hardcoded product categories as the durable model. If `get_status` reports `rulesFile`, governance tools can use it by default when no inline `rules` or explicit `rulesFile` is passed.
-6. `ruleset_governance_preview` for high-throughput Gmail-like governance. It applies the ruleset, groups matching metadata by user-defined group, and creates preview operation plans per target group. It defaults to compact output; pass `includeClassifications: true` only when debugging individual rule matches.
-7. `classification_sweep` and `classification_map` only for exploratory built-in heuristic discovery when the ruleset is not yet clear. Treat their `workflowWarning.code: "legacy_discovery_helper"` as a prompt to convert discoveries into rules.
-8. `ensure_classification_folder` after a user group or target folder is selected and before planning moves. Pass a short user-facing folder name such as `广告营销` or `开发社区`; QFerry maps it to the QQ IMAP path such as `其他文件夹/广告营销` and returns a preview `create_folder` plan if the folder is missing.
-9. `bulk_governance_preview` only for legacy built-in category preview. Prefer `ruleset_governance_preview` for repeatable governance.
-10. `triage_inbox` for a small inbox review summary and urgency buckets.
-11. `group_spam_candidates` only for narrow spam/ad spot checks. Present the grouped candidates for confirmation before any real operation.
-12. `preview_cleanup_batch` when the user already has explicit rules and wants a single bounded operation plan.
-13. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups or already reviewed message refs. Direct `messageRefs` plans are limited and marked as `source: "client_refs"`.
-14. `confirm_cleanup_plan` only after the user explicitly approves one specific preview plan.
-15. `execute_cleanup` only with the confirmed `operationPlanId`; never pass or fabricate a `status: "confirmed"` plan object. For move plans, the installed MCP server executes at most 5 messages by default and keeps a partially executed plan resumable under the same `operationPlanId`; call `execute_cleanup` again to continue remaining messages. You may pass `maxMessages` from 1 to 50 for controlled experiments. Use 20 for real QQ Mail while validating a new category, and use 50 only after target-folder reconciliation has been stable for that workflow.
+6. `plan_high_yield_governance` before spending agent time on cleanup. It scans a bounded metadata window, ranks sender/domain candidates by yield, drafts local rules only for low-risk domains, flags broad mixed domains for `sender_breakdown`, and returns `stop_low_yield` when continuing would be micro-operations.
+7. `ruleset_governance_preview` for high-throughput Gmail-like governance. It applies the ruleset, groups matching metadata by user-defined group, and creates preview operation plans per target group. It defaults to compact output; pass `includeClassifications: true` only when debugging individual rule matches.
+8. `classification_sweep` and `classification_map` only for exploratory built-in heuristic discovery when the ruleset is not yet clear. Treat their `workflowWarning.code: "legacy_discovery_helper"` as a prompt to convert discoveries into rules.
+9. `ensure_classification_folder` after a user group or target folder is selected and before planning moves. Pass a short user-facing folder name such as `广告营销` or `开发社区`; QFerry maps it to the QQ IMAP path such as `其他文件夹/广告营销` and returns a preview `create_folder` plan if the folder is missing.
+10. `bulk_governance_preview` only for legacy built-in category preview. Prefer `ruleset_governance_preview` for repeatable governance.
+11. `triage_inbox` for a small inbox review summary and urgency buckets.
+12. `group_spam_candidates` only for narrow spam/ad spot checks. Present the grouped candidates for confirmation before any real operation.
+13. `preview_cleanup_batch` when the user already has explicit rules and wants a single bounded operation plan.
+14. `plan_cleanup` only when the user wants a preview-only operation plan from selected groups or already reviewed message refs. Direct `messageRefs` plans are limited and marked as `source: "client_refs"`.
+15. `confirm_cleanup_plan` only after the user explicitly approves one specific preview plan.
+16. `execute_cleanup` only with the confirmed `operationPlanId`; never pass or fabricate a `status: "confirmed"` plan object. For move plans, the installed MCP server executes at most 5 messages by default and keeps a partially executed plan resumable under the same `operationPlanId`; call `execute_cleanup` again to continue remaining messages. You may pass `maxMessages` from 1 to 50 for controlled experiments. Use 20 for real QQ Mail while validating a new category, and use 50 only after target-folder reconciliation has been stable for that workflow.
 
 Use `classify_messages` when debugging rules or doing focused classification. Prefer `triage_inbox` for normal inbox organization because it returns group counts, priority buckets (`urgent`, `needs_review`, `waiting`, `fyi`, `bulk`), sampled message count, recommended next action, and `mutationsAttempted`.
 
@@ -48,6 +49,7 @@ Allowed by default:
 - Create operation plans.
 - Preview bounded cross-page cleanup batches.
 - Plan sender/domain governance candidates and local rule suggestions.
+- Run `plan_high_yield_governance` to decide whether a folder has enough repeatable signal to justify batch governance. Treat `stop_low_yield` as a reason to stop mailbox cleanup and improve rules later instead of doing manual micro-moves.
 - Break noisy domains down by concrete sender with `sender_breakdown` before moving anything. This is the preferred first step for mixed domains such as `qq.com`, where a domain-level rule would merge system mail, product mail, personal QQ senders, and bounce notices.
 - Write trace artifacts.
 - Confirm an operation plan after explicit user approval.
@@ -67,6 +69,8 @@ Use `plan_sender_governance` when the user wants Gmail-like sender/domain cleanu
 Use `sender_breakdown` before `plan_sender_governance` when a single domain is too broad. Pass `fromDomainIncludes` such as `qq.com` and a target `ruleGroup`; review the returned concrete `senderCandidates`, `sampleSubjects`, and `suggestedRule.match.fromIncludes`. Then pass only the approved sender strings to `plan_sender_governance.selectedFromIncludes` for preview and execution. `sender_breakdown` is read-only and does not create an operation plan.
 
 For high-throughput sender or rule cleanup, prefer one window-backed preview over manual offset stitching. Pass enough `pageSize * maxPages` to cover the target mailbox window, then use `plan_sender_governance` with `ruleGroup` to draft reusable classification rules for recurring domains, dry-run the patch with `apply_ruleset_patch`, and use `ruleset_governance_preview` against the ruleset for all matching groups. These tools use the provider bulk metadata window when available, so they should produce UID-ref operation plans for user-defined groups instead of requiring multiple `scanOffset` retries.
+
+Before drafting sender/domain rules, use `plan_high_yield_governance` with a practical `minMessageCount` such as 10 or 20. Draft rules only for candidates whose `recommendedAction` is `draft_domain_rule`; for `break_down_sender`, call `sender_breakdown` and choose concrete senders instead. If `recommendedNextAction` is `stop_low_yield`, stop real mailbox governance for that folder rather than spending tokens on long-tail cleanup.
 
 Keep `ruleset_governance_preview` compact by default during real mailbox治理. Review `campaignReport`, `topUnplannedDomains`, `topUnplannedSenders`, `groupPlans`, `skippedGroups`, and operation plan ids first; request `includeClassifications: true` only for a bounded debug pass when a rule behaves unexpectedly.
 

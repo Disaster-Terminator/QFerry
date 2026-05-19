@@ -45,6 +45,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "ensure_classification_folder",
       "preview_cleanup_batch",
       "plan_sender_governance",
+      "plan_high_yield_governance",
       "sender_breakdown",
       "classification_map",
       "classification_sweep",
@@ -66,6 +67,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "ensure_classification_folder")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "preview_cleanup_batch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "plan_sender_governance")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "plan_high_yield_governance")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "sender_breakdown")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "bulk_governance_preview")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "ruleset_governance_preview")?.annotations?.destructiveHint).toBe(false);
@@ -2020,6 +2022,93 @@ describe("QFerry ChatGPT App MCP server", () => {
       },
       mutationsAttempted: 0,
     });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("plans high-yield governance through the MCP server without creating operation plans", async () => {
+    const messages: MessageSummary[] = [
+      ...Array.from({ length: 4 }, (_, index) => ({
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: `steam-${index + 1}` },
+        from: index % 2 === 0 ? "Steam <noreply@steampowered.com>" : "Steam Support <support@steampowered.com>",
+        subject: `Steam update ${index + 1}`,
+        date: `2026-05-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "platform",
+        flags: [],
+      })),
+      ...Array.from({ length: 5 }, (_, index) => ({
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: `qq-${index + 1}` },
+        from: [
+          "QQ Mail Admin <admin@qq.com>",
+          "Friend <friend@qq.com>",
+          "Shop <shop@qq.com>",
+        ][index % 3],
+        subject: `QQ mixed ${index + 1}`,
+        date: `2026-06-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "mixed",
+        flags: [],
+      })),
+    ];
+    const provider: MailProvider = {
+      listMailboxes: async () => [],
+      scanMailboxMetadata: async () => {
+        throw new Error("plan_high_yield_governance should use the window scanner");
+      },
+      scanMailboxMetadataWindow: async () => ({
+        pagesScanned: 1,
+        mailboxSnapshot: { folder: "INBOX", exists: messages.length, uidValidity: "high-yield" },
+        messages,
+      }),
+      fetchMessage: async () => {
+        throw new Error("not used");
+      },
+    };
+    const server = createQFerryMcpServer({ provider });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "plan_high_yield_governance",
+      arguments: {
+        runId: "run-mcp-high-yield",
+        folder: "INBOX",
+        pageSize: 50,
+        maxPages: 1,
+        minMessageCount: 3,
+        maxDistinctSendersForDomainRule: 2,
+        ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "其他文件夹/Bulk platform" } },
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      planner: {
+        provider: "fixture",
+        scannedMessages: 9,
+        candidateSummary: {
+          directRuleCandidates: 1,
+          mixedDomainCandidates: 1,
+        },
+        recommendedNextAction: "review_mixed_domains",
+        mutationsAttempted: 0,
+      },
+      rulesetPatch: {
+        rulesToAdd: [
+          {
+            id: "sender-domain-steampowered-com",
+            groupId: "bulk_platform",
+            match: { fromDomainIncludes: "steampowered.com" },
+          },
+        ],
+      },
+      mutationsAttempted: 0,
+    });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("operationPlanId");
 
     await client.close();
     await server.close();
