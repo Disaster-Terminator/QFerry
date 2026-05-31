@@ -535,6 +535,7 @@ export interface MailboxGovernanceCampaignInput {
   maxCandidatesPerFolder?: number;
   maxDistinctSendersForDomainRule?: number;
   maxConcurrentFolders?: number;
+  scopeDraftRulesToSourceFolder?: boolean;
   ruleGroup?: ClassificationGroup;
   rules?: ClassificationRule[];
   rulesFile?: string;
@@ -553,6 +554,7 @@ export interface MailboxGovernanceCampaignReport {
   maxCandidatesPerFolder: number;
   maxDistinctSendersForDomainRule: number;
   maxConcurrentFolders: number;
+  scopeDraftRulesToSourceFolder: boolean;
   folderPlans: HighYieldGovernancePlannerReport[];
   folderSummary: {
     draftRuleFolders: number;
@@ -1304,6 +1306,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const maxCandidatesPerFolder = Math.max(campaignInput.maxCandidatesPerFolder ?? DEFAULT_SENDER_GOVERNANCE_CANDIDATE_LIMIT, 0);
       const maxDistinctSendersForDomainRule = Math.max(campaignInput.maxDistinctSendersForDomainRule ?? 2, 1);
       const maxConcurrentFolders = Math.min(Math.max(campaignInput.maxConcurrentFolders ?? 3, 1), 10);
+      const scopeDraftRulesToSourceFolder = campaignInput.scopeDraftRulesToSourceFolder ?? true;
       const ruleGroup = campaignInput.ruleGroup ?? { id: "sender_governance", label: "Sender governance" };
       const plannedFolders = await mapWithConcurrency(campaignInput.folders, maxConcurrentFolders, async (folder) => {
         const scanWindow = await scanMetadataWindow(input.provider, {
@@ -1321,7 +1324,14 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           ruleGroup,
         });
         const allHighYieldCandidates = allCandidates.filter((candidate) => candidate.messageCount >= minMessageCount);
-        const highYieldCandidates = allHighYieldCandidates.slice(0, maxCandidatesPerFolder);
+        const highYieldCandidates = allHighYieldCandidates.slice(0, maxCandidatesPerFolder).map((candidate) => (
+          scopeDraftRulesToSourceFolder && candidate.suggestedRule
+            ? {
+                ...candidate,
+                suggestedRule: scopeDraftRuleToSourceFolder(candidate.suggestedRule, folder),
+              }
+            : candidate
+        ));
         const directCandidates = highYieldCandidates.filter((candidate) => candidate.recommendedAction === "draft_domain_rule");
         const mixedDomainCandidates = highYieldCandidates.filter((candidate) => candidate.recommendedAction === "break_down_sender");
         const lowYieldDomainCandidates = allCandidates.length - allHighYieldCandidates.length;
@@ -1359,10 +1369,11 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const folderPlans = plannedFolders.map((folder) => folder.plan);
       const directCandidateByDomain = new Map<string, SenderGovernanceCandidate>();
       const provider = folderPlans.find((plan) => plan.provider)?.provider ?? input.runtimeConfig?.provider ?? "fixture";
-      for (const { directCandidates } of plannedFolders) {
+      for (const { plan, directCandidates } of plannedFolders) {
         for (const candidate of directCandidates) {
-          if (directCandidateByDomain.has(candidate.domain)) continue;
-          directCandidateByDomain.set(candidate.domain, {
+          const candidateKey = scopeDraftRulesToSourceFolder ? `${plan.folder}\0${candidate.domain}` : candidate.domain;
+          if (directCandidateByDomain.has(candidateKey)) continue;
+          directCandidateByDomain.set(candidateKey, {
             domain: candidate.domain,
             messageCount: candidate.messageCount,
             seenCount: candidate.seenCount,
@@ -1386,7 +1397,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const stopLowYieldFolders = folderPlans.filter((plan) => plan.recommendedNextAction === "stop_low_yield").length;
       const rulesetPatch = buildRulesetPatchDraft({
         candidates: [...directCandidateByDomain.values()],
-        selectedSenderDomains: [...directCandidateByDomain.keys()],
+        selectedSenderDomains: [...directCandidateByDomain.values()].map((candidate) => candidate.domain),
         selectedFromIncludes: [],
         existingRules,
         ruleGroup,
@@ -1412,6 +1423,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           maxCandidatesPerFolder,
           maxDistinctSendersForDomainRule,
           maxConcurrentFolders,
+          scopeDraftRulesToSourceFolder,
           folderPlans: sortedFolderPlans,
           folderSummary: {
             draftRuleFolders,
@@ -2306,6 +2318,17 @@ function folderActionRank(action: HighYieldGovernancePlannerReport["recommendedN
 
 function folderPlannedMessageCount(plan: HighYieldGovernancePlannerReport): number {
   return plan.candidates.reduce((sum, candidate) => sum + candidate.messageCount, 0);
+}
+
+function scopeDraftRuleToSourceFolder(rule: ClassificationRule, folder: string): ClassificationRule {
+  return {
+    ...rule,
+    id: `${rule.id}-in-${slugifyRuleId(folder)}`,
+    match: {
+      ...rule.match,
+      folderEquals: folder,
+    },
+  };
 }
 
 function limitSenderGovernanceCandidates(

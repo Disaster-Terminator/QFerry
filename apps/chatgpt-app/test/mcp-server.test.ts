@@ -2190,9 +2190,9 @@ describe("QFerry ChatGPT App MCP server", () => {
       rulesetPatch: {
         rulesToAdd: [
           {
-            id: "sender-domain-steampowered-com",
+            id: "sender-domain-steampowered-com-in-archive",
             groupId: "bulk_platform",
-            match: { fromDomainIncludes: "steampowered.com" },
+            match: { fromDomainIncludes: "steampowered.com", folderEquals: "Archive" },
           },
         ],
       },

@@ -1443,9 +1443,9 @@ describe("mail tools", () => {
     ]);
     expect(result.rulesetPatch.rulesToAdd).toMatchObject([
       {
-        id: "sender-domain-steampowered-com",
+        id: "sender-domain-steampowered-com-in-archive",
         groupId: "bulk_platform",
-        match: { fromDomainIncludes: "steampowered.com" },
+        match: { fromDomainIncludes: "steampowered.com", folderEquals: "Archive" },
       },
     ]);
   });
@@ -1460,7 +1460,7 @@ describe("mail tools", () => {
         { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
         { id: "review", label: "Review" },
       ],
-      rules: [{ id: "existing-steam", groupId: "bulk_platform", match: { fromDomainIncludes: "steampowered.com" } }],
+      rules: [{ id: "existing-steam", groupId: "bulk_platform", match: { fromDomainIncludes: "steampowered.com", folderEquals: "Archive" } }],
     }), "utf8");
     const byFolder: Record<string, MessageSummary[]> = {
       Archive: Array.from({ length: 12 }, (_, index) => ({
@@ -1518,7 +1518,7 @@ describe("mail tools", () => {
       {
         ruleId: "existing-steam",
         reason: "match already covered by existing rule",
-        match: { fromDomainIncludes: "steampowered.com" },
+        match: { fromDomainIncludes: "steampowered.com", folderEquals: "Archive" },
       },
     ]);
     expect(result.rulesetPatch.renderedDraft?.rules).toHaveLength(1);
