@@ -416,6 +416,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         minMessageCount: z.number().int().min(1).max(500).optional(),
         maxCandidatesPerFolder: z.number().int().min(0).max(100).optional(),
         maxDistinctSendersForDomainRule: z.number().int().min(1).max(100).optional(),
+        maxConcurrentFolders: z.number().int().min(1).max(10).optional(),
         ruleGroup: z.object({
           id: z.string(),
           label: z.string(),

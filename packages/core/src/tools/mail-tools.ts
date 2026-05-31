@@ -534,6 +534,7 @@ export interface MailboxGovernanceCampaignInput {
   minMessageCount?: number;
   maxCandidatesPerFolder?: number;
   maxDistinctSendersForDomainRule?: number;
+  maxConcurrentFolders?: number;
   ruleGroup?: ClassificationGroup;
   rules?: ClassificationRule[];
   rulesFile?: string;
@@ -551,6 +552,7 @@ export interface MailboxGovernanceCampaignReport {
   minMessageCount: number;
   maxCandidatesPerFolder: number;
   maxDistinctSendersForDomainRule: number;
+  maxConcurrentFolders: number;
   folderPlans: HighYieldGovernancePlannerReport[];
   folderSummary: {
     draftRuleFolders: number;
@@ -1301,12 +1303,9 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const minMessageCount = Math.max(campaignInput.minMessageCount ?? 10, 1);
       const maxCandidatesPerFolder = Math.max(campaignInput.maxCandidatesPerFolder ?? DEFAULT_SENDER_GOVERNANCE_CANDIDATE_LIMIT, 0);
       const maxDistinctSendersForDomainRule = Math.max(campaignInput.maxDistinctSendersForDomainRule ?? 2, 1);
+      const maxConcurrentFolders = Math.min(Math.max(campaignInput.maxConcurrentFolders ?? 3, 1), 10);
       const ruleGroup = campaignInput.ruleGroup ?? { id: "sender_governance", label: "Sender governance" };
-      const folderPlans: HighYieldGovernancePlannerReport[] = [];
-      const directCandidateByDomain = new Map<string, SenderGovernanceCandidate>();
-      let provider: string = input.runtimeConfig?.provider ?? "fixture";
-
-      for (const folder of campaignInput.folders) {
+      const plannedFolders = await mapWithConcurrency(campaignInput.folders, maxConcurrentFolders, async (folder) => {
         const scanWindow = await scanMetadataWindow(input.provider, {
           folder,
           limit: pageSize,
@@ -1315,7 +1314,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           offset: scanOffset,
         });
         const messages = scanWindow.messages;
-        provider = messages[0]?.ref.provider ?? provider;
+        const folderProvider = messages[0]?.ref.provider ?? input.runtimeConfig?.provider ?? "fixture";
         const allCandidates = buildHighYieldGovernanceCandidates(messages, {
           minMessageCount,
           maxDistinctSendersForDomainRule,
@@ -1325,27 +1324,13 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         const highYieldCandidates = allHighYieldCandidates.slice(0, maxCandidatesPerFolder);
         const directCandidates = highYieldCandidates.filter((candidate) => candidate.recommendedAction === "draft_domain_rule");
         const mixedDomainCandidates = highYieldCandidates.filter((candidate) => candidate.recommendedAction === "break_down_sender");
-        for (const candidate of directCandidates) {
-          if (directCandidateByDomain.has(candidate.domain)) continue;
-          directCandidateByDomain.set(candidate.domain, {
-            domain: candidate.domain,
-            messageCount: candidate.messageCount,
-            seenCount: candidate.seenCount,
-            unreadCount: candidate.unreadCount,
-            firstDate: candidate.firstDate,
-            lastDate: candidate.lastDate,
-            sampleSubjects: candidate.sampleSubjects,
-            senders: candidate.topSenders.map((sender) => sender.sender),
-            suggestedRule: candidate.suggestedRule!,
-          });
-        }
         const lowYieldDomainCandidates = allCandidates.length - allHighYieldCandidates.length;
         const recommendedNextAction = directCandidates.length > 0
           ? mixedDomainCandidates.length > 0 ? "review_mixed_domains" : "draft_rules"
           : mixedDomainCandidates.length > 0 ? "review_mixed_domains" : "stop_low_yield";
 
-        folderPlans.push({
-          provider,
+        const plan: HighYieldGovernancePlannerReport = {
+          provider: folderProvider,
           folder,
           scanOrder,
           scanOffset,
@@ -1367,7 +1352,28 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           },
           recommendedNextAction,
           mutationsAttempted: 0,
-        });
+        };
+
+        return { plan, directCandidates };
+      });
+      const folderPlans = plannedFolders.map((folder) => folder.plan);
+      const directCandidateByDomain = new Map<string, SenderGovernanceCandidate>();
+      const provider = folderPlans.find((plan) => plan.provider)?.provider ?? input.runtimeConfig?.provider ?? "fixture";
+      for (const { directCandidates } of plannedFolders) {
+        for (const candidate of directCandidates) {
+          if (directCandidateByDomain.has(candidate.domain)) continue;
+          directCandidateByDomain.set(candidate.domain, {
+            domain: candidate.domain,
+            messageCount: candidate.messageCount,
+            seenCount: candidate.seenCount,
+            unreadCount: candidate.unreadCount,
+            firstDate: candidate.firstDate,
+            lastDate: candidate.lastDate,
+            sampleSubjects: candidate.sampleSubjects,
+            senders: candidate.topSenders.map((sender) => sender.sender),
+            suggestedRule: candidate.suggestedRule!,
+          });
+        }
       }
 
       const sortedFolderPlans = folderPlans.sort((left, right) =>
@@ -1405,6 +1411,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           minMessageCount,
           maxCandidatesPerFolder,
           maxDistinctSendersForDomainRule,
+          maxConcurrentFolders,
           folderPlans: sortedFolderPlans,
           folderSummary: {
             draftRuleFolders,
@@ -1824,6 +1831,24 @@ function withRuntimeRulesFile<T extends { rules?: ClassificationRule[]; rulesFil
     ...input,
     rulesFile: runtimeConfig.rulesFile,
   };
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  maxConcurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(maxConcurrency, 1), items.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index]!, index);
+    }
+  }));
+  return results;
 }
 
 async function scanMetadataWindowWithPages(

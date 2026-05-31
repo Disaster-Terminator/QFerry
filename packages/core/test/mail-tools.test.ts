@@ -1524,6 +1524,62 @@ describe("mail tools", () => {
     expect(result.rulesetPatch.renderedDraft?.rules).toHaveLength(1);
   });
 
+  it("scans mailbox governance campaign folders with bounded concurrency", async () => {
+    let activeScans = 0;
+    let maxActiveScans = 0;
+    const scanOrder: string[] = [];
+    const byFolder: Record<string, MessageSummary[]> = Object.fromEntries(
+      ["Folder A", "Folder B", "Folder C", "Folder D"].map((folder) => [
+        folder,
+        Array.from({ length: 10 }, (_, index) => ({
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder, uid: `${folder}-${index + 1}` },
+          from: "Bulk <bulk@example.com>",
+          subject: `Bulk ${index + 1}`,
+          date: `2026-06-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+          snippet: "bulk",
+          flags: [],
+        })),
+      ]),
+    );
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => {
+          throw new Error("campaign planner should use the window scanner");
+        },
+        scanMailboxMetadataWindow: async (input) => {
+          scanOrder.push(input.folder);
+          activeScans += 1;
+          maxActiveScans = Math.max(maxActiveScans, activeScans);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          activeScans -= 1;
+          return {
+            pagesScanned: 1,
+            mailboxSnapshot: { folder: input.folder, exists: byFolder[input.folder]?.length ?? 0, uidValidity: "campaign" },
+            messages: byFolder[input.folder] ?? [],
+          };
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await (tools as any).planMailboxGovernanceCampaign({
+      folders: ["Folder A", "Folder B", "Folder C", "Folder D"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      minMessageCount: 10,
+      maxConcurrentFolders: 2,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform" },
+    });
+
+    expect(scanOrder).toEqual(["Folder A", "Folder B", "Folder C", "Folder D"]);
+    expect(maxActiveScans).toBe(2);
+    expect(result.campaign.maxConcurrentFolders).toBe(2);
+    expect(result.campaign.foldersScanned).toBe(4);
+  });
+
   it("builds Gmail-like bulk governance previews from sender and content categories", async () => {
     const messages = [
       {
