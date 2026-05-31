@@ -2323,7 +2323,7 @@ function folderPlannedMessageCount(plan: HighYieldGovernancePlannerReport): numb
 function scopeDraftRuleToSourceFolder(rule: ClassificationRule, folder: string): ClassificationRule {
   return {
     ...rule,
-    id: `${rule.id}-in-${slugifyRuleId(folder)}`,
+    id: `${rule.id}-in-${scopedRuleIdSuffix(folder)}`,
     match: {
       ...rule.match,
       folderEquals: folder,
@@ -2870,6 +2870,21 @@ function matchesSenderGovernanceSelection(
 
 function slugifyRuleId(value: string): string {
   return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "unknown";
+}
+
+function scopedRuleIdSuffix(value: string): string {
+  const slug = slugifyRuleId(value);
+  const readableSlug = slug === "unknown" ? "folder" : slug;
+  return `${readableSlug}-${stableHexHash(value)}`;
+}
+
+function stableHexHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 function messageRefKey(ref: MessageRef): string {

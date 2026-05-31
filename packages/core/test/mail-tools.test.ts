@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import type { ClassificationRule } from "../src/classification.js";
 import { createMailTools } from "../src/tools/mail-tools.js";
 import { FixtureMailProvider } from "../src/providers/fixture-provider.js";
 import type { MessageSummary } from "../src/providers/types.js";
@@ -1443,11 +1444,11 @@ describe("mail tools", () => {
     ]);
     expect(result.rulesetPatch.rulesToAdd).toMatchObject([
       {
-        id: "sender-domain-steampowered-com-in-archive",
         groupId: "bulk_platform",
         match: { fromDomainIncludes: "steampowered.com", folderEquals: "Archive" },
       },
     ]);
+    expect(result.rulesetPatch.rulesToAdd[0]?.id).toMatch(/^sender-domain-steampowered-com-in-archive-[a-f0-9]{8}$/);
   });
 
   it("uses runtime rules when planning mailbox-wide governance campaigns", async () => {
@@ -1522,6 +1523,57 @@ describe("mail tools", () => {
       },
     ]);
     expect(result.rulesetPatch.renderedDraft?.rules).toHaveLength(1);
+  });
+
+  it("keeps scoped campaign rule ids unique for non-ascii folders", async () => {
+    const folderA = "\u5176\u4ed6\u6587\u4ef6\u5939/\u5e7f\u544a\u8425\u9500";
+    const folderB = "\u5176\u4ed6\u6587\u4ef6\u5939/\u8ba2\u5355\u8d26\u5355";
+    const byFolder: Record<string, MessageSummary[]> = Object.fromEntries([folderA, folderB].map((folder) => [
+      folder,
+      Array.from({ length: 10 }, (_, index) => ({
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder, uid: `${folder}-${index + 1}` },
+        from: "Steam <noreply@steampowered.com>",
+        subject: `Steam ${index + 1}`,
+        date: `2026-06-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "platform",
+        flags: [],
+      })),
+    ]));
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => {
+          throw new Error("campaign planner should use the window scanner");
+        },
+        scanMailboxMetadataWindow: async (input) => ({
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: input.folder, exists: byFolder[input.folder]?.length ?? 0, uidValidity: "campaign" },
+          messages: byFolder[input.folder] ?? [],
+        }),
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await (tools as any).planMailboxGovernanceCampaign({
+      folders: [folderA, folderB],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      minMessageCount: 10,
+      maxDistinctSendersForDomainRule: 2,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform" },
+    });
+
+    expect(result.rulesetPatch.rulesToAdd).toHaveLength(2);
+    expect(result.rulesetPatch.rulesToAdd.map((rule: ClassificationRule) => rule.match)).toEqual([
+      { fromDomainIncludes: "steampowered.com", folderEquals: folderA },
+      { fromDomainIncludes: "steampowered.com", folderEquals: folderB },
+    ]);
+    const ids = result.rulesetPatch.rulesToAdd.map((rule: ClassificationRule) => rule.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids.every((id: string) => id.includes("-in-unknown"))).toBe(false);
+    expect(ids.every((id: string) => /^sender-domain-steampowered-com-in-folder-[a-f0-9]{8}$/.test(id))).toBe(true);
   });
 
   it("scans mailbox governance campaign folders with bounded concurrency", async () => {
