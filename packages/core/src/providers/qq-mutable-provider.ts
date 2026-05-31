@@ -9,11 +9,17 @@ export class QqMutableProvider extends QqReadOnlyProvider {
 
   override async getCapabilitySnapshot(): Promise<ProviderCapabilitySnapshot> {
     const capability = await super.getCapabilitySnapshot();
+    const moveSafety = await this.withClient("capability_snapshot", async (client) => readMoveSafety(client.capabilities));
+    const mutationActions = moveSafety.safeForMove ? ["move", "create_folder"] : ["create_folder"];
     return {
       ...capability,
       supportsMutation: true,
-      mutationActions: ["move", "create_folder"],
+      mutationActions,
       supportsCreateMailbox: true,
+      imapCapabilities: moveSafety.capabilities,
+      supportsNativeMove: moveSafety.supportsNativeMove,
+      supportsUidExpunge: moveSafety.supportsUidExpunge,
+      ...(moveSafety.warning ? { moveSafetyWarning: moveSafety.warning } : {}),
     };
   }
 
@@ -62,6 +68,7 @@ export class QqMutableProvider extends QqReadOnlyProvider {
         if (mailbox.readOnly) {
           throw new Error(`Mailbox is read-only: ${folder}`);
         }
+        assertSafeMoveCapabilities(client.capabilities);
         assertUidValidity(folderRefs, mailbox.uidValidity);
 
         const uids = folderRefs.map((ref) => parseUid(ref.uid));
@@ -77,6 +84,40 @@ export class QqMutableProvider extends QqReadOnlyProvider {
         ? { moved, movedCountStatus }
         : { moved };
     });
+  }
+}
+
+function readMoveSafety(capabilities: Map<string, unknown> | undefined): {
+  capabilities: string[];
+  safeForMove: boolean;
+  supportsNativeMove: boolean;
+  supportsUidExpunge: boolean;
+  warning?: string;
+} {
+  const names = capabilities ? [...capabilities.keys()].map((capability) => capability.toUpperCase()).sort() : [];
+  const supportsNativeMove = names.includes("MOVE");
+  const supportsUidExpunge = names.includes("UIDPLUS");
+  const safeForMove = supportsNativeMove || supportsUidExpunge;
+  return {
+    capabilities: names,
+    safeForMove,
+    supportsNativeMove,
+    supportsUidExpunge,
+    ...(safeForMove
+      ? {}
+      : {
+        warning: "QQ IMAP server did not advertise MOVE or UIDPLUS; ImapFlow move fallback would use mailbox-wide EXPUNGE.",
+      }),
+  };
+}
+
+function assertSafeMoveCapabilities(capabilities: Map<string, unknown> | undefined): void {
+  const moveSafety = readMoveSafety(capabilities);
+  if (!moveSafety.safeForMove) {
+    throw new Error(
+      "QQ IMAP unsafe MOVE fallback blocked: server does not advertise MOVE or UIDPLUS, "
+      + "so COPY+EXPUNGE could remove unrelated messages already flagged as deleted.",
+    );
   }
 }
 

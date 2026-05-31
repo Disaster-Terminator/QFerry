@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import { QqMutableProvider } from "../src/providers/qq-mutable-provider.js";
 
+const nativeMoveCapabilities = new Map([["MOVE", true]]);
+const uidPlusOnlyCapabilities = new Map([["UIDPLUS", true]]);
+
 describe("QQ mutable provider", () => {
-  it("reports move and create-folder mutation capability", async () => {
+  it("reports move and create-folder mutation capability when native MOVE is available", async () => {
     const provider = new QqMutableProvider({
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
       sleep: async () => undefined,
       clientFactory: () => ({
+        capabilities: nativeMoveCapabilities,
         connect: async () => undefined,
         logout: async () => undefined,
         list: async () => [],
@@ -27,6 +31,30 @@ describe("QQ mutable provider", () => {
     });
   });
 
+  it("does not advertise move capability when MOVE and UIDPLUS are unavailable", async () => {
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      sleep: async () => undefined,
+      clientFactory: () => ({
+        capabilities: new Map(),
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async () => ({ exists: 0 }),
+        fetch: async function* () {},
+        messageMove: async () => ({ uidMap: new Map() }),
+        mailboxCreate: async () => ({ path: "其他文件夹/开发社区", created: true }),
+      }),
+    });
+
+    await expect(provider.getCapabilitySnapshot()).resolves.toMatchObject({
+      supportsMutation: true,
+      mutationActions: ["create_folder"],
+      supportsCreateMailbox: true,
+    });
+  });
+
   it("creates QQ classification folders through IMAP CREATE", async () => {
     const created: unknown[] = [];
     const provider = new QqMutableProvider({
@@ -34,6 +62,7 @@ describe("QQ mutable provider", () => {
       auth: { user: "user@qq.com", pass: "secret" },
       sleep: async () => undefined,
       clientFactory: () => ({
+        capabilities: nativeMoveCapabilities,
         connect: async () => undefined,
         logout: async () => undefined,
         list: async () => [],
@@ -61,6 +90,7 @@ describe("QQ mutable provider", () => {
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
       clientFactory: () => ({
+        capabilities: nativeMoveCapabilities,
         connect: async () => undefined,
         logout: async () => undefined,
         list: async () => [],
@@ -89,11 +119,62 @@ describe("QQ mutable provider", () => {
     ]);
   });
 
+  it("allows UIDPLUS fallback move because UID EXPUNGE is scoped to selected UIDs", async () => {
+    const moved: unknown[] = [];
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => ({
+        capabilities: uidPlusOnlyCapabilities,
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async () => ({ exists: 1, uidValidity: 888n }),
+        fetch: async function* () {},
+        messageMove: async (range: unknown, destination: string, options: unknown) => {
+          moved.push({ range, destination, options });
+          return { uidMap: new Map([[1, 1001]]) };
+        },
+      }),
+    });
+
+    await expect(provider.moveMessages([
+      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
+    ], "Archive")).resolves.toEqual({ moved: 1 });
+    expect(moved).toEqual([{ range: [1], destination: "Archive", options: { uid: true } }]);
+  });
+
+  it("rejects move when neither MOVE nor UIDPLUS is available because fallback EXPUNGE is mailbox-wide", async () => {
+    let moveCalled = false;
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      clientFactory: () => ({
+        capabilities: new Map(),
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async () => ({ exists: 1, uidValidity: 888n }),
+        fetch: async function* () {},
+        messageMove: async () => {
+          moveCalled = true;
+          return { uidMap: new Map([[1, 1001]]) };
+        },
+      }),
+    });
+
+    await expect(provider.moveMessages([
+      { provider: "qqmail", accountAlias: "masked@qq.com", folder: "INBOX", uid: "1", uidValidity: "888" },
+    ], "Archive")).rejects.toThrow(/unsafe MOVE fallback/);
+    expect(moveCalled).toBe(false);
+  });
+
   it("reports partial QQ UID move counts without treating already-moved messages as a hard failure", async () => {
     const provider = new QqMutableProvider({
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
       clientFactory: () => ({
+        capabilities: nativeMoveCapabilities,
         connect: async () => undefined,
         logout: async () => undefined,
         list: async () => [],
@@ -115,6 +196,7 @@ describe("QQ mutable provider", () => {
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
       clientFactory: () => ({
+        capabilities: nativeMoveCapabilities,
         connect: async () => undefined,
         logout: async () => undefined,
         list: async () => [],
@@ -135,6 +217,7 @@ describe("QQ mutable provider", () => {
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
       clientFactory: () => ({
+        capabilities: nativeMoveCapabilities,
         connect: async () => undefined,
         logout: async () => undefined,
         list: async () => [],
@@ -154,6 +237,7 @@ describe("QQ mutable provider", () => {
       accountAlias: "masked@qq.com",
       auth: { user: "user@qq.com", pass: "secret" },
       clientFactory: () => ({
+        capabilities: nativeMoveCapabilities,
         connect: async () => undefined,
         logout: async () => undefined,
         list: async () => [],

@@ -21,6 +21,10 @@ export interface ProviderCapabilitySnapshot {
   supportsMutation: boolean;
   mutationActions: string[];
   supportsCreateMailbox?: boolean;
+  imapCapabilities?: string[];
+  supportsNativeMove?: boolean;
+  supportsUidExpunge?: boolean;
+  moveSafetyWarning?: string;
   maxRecommendedScanLimit: number;
 }
 

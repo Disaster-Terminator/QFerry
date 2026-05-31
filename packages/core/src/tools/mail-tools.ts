@@ -883,6 +883,10 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       if (plan.action !== "move" && plan.action !== "create_folder") {
         throw new Error(`Unsupported execute_cleanup action: ${plan.action}`);
       }
+      if (!capability.mutationActions.includes(plan.action)) {
+        const warning = capability.moveSafetyWarning ? `: ${capability.moveSafetyWarning}` : "";
+        throw new Error(`Provider does not support safe ${plan.action} mutation${warning}`);
+      }
       if (plan.action === "create_folder") {
         const targetFolder = plan.target?.folder;
         if (!targetFolder) {

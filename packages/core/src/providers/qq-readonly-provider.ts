@@ -12,6 +12,7 @@ import type {
 } from "./types.js";
 
 export interface QqReadOnlyClient {
+  capabilities?: Map<string, unknown>;
   connect(): Promise<void>;
   logout(): Promise<void>;
   list(): Promise<Array<{ path: string; delimiter?: string; flags?: Set<string> }>>;
