@@ -525,6 +525,42 @@ export interface HighYieldGovernancePlannerReport {
   mutationsAttempted: 0;
 }
 
+export interface MailboxGovernanceCampaignInput {
+  folders: string[];
+  pageSize: number;
+  maxPagesPerFolder: number;
+  order?: "newest" | "oldest";
+  scanOffset?: number;
+  minMessageCount?: number;
+  maxCandidatesPerFolder?: number;
+  maxDistinctSendersForDomainRule?: number;
+  ruleGroup?: ClassificationGroup;
+  rules?: ClassificationRule[];
+  rulesFile?: string;
+}
+
+export interface MailboxGovernanceCampaignReport {
+  provider: string;
+  folders: string[];
+  scanOrder: "newest" | "oldest";
+  scanOffset: number;
+  pageSize: number;
+  maxPagesPerFolder: number;
+  foldersScanned: number;
+  scannedMessages: number;
+  minMessageCount: number;
+  maxCandidatesPerFolder: number;
+  maxDistinctSendersForDomainRule: number;
+  folderPlans: HighYieldGovernancePlannerReport[];
+  folderSummary: {
+    draftRuleFolders: number;
+    mixedDomainFolders: number;
+    stopLowYieldFolders: number;
+  };
+  recommendedNextAction: "draft_rules" | "review_mixed_domains" | "stop_low_yield";
+  mutationsAttempted: 0;
+}
+
 export interface CleanupBatchPreview {
   provider: string;
   folder: string;
@@ -637,6 +673,11 @@ export interface MailTools {
   }>;
   planHighYieldGovernance(input: HighYieldGovernanceInput): Promise<{
     planner: HighYieldGovernancePlannerReport;
+    rulesetPatch: RulesetPatchDraft;
+    mutationsAttempted: 0;
+  }>;
+  planMailboxGovernanceCampaign(input: MailboxGovernanceCampaignInput): Promise<{
+    campaign: MailboxGovernanceCampaignReport;
     rulesetPatch: RulesetPatchDraft;
     mutationsAttempted: 0;
   }>;
@@ -1233,6 +1274,140 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
             mixedDomainCandidates: mixedDomainCandidates.length,
             lowYieldDomainCandidates,
             truncated: allHighYieldCandidates.length > highYieldCandidates.length,
+          },
+          recommendedNextAction,
+          mutationsAttempted: 0,
+        },
+        rulesetPatch: {
+          ...rulesetPatch,
+          renderedDraft,
+          changelog,
+        },
+        mutationsAttempted: 0,
+      };
+    },
+
+    async planMailboxGovernanceCampaign(campaignInput) {
+      const existingRuleset = campaignInput.rulesFile
+        ? await loadClassificationRuleset(campaignInput.rulesFile)
+        : undefined;
+      const existingRules = existingRuleset?.rules ?? campaignInput.rules ?? [];
+      const pageSize = Math.max(campaignInput.pageSize, 0);
+      const maxPagesPerFolder = Math.max(campaignInput.maxPagesPerFolder, 0);
+      const scanOffset = Math.max(campaignInput.scanOffset ?? 0, 0);
+      const scanOrder = campaignInput.order ?? "oldest";
+      const minMessageCount = Math.max(campaignInput.minMessageCount ?? 10, 1);
+      const maxCandidatesPerFolder = Math.max(campaignInput.maxCandidatesPerFolder ?? DEFAULT_SENDER_GOVERNANCE_CANDIDATE_LIMIT, 0);
+      const maxDistinctSendersForDomainRule = Math.max(campaignInput.maxDistinctSendersForDomainRule ?? 2, 1);
+      const ruleGroup = campaignInput.ruleGroup ?? { id: "sender_governance", label: "Sender governance" };
+      const folderPlans: HighYieldGovernancePlannerReport[] = [];
+      const directCandidateByDomain = new Map<string, SenderGovernanceCandidate>();
+      let provider: string = input.runtimeConfig?.provider ?? "fixture";
+
+      for (const folder of campaignInput.folders) {
+        const scanWindow = await scanMetadataWindow(input.provider, {
+          folder,
+          limit: pageSize,
+          maxPages: maxPagesPerFolder,
+          order: scanOrder,
+          offset: scanOffset,
+        });
+        const messages = scanWindow.messages;
+        provider = messages[0]?.ref.provider ?? provider;
+        const allCandidates = buildHighYieldGovernanceCandidates(messages, {
+          minMessageCount,
+          maxDistinctSendersForDomainRule,
+          ruleGroup,
+        });
+        const allHighYieldCandidates = allCandidates.filter((candidate) => candidate.messageCount >= minMessageCount);
+        const highYieldCandidates = allHighYieldCandidates.slice(0, maxCandidatesPerFolder);
+        const directCandidates = highYieldCandidates.filter((candidate) => candidate.recommendedAction === "draft_domain_rule");
+        const mixedDomainCandidates = highYieldCandidates.filter((candidate) => candidate.recommendedAction === "break_down_sender");
+        for (const candidate of directCandidates) {
+          if (directCandidateByDomain.has(candidate.domain)) continue;
+          directCandidateByDomain.set(candidate.domain, {
+            domain: candidate.domain,
+            messageCount: candidate.messageCount,
+            seenCount: candidate.seenCount,
+            unreadCount: candidate.unreadCount,
+            firstDate: candidate.firstDate,
+            lastDate: candidate.lastDate,
+            sampleSubjects: candidate.sampleSubjects,
+            senders: candidate.topSenders.map((sender) => sender.sender),
+            suggestedRule: candidate.suggestedRule!,
+          });
+        }
+        const lowYieldDomainCandidates = allCandidates.length - allHighYieldCandidates.length;
+        const recommendedNextAction = directCandidates.length > 0
+          ? mixedDomainCandidates.length > 0 ? "review_mixed_domains" : "draft_rules"
+          : mixedDomainCandidates.length > 0 ? "review_mixed_domains" : "stop_low_yield";
+
+        folderPlans.push({
+          provider,
+          folder,
+          scanOrder,
+          scanOffset,
+          pageSize,
+          maxPages: maxPagesPerFolder,
+          pagesScanned: scanWindow.pagesScanned,
+          scannedMessages: messages.length,
+          minMessageCount,
+          maxCandidates: maxCandidatesPerFolder,
+          maxDistinctSendersForDomainRule,
+          candidates: highYieldCandidates,
+          candidateSummary: {
+            totalDomainCandidates: allCandidates.length,
+            returnedHighYieldCandidates: highYieldCandidates.length,
+            directRuleCandidates: directCandidates.length,
+            mixedDomainCandidates: mixedDomainCandidates.length,
+            lowYieldDomainCandidates,
+            truncated: allHighYieldCandidates.length > highYieldCandidates.length,
+          },
+          recommendedNextAction,
+          mutationsAttempted: 0,
+        });
+      }
+
+      const sortedFolderPlans = folderPlans.sort((left, right) =>
+        folderActionRank(left.recommendedNextAction) - folderActionRank(right.recommendedNextAction)
+        || folderPlannedMessageCount(right) - folderPlannedMessageCount(left)
+        || left.folder.localeCompare(right.folder)
+      );
+      const draftRuleFolders = folderPlans.filter((plan) => plan.candidateSummary.directRuleCandidates > 0).length;
+      const mixedDomainFolders = folderPlans.filter((plan) => plan.candidateSummary.directRuleCandidates === 0 && plan.candidateSummary.mixedDomainCandidates > 0).length;
+      const stopLowYieldFolders = folderPlans.filter((plan) => plan.recommendedNextAction === "stop_low_yield").length;
+      const rulesetPatch = buildRulesetPatchDraft({
+        candidates: [...directCandidateByDomain.values()],
+        selectedSenderDomains: [...directCandidateByDomain.keys()],
+        selectedFromIncludes: [],
+        existingRules,
+        ruleGroup,
+        ruleset: existingRuleset?.metadata,
+      });
+      const renderedDraft = renderRulesetPatchDraft(rulesetPatch, existingRuleset);
+      const changelog = formatRulesetPatchChangelog(rulesetPatch);
+      const recommendedNextAction = draftRuleFolders > 0
+        ? "draft_rules"
+        : mixedDomainFolders > 0 ? "review_mixed_domains" : "stop_low_yield";
+
+      return {
+        campaign: {
+          provider,
+          folders: campaignInput.folders,
+          scanOrder,
+          scanOffset,
+          pageSize,
+          maxPagesPerFolder,
+          foldersScanned: folderPlans.length,
+          scannedMessages: folderPlans.reduce((sum, plan) => sum + plan.scannedMessages, 0),
+          minMessageCount,
+          maxCandidatesPerFolder,
+          maxDistinctSendersForDomainRule,
+          folderPlans: sortedFolderPlans,
+          folderSummary: {
+            draftRuleFolders,
+            mixedDomainFolders,
+            stopLowYieldFolders,
           },
           recommendedNextAction,
           mutationsAttempted: 0,
@@ -2094,6 +2269,16 @@ function buildHighYieldGovernanceCandidates(
       || left.recommendedAction.localeCompare(right.recommendedAction)
       || left.domain.localeCompare(right.domain)
     );
+}
+
+function folderActionRank(action: HighYieldGovernancePlannerReport["recommendedNextAction"]): number {
+  if (action === "draft_rules") return 0;
+  if (action === "review_mixed_domains") return 1;
+  return 2;
+}
+
+function folderPlannedMessageCount(plan: HighYieldGovernancePlannerReport): number {
+  return plan.candidates.reduce((sum, candidate) => sum + candidate.messageCount, 0);
 }
 
 function limitSenderGovernanceCandidates(

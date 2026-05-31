@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 
 import { createMailTools } from "../src/tools/mail-tools.js";
 import { FixtureMailProvider } from "../src/providers/fixture-provider.js";
+import type { MessageSummary } from "../src/providers/types.js";
 import { confirmOperationPlan, createOperationPlan } from "../src/operation-plan.js";
 
 describe("mail tools", () => {
@@ -1285,6 +1286,104 @@ describe("mail tools", () => {
       },
     ]);
     expect(result.rulesetPatch.rulesToAdd).toHaveLength(1);
+  });
+
+  it("ranks folders for mailbox-wide high-yield governance campaigns", async () => {
+    const byFolder: Record<string, MessageSummary[]> = {
+      INBOX: Array.from({ length: 2 }, (_, index) => ({
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: `inbox-${index + 1}` },
+        from: "Low Yield <notice@low.example.com>",
+        subject: `Low yield ${index + 1}`,
+        date: `2026-05-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "too small",
+        flags: [],
+      })),
+      Archive: Array.from({ length: 12 }, (_, index) => ({
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Archive", uid: `steam-${index + 1}` },
+        from: index % 2 === 0 ? "Steam <noreply@steampowered.com>" : "Steam Support <support@steampowered.com>",
+        subject: `Steam update ${index + 1}`,
+        date: `2026-06-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "platform",
+        flags: [],
+      })),
+      "开发社区": Array.from({ length: 11 }, (_, index) => ({
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "开发社区", uid: `qq-${index + 1}` },
+        from: [
+          "QQ Mail Admin <admin@qq.com>",
+          "Friend <friend@qq.com>",
+          "Shop <shop@qq.com>",
+        ][index % 3],
+        subject: `QQ mixed ${index + 1}`,
+        date: `2026-07-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "mixed",
+        flags: [],
+      })),
+    };
+    const scanInputs: unknown[] = [];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => {
+          throw new Error("campaign planner should use the window scanner");
+        },
+        scanMailboxMetadataWindow: async (input) => {
+          scanInputs.push(input);
+          return {
+            pagesScanned: 1,
+            mailboxSnapshot: { folder: input.folder, exists: byFolder[input.folder]?.length ?? 0, uidValidity: "campaign" },
+            messages: byFolder[input.folder] ?? [],
+          };
+        },
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await (tools as any).planMailboxGovernanceCampaign({
+      folders: ["INBOX", "Archive", "开发社区"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      order: "oldest",
+      minMessageCount: 10,
+      maxDistinctSendersForDomainRule: 2,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "其他文件夹/Bulk platform" } },
+    });
+
+    expect(scanInputs).toEqual([
+      { folder: "INBOX", limit: 50, maxPages: 1, order: "oldest", offset: 0 },
+      { folder: "Archive", limit: 50, maxPages: 1, order: "oldest", offset: 0 },
+      { folder: "开发社区", limit: 50, maxPages: 1, order: "oldest", offset: 0 },
+    ]);
+    expect(result.campaign).toMatchObject({
+      provider: "fixture",
+      foldersScanned: 3,
+      scannedMessages: 25,
+      recommendedNextAction: "draft_rules",
+      folderSummary: {
+        draftRuleFolders: 1,
+        mixedDomainFolders: 1,
+        stopLowYieldFolders: 1,
+      },
+      mutationsAttempted: 0,
+    });
+    expect(result.campaign.folderPlans.map((plan: any) => ({
+      folder: plan.folder,
+      recommendedNextAction: plan.recommendedNextAction,
+      directRuleCandidates: plan.candidateSummary.directRuleCandidates,
+      mixedDomainCandidates: plan.candidateSummary.mixedDomainCandidates,
+    }))).toEqual([
+      { folder: "Archive", recommendedNextAction: "draft_rules", directRuleCandidates: 1, mixedDomainCandidates: 0 },
+      { folder: "开发社区", recommendedNextAction: "review_mixed_domains", directRuleCandidates: 0, mixedDomainCandidates: 1 },
+      { folder: "INBOX", recommendedNextAction: "stop_low_yield", directRuleCandidates: 0, mixedDomainCandidates: 0 },
+    ]);
+    expect(result.rulesetPatch.rulesToAdd).toMatchObject([
+      {
+        id: "sender-domain-steampowered-com",
+        groupId: "bulk_platform",
+        match: { fromDomainIncludes: "steampowered.com" },
+      },
+    ]);
   });
 
   it("builds Gmail-like bulk governance previews from sender and content categories", async () => {

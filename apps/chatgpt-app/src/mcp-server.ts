@@ -402,6 +402,36 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
   );
 
   server.registerTool(
+    "plan_mailbox_governance_campaign",
+    {
+      title: "Plan mailbox governance campaign",
+      description: "Use this to rank multiple folders by high-yield cleanup opportunity before spending agent time on mailbox governance.",
+      inputSchema: {
+        runId: z.string(),
+        folders: z.array(z.string()).min(1).max(50),
+        pageSize: z.number().int().min(1).max(50),
+        maxPagesPerFolder: z.number().int().min(1).max(100),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+        minMessageCount: z.number().int().min(1).max(500).optional(),
+        maxCandidatesPerFolder: z.number().int().min(0).max(100).optional(),
+        maxDistinctSendersForDomainRule: z.number().int().min(1).max(100).optional(),
+        ruleGroup: z.object({
+          id: z.string(),
+          label: z.string(),
+          target: z.object({
+            folder: z.string(),
+          }).optional(),
+        }).optional(),
+        rules: z.array(classificationRuleSchema).optional(),
+        rulesFile: z.string().optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await withMcpAudit("plan_mailbox_governance_campaign", input.runId, input, await tools.planMailboxGovernanceCampaign(input))),
+  );
+
+  server.registerTool(
     "sender_breakdown",
     {
       title: "Break down senders",

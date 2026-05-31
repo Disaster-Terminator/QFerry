@@ -46,6 +46,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "preview_cleanup_batch",
       "plan_sender_governance",
       "plan_high_yield_governance",
+      "plan_mailbox_governance_campaign",
       "sender_breakdown",
       "classification_map",
       "classification_sweep",
@@ -68,6 +69,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "preview_cleanup_batch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "plan_sender_governance")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "plan_high_yield_governance")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "plan_mailbox_governance_campaign")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "sender_breakdown")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "bulk_governance_preview")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "ruleset_governance_preview")?.annotations?.destructiveHint).toBe(false);
@@ -2095,6 +2097,94 @@ describe("QFerry ChatGPT App MCP server", () => {
           mixedDomainCandidates: 1,
         },
         recommendedNextAction: "review_mixed_domains",
+        mutationsAttempted: 0,
+      },
+      rulesetPatch: {
+        rulesToAdd: [
+          {
+            id: "sender-domain-steampowered-com",
+            groupId: "bulk_platform",
+            match: { fromDomainIncludes: "steampowered.com" },
+          },
+        ],
+      },
+      mutationsAttempted: 0,
+    });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("operationPlanId");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("plans mailbox governance campaigns through the MCP server without creating operation plans", async () => {
+    const byFolder: Record<string, MessageSummary[]> = {
+      INBOX: Array.from({ length: 2 }, (_, index) => ({
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: `inbox-${index + 1}` },
+        from: "Low Yield <notice@low.example.com>",
+        subject: `Low yield ${index + 1}`,
+        date: `2026-05-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "too small",
+        flags: [],
+      })),
+      Archive: Array.from({ length: 12 }, (_, index) => ({
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Archive", uid: `steam-${index + 1}` },
+        from: index % 2 === 0 ? "Steam <noreply@steampowered.com>" : "Steam Support <support@steampowered.com>",
+        subject: `Steam update ${index + 1}`,
+        date: `2026-06-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "platform",
+        flags: [],
+      })),
+    };
+    const provider: MailProvider = {
+      listMailboxes: async () => [],
+      scanMailboxMetadata: async () => {
+        throw new Error("plan_mailbox_governance_campaign should use the window scanner");
+      },
+      scanMailboxMetadataWindow: async (input) => ({
+        pagesScanned: 1,
+        mailboxSnapshot: { folder: input.folder, exists: byFolder[input.folder]?.length ?? 0, uidValidity: "campaign" },
+        messages: byFolder[input.folder] ?? [],
+      }),
+      fetchMessage: async () => {
+        throw new Error("not used");
+      },
+    };
+    const server = createQFerryMcpServer({ provider });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "plan_mailbox_governance_campaign",
+      arguments: {
+        runId: "run-mcp-mailbox-campaign",
+        folders: ["INBOX", "Archive"],
+        pageSize: 50,
+        maxPagesPerFolder: 1,
+        minMessageCount: 10,
+        maxDistinctSendersForDomainRule: 2,
+        ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "其他文件夹/Bulk platform" } },
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      campaign: {
+        provider: "fixture",
+        foldersScanned: 2,
+        scannedMessages: 14,
+        recommendedNextAction: "draft_rules",
+        folderSummary: {
+          draftRuleFolders: 1,
+          stopLowYieldFolders: 1,
+        },
+        folderPlans: [
+          { folder: "Archive", recommendedNextAction: "draft_rules" },
+          { folder: "INBOX", recommendedNextAction: "stop_low_yield" },
+        ],
         mutationsAttempted: 0,
       },
       rulesetPatch: {
