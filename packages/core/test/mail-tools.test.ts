@@ -1288,6 +1288,70 @@ describe("mail tools", () => {
     expect(result.rulesetPatch.rulesToAdd).toHaveLength(1);
   });
 
+  it("uses runtime rules when planning high-yield governance drafts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-high-yield-default-rules-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "default-rules",
+      defaultGroupId: "review",
+      groups: [
+        { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+        { id: "review", label: "Review" },
+      ],
+      rules: [{ id: "existing-steam", groupId: "bulk_platform", match: { fromDomainIncludes: "steampowered.com" } }],
+    }), "utf8");
+    const messages: MessageSummary[] = Array.from({ length: 12 }, (_, index) => ({
+      ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: `steam-${index + 1}` },
+      from: index % 2 === 0 ? "Steam <noreply@steampowered.com>" : "Steam Support <support@steampowered.com>",
+      subject: `Steam update ${index + 1}`,
+      date: `2026-06-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+      snippet: "platform",
+      flags: [],
+    }));
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+      runtimeConfig: {
+        provider: "fixture",
+        accountAlias: "demo",
+        configSource: "test",
+        mutationAllowed: false,
+        mutationCapable: false,
+        mutationOperationallyReady: false,
+        mutationRequiresConfirmation: false,
+        authConfigured: false,
+        providerReady: true,
+        metadataSampleLimit: 10,
+        statusWarnings: [],
+        rulesFile,
+      },
+    });
+
+    const result = await (tools as any).planHighYieldGovernance({
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      minMessageCount: 10,
+      maxDistinctSendersForDomainRule: 2,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+    });
+
+    expect(result.rulesetPatch.rulesToAdd).toEqual([]);
+    expect(result.rulesetPatch.skippedDuplicateRules).toEqual([
+      {
+        ruleId: "existing-steam",
+        reason: "match already covered by existing rule",
+        match: { fromDomainIncludes: "steampowered.com" },
+      },
+    ]);
+    expect(result.rulesetPatch.renderedDraft?.rules).toHaveLength(1);
+  });
+
   it("ranks folders for mailbox-wide high-yield governance campaigns", async () => {
     const byFolder: Record<string, MessageSummary[]> = {
       INBOX: Array.from({ length: 2 }, (_, index) => ({
@@ -1384,6 +1448,80 @@ describe("mail tools", () => {
         match: { fromDomainIncludes: "steampowered.com" },
       },
     ]);
+  });
+
+  it("uses runtime rules when planning mailbox-wide governance campaigns", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-campaign-default-rules-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "default-rules",
+      defaultGroupId: "review",
+      groups: [
+        { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+        { id: "review", label: "Review" },
+      ],
+      rules: [{ id: "existing-steam", groupId: "bulk_platform", match: { fromDomainIncludes: "steampowered.com" } }],
+    }), "utf8");
+    const byFolder: Record<string, MessageSummary[]> = {
+      Archive: Array.from({ length: 12 }, (_, index) => ({
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Archive", uid: `steam-${index + 1}` },
+        from: index % 2 === 0 ? "Steam <noreply@steampowered.com>" : "Steam Support <support@steampowered.com>",
+        subject: `Steam update ${index + 1}`,
+        date: `2026-06-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+        snippet: "platform",
+        flags: [],
+      })),
+    };
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => {
+          throw new Error("campaign planner should use the window scanner");
+        },
+        scanMailboxMetadataWindow: async (input) => ({
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: input.folder, exists: byFolder[input.folder]?.length ?? 0, uidValidity: "campaign" },
+          messages: byFolder[input.folder] ?? [],
+        }),
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+      runtimeConfig: {
+        provider: "fixture",
+        accountAlias: "demo",
+        configSource: "test",
+        mutationAllowed: false,
+        mutationCapable: false,
+        mutationOperationallyReady: false,
+        mutationRequiresConfirmation: false,
+        authConfigured: false,
+        providerReady: true,
+        metadataSampleLimit: 10,
+        statusWarnings: [],
+        rulesFile,
+      },
+    });
+
+    const result = await (tools as any).planMailboxGovernanceCampaign({
+      folders: ["Archive"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      minMessageCount: 10,
+      maxDistinctSendersForDomainRule: 2,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+    });
+
+    expect(result.campaign.folderSummary.draftRuleFolders).toBe(1);
+    expect(result.rulesetPatch.rulesToAdd).toEqual([]);
+    expect(result.rulesetPatch.skippedDuplicateRules).toEqual([
+      {
+        ruleId: "existing-steam",
+        reason: "match already covered by existing rule",
+        match: { fromDomainIncludes: "steampowered.com" },
+      },
+    ]);
+    expect(result.rulesetPatch.renderedDraft?.rules).toHaveLength(1);
   });
 
   it("builds Gmail-like bulk governance previews from sender and content categories", async () => {

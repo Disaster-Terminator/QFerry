@@ -1198,10 +1198,11 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async planHighYieldGovernance(plannerInput) {
-      const existingRuleset = plannerInput.rulesFile
-        ? await loadClassificationRuleset(plannerInput.rulesFile)
+      const resolvedInput = withRuntimeRulesFile(plannerInput, input.runtimeConfig);
+      const existingRuleset = resolvedInput.rulesFile
+        ? await loadClassificationRuleset(resolvedInput.rulesFile)
         : undefined;
-      const existingRules = existingRuleset?.rules ?? plannerInput.rules ?? [];
+      const existingRules = existingRuleset?.rules ?? resolvedInput.rules ?? [];
       const pageSize = Math.max(plannerInput.pageSize, 0);
       const maxPages = Math.max(plannerInput.maxPages, 0);
       const scanOffset = Math.max(plannerInput.scanOffset ?? 0, 0);
@@ -1288,10 +1289,11 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
 
     async planMailboxGovernanceCampaign(campaignInput) {
-      const existingRuleset = campaignInput.rulesFile
-        ? await loadClassificationRuleset(campaignInput.rulesFile)
+      const resolvedInput = withRuntimeRulesFile(campaignInput, input.runtimeConfig);
+      const existingRuleset = resolvedInput.rulesFile
+        ? await loadClassificationRuleset(resolvedInput.rulesFile)
         : undefined;
-      const existingRules = existingRuleset?.rules ?? campaignInput.rules ?? [];
+      const existingRules = existingRuleset?.rules ?? resolvedInput.rules ?? [];
       const pageSize = Math.max(campaignInput.pageSize, 0);
       const maxPagesPerFolder = Math.max(campaignInput.maxPagesPerFolder, 0);
       const scanOffset = Math.max(campaignInput.scanOffset ?? 0, 0);
