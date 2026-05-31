@@ -904,7 +904,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
             targetFolder,
           )
         : await input.provider.moveMessages(messageRefsToMove, targetFolder);
-      const remainingMessages = plan.messageRefs.length - moveResult.moved;
+      const remainingMessages = plan.messageRefs.length - messageRefsToMove.length;
       return {
         result: {
           operationPlanId: plan.operationPlanId,

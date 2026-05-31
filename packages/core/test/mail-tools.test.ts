@@ -2864,14 +2864,14 @@ describe("mail tools", () => {
 
     expect(result.result).toMatchObject({
       operationPlanId: plan.operationPlanId,
-      status: "partially_executed",
+      status: "executed",
       action: "move",
       attemptedMessages: 3,
       mutationsAttempted: 3,
       moved: 2,
       reconciliationStatus: "matched",
       totalPlanMessages: 3,
-      remainingMessages: 1,
+      remainingMessages: 0,
       reconciliations: [
         {
           sourceDelta: -2,

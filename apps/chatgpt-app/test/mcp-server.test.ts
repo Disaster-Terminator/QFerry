@@ -1564,8 +1564,8 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
-  it("does not resume a partial move plan when moved refs cannot be identified", async () => {
-    const messages: MessageSummary[] = ["1", "2", "3"].map((uid) => ({
+  it("resumes only unattempted refs when a partial move reports fewer moved refs than attempted", async () => {
+    const messages: MessageSummary[] = ["1", "2", "3", "4", "5"].map((uid) => ({
       ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid },
       from: "newsletter@example.com",
       subject: `Promo ${uid}`,
@@ -1573,7 +1573,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       snippet: "",
       flags: [],
     }));
-    let inboxCount = 3;
+    let inboxCount = 5;
     let archiveCount = 0;
     const server = createQFerryMcpServer({
       provider: {
@@ -1644,10 +1644,13 @@ describe("QFerry ChatGPT App MCP server", () => {
       arguments: { operationPlanId, maxMessages: 3 },
     });
 
-    expect(secondExecute.isError).toBe(true);
-    expect(secondExecute.content).toContainEqual({
-      type: "text",
-      text: `Operation plan already consumed: ${operationPlanId}`,
+    expect(secondExecute.structuredContent).toMatchObject({
+      result: {
+        status: "executed",
+        attemptedMessages: 2,
+        moved: 1,
+        remainingMessages: 0,
+      },
     });
 
     await client.close();
