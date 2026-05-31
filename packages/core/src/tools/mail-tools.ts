@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { classifyMessages, type ClassificationRule, type MessageClassification, type PriorityBucketId, type PriorityConfidence } from "../classification.js";
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
 import type { MailboxInfo, MailboxSummary, MailProvider, MailboxWindowSnapshot, MessageDetail, MessageSummary, MoveMessagesReconciliation, ProviderCapabilitySnapshot, ScanMailboxMetadataWindowResult } from "../providers/types.js";
@@ -78,6 +79,7 @@ export interface ExecuteCleanupResult {
     requestedMaxMessages: number;
     executedMessages: number;
   };
+  batchAudit?: MessageRefAuditSummary;
   reconciliations?: Array<{
     sourceFolder: string;
     targetFolder: string;
@@ -95,6 +97,22 @@ export interface ExecuteCleanupResult {
     reconciliationStatus: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "provider_result_unreliable";
   }>;
   createdFolder?: string;
+}
+
+export interface MessageRefAuditSummary {
+  count: number;
+  digest: string;
+  duplicateCount: number;
+  folders: Array<{
+    folder: string;
+    count: number;
+    uidValidity?: string;
+    firstUid?: string;
+    lastUid?: string;
+    minUid?: string;
+    maxUid?: string;
+    digest: string;
+  }>;
 }
 
 export interface SpamCandidate {
@@ -288,6 +306,7 @@ export interface RulesetGovernanceGroupPlan {
   operationPlanId: string;
   runId: string;
   targetResolution?: MailboxTargetResolution;
+  messageRefAudit: MessageRefAuditSummary;
 }
 
 export interface RulesetGovernanceSkippedGroup {
@@ -905,20 +924,24 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           )
         : await input.provider.moveMessages(messageRefsToMove, targetFolder);
       const remainingMessages = plan.messageRefs.length - messageRefsToMove.length;
+      const reconciliationStatus = summarizeMoveReconciliationStatus(moveResult.reconciliations);
       return {
         result: {
           operationPlanId: plan.operationPlanId,
-          status: remainingMessages > 0 ? "partially_executed" : "executed",
+          status: reconciliationStatus === "target_reconciled_source_unreliable"
+            ? "blocked"
+            : remainingMessages > 0 ? "partially_executed" : "executed",
           action: plan.action,
           attemptedMessages: messageRefsToMove.length,
           mutationsAttempted: messageRefsToMove.length,
           moved: moveResult.moved,
-          reconciliationStatus: summarizeMoveReconciliationStatus(moveResult.reconciliations),
+          reconciliationStatus,
           totalPlanMessages: plan.messageRefs.length,
           remainingMessages,
           ...(executionLimit === undefined
             ? {}
             : { executionBatch: { requestedMaxMessages: executionLimit, executedMessages: moveResult.moved } }),
+          batchAudit: summarizeMessageRefs(messageRefsToMove),
           reconciliations: moveResult.reconciliations,
         },
       };
@@ -1788,6 +1811,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           operationPlanId: plan.operationPlanId,
           runId: plan.runId,
           targetResolution: targetResolution.resolution,
+          messageRefAudit: summarizeMessageRefs(messageRefs),
         });
       }
 
@@ -2889,6 +2913,35 @@ function stableHexHash(value: string): string {
 
 function messageRefKey(ref: MessageRef): string {
   return `${ref.provider}\0${ref.accountAlias}\0${ref.folder}\0${ref.uid}\0${ref.uidValidity ?? ""}`;
+}
+
+function summarizeMessageRefs(refs: MessageRef[]): MessageRefAuditSummary {
+  const keys = refs.map(messageRefKey);
+  const grouped = groupMessageRefsByFolder(refs);
+  return {
+    count: refs.length,
+    digest: digestValues(keys),
+    duplicateCount: refs.length - new Set(keys).size,
+    folders: [...grouped.entries()].map(([folder, folderRefs]) => {
+      const numericUids = folderRefs
+        .map((ref) => Number(ref.uid))
+        .filter((uid) => Number.isSafeInteger(uid));
+      const uidValidityValues = [...new Set(folderRefs.map((ref) => ref.uidValidity).filter((value): value is string => value !== undefined))];
+      return {
+        folder,
+        count: folderRefs.length,
+        ...(uidValidityValues.length === 1 ? { uidValidity: uidValidityValues[0] } : {}),
+        firstUid: folderRefs[0]?.uid,
+        lastUid: folderRefs[folderRefs.length - 1]?.uid,
+        ...(numericUids.length > 0 ? { minUid: String(Math.min(...numericUids)), maxUid: String(Math.max(...numericUids)) } : {}),
+        digest: digestValues(folderRefs.map(messageRefKey)),
+      };
+    }),
+  };
+}
+
+function digestValues(values: string[]): string {
+  return createHash("sha256").update(values.join("\n")).digest("hex").slice(0, 16);
 }
 
 function normalizeMoveExecutionLimit(maxMessages: number | undefined): number | undefined {

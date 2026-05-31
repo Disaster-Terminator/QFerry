@@ -1464,6 +1464,12 @@ describe("QFerry ChatGPT App MCP server", () => {
         status: "executed",
         moved: 1,
         reconciliationStatus: "matched",
+        batchAudit: {
+          count: 1,
+          folders: [
+            { folder: "INBOX", count: 1, firstUid: "1", lastUid: "1" },
+          ],
+        },
       },
     });
     const audit = execute.structuredContent as { audit?: { tracePath?: string; summaryPath?: string } };
@@ -1477,6 +1483,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(summary).toContain("- lastTool: execute_cleanup");
     expect(summary).toContain('- target: {"folder":"Archive"}');
     expect(summary).toContain("- reconciliationStatus: matched");
+    expect(summary).toContain("- batchAudit:");
     expect(summary).toContain("- reconciliations:");
 
     await client.close();

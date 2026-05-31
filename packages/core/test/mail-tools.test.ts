@@ -2734,15 +2734,22 @@ describe("mail tools", () => {
 
     expect(result.result).toMatchObject({
       operationPlanId: plan.operationPlanId,
-      status: "executed",
+      status: "blocked",
       action: "move",
       attemptedMessages: 2,
       mutationsAttempted: 2,
       moved: 2,
       reconciliationStatus: "target_reconciled_source_unreliable",
+      remainingMessages: 0,
       reconciliations: [
         { sourceDelta: 1, targetDelta: 2, reconciliationStatus: "target_reconciled_source_unreliable" },
       ],
+      batchAudit: {
+        count: 2,
+        folders: [
+          { folder: "INBOX", count: 2, firstUid: "1", lastUid: "2" },
+        ],
+      },
     });
     expect(movedRefs).toEqual([
       [
@@ -2752,7 +2759,7 @@ describe("mail tools", () => {
     ]);
   });
 
-  it("marks source deltas as advisory when target reconciliation succeeds but source changed concurrently", async () => {
+  it("blocks move plans when target reconciles but source count changes unexpectedly", async () => {
     const provider = FixtureMailProvider.demo();
     const counts = new Map([
       ["INBOX", 2],
@@ -2797,19 +2804,32 @@ describe("mail tools", () => {
 
     const result = await tools.executeCleanup({ plan });
 
-    expect(result.result.reconciliationStatus).toBe("target_reconciled_source_unreliable");
-    expect(result.result.reconciliations).toEqual([
-      expect.objectContaining({
-        sourceDelta: -2,
-        expectedSourceDelta: -1,
-        targetDelta: 1,
-        expectedTargetDelta: 1,
-        targetDeltaReconciled: true,
-        sourceDeltaReliable: false,
-        sourceDeltaStatus: "concurrent_or_external_change",
-        reconciliationStatus: "target_reconciled_source_unreliable",
-      }),
-    ]);
+    expect(result.result).toMatchObject({
+      status: "blocked",
+      moved: 1,
+      attemptedMessages: 1,
+      mutationsAttempted: 1,
+      remainingMessages: 0,
+      reconciliationStatus: "target_reconciled_source_unreliable",
+      reconciliations: [
+        {
+          sourceDelta: -2,
+          expectedSourceDelta: -1,
+          targetDelta: 1,
+          expectedTargetDelta: 1,
+          targetDeltaReconciled: true,
+          sourceDeltaReliable: false,
+          sourceDeltaStatus: "concurrent_or_external_change",
+          reconciliationStatus: "target_reconciled_source_unreliable",
+        },
+      ],
+      batchAudit: {
+        count: 1,
+        folders: [
+          { folder: "INBOX", count: 1, firstUid: "1", lastUid: "1" },
+        ],
+      },
+    });
   });
 
   it("reports partial provider move counts as partially executed after target reconciliation", async () => {
