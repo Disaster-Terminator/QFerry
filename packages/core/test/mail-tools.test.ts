@@ -175,6 +175,9 @@ describe("mail tools", () => {
     expect(JSON.stringify(result)).not.toContain("secret");
     expect(JSON.stringify(result)).not.toContain("25abc@qq.com");
     expect(result.status.qqmail?.email).toBeUndefined();
+    expect(result.executionPolicy).toEqual({
+      moveTargetReconciledSourceUnreliableIsBlocking: false,
+    });
   });
 
   it("searches bounded metadata without returning message bodies", async () => {

@@ -12,6 +12,9 @@ const MOVE_RECONCILE_ATTEMPTS = 10;
 const MOVE_RECONCILE_DELAY_MS = 1_000;
 const DEFAULT_CLASSIFICATION_PARENT_PATH = "其他文件夹";
 const DEFAULT_SENDER_GOVERNANCE_CANDIDATE_LIMIT = 10;
+const EXECUTION_POLICY = {
+  moveTargetReconciledSourceUnreliableIsBlocking: false,
+} as const;
 
 export interface CreateMailToolsInput {
   provider: MailProvider;
@@ -642,6 +645,7 @@ export interface SenderBreakdownReport {
 export interface MailTools {
   getStatus(): Promise<{
     status: QFerryRuntimeConfig;
+    executionPolicy: typeof EXECUTION_POLICY;
   }>;
   listMailboxes(): Promise<{ mailboxes: MailboxInfo[] }>;
   getMailboxSummary(input: GetMailboxSummaryInput): Promise<{ mailbox: MailboxSummary }>;
@@ -736,7 +740,10 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
   return {
     async getStatus() {
       if (input.runtimeConfig) {
-        return { status: redactRuntimeConfig(input.runtimeConfig) };
+        return {
+          status: redactRuntimeConfig(input.runtimeConfig),
+          executionPolicy: EXECUTION_POLICY,
+        };
       }
       const capability = input.provider.getCapabilitySnapshot
         ? await input.provider.getCapabilitySnapshot()
@@ -755,6 +762,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           metadataSampleLimit: capability?.maxRecommendedScanLimit ?? 1,
           statusWarnings: [],
         },
+        executionPolicy: EXECUTION_POLICY,
       };
     },
 
