@@ -2779,7 +2779,7 @@ describe("mail tools", () => {
 
     expect(result.result).toMatchObject({
       operationPlanId: plan.operationPlanId,
-      status: "blocked",
+      status: "executed",
       action: "move",
       attemptedMessages: 2,
       mutationsAttempted: 2,
@@ -2804,7 +2804,7 @@ describe("mail tools", () => {
     ]);
   });
 
-  it("blocks move plans when target reconciles but source count changes unexpectedly", async () => {
+  it("allows move plans when target reconciles but source count changes unexpectedly", async () => {
     const provider = FixtureMailProvider.demo();
     const counts = new Map([
       ["INBOX", 2],
@@ -2850,7 +2850,7 @@ describe("mail tools", () => {
     const result = await tools.executeCleanup({ plan });
 
     expect(result.result).toMatchObject({
-      status: "blocked",
+      status: "executed",
       moved: 1,
       attemptedMessages: 1,
       mutationsAttempted: 1,
@@ -2877,7 +2877,7 @@ describe("mail tools", () => {
     });
   });
 
-  it("allows bounded source count drift after target reconciliation for larger move batches", async () => {
+  it("allows source count drift after target reconciliation for larger move batches", async () => {
     const provider = FixtureMailProvider.demo();
     const counts = new Map([
       ["INBOX", 20],

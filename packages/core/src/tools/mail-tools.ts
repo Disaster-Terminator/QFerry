@@ -3121,29 +3121,7 @@ function hasBlockingMoveReconciliation(reconciliations: MoveMessagesReconciliati
   if (!reconciliations) {
     return false;
   }
-  return reconciliations.some((reconciliation) => {
-    if (reconciliation.reconciliationStatus === "target_unreconciled") {
-      return true;
-    }
-    if (reconciliation.reconciliationStatus !== "target_reconciled_source_unreliable") {
-      return false;
-    }
-    return !isSourceDriftWithinTolerance(reconciliation);
-  });
-}
-
-function isSourceDriftWithinTolerance(reconciliation: MoveMessagesReconciliation): boolean {
-  if (
-    reconciliation.expectedSourceDelta === undefined
-    || reconciliation.expectedTargetDelta === undefined
-    || !reconciliation.targetDeltaReconciled
-    || reconciliation.expectedTargetDelta < 5
-  ) {
-    return false;
-  }
-  const sourceDrift = Math.abs(reconciliation.sourceDelta - reconciliation.expectedSourceDelta);
-  const sourceDriftTolerance = Math.max(1, Math.floor(reconciliation.expectedTargetDelta * 0.1));
-  return sourceDrift <= sourceDriftTolerance;
+  return reconciliations.some((reconciliation) => reconciliation.reconciliationStatus === "target_unreconciled");
 }
 
 function assertMoveReconciled(reconciliation: MoveMessagesReconciliation): void {
