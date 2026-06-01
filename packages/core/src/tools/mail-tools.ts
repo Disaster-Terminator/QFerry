@@ -91,9 +91,10 @@ export interface ExecuteCleanupResult {
     targetDelta: number;
     expectedSourceDelta?: number;
     expectedTargetDelta?: number;
+    sourceDeletedBefore?: number;
     targetDeltaReconciled: boolean;
     sourceDeltaReliable: boolean;
-    sourceDeltaStatus: "matched" | "concurrent_or_external_change";
+    sourceDeltaStatus: "matched" | "matched_with_deleted_expunge" | "concurrent_or_external_change";
     reconciliationStatus: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "provider_result_unreliable";
   }>;
   createdFolder?: string;
@@ -2969,6 +2970,9 @@ async function moveMessagesWithFreshReconciliation(
   for (const [sourceFolder, folderRefs] of groupMessageRefsByFolder(refs)) {
     const sourceBefore = await provider.getMailboxSummary(sourceFolder);
     const targetBefore = await provider.getMailboxSummary(targetFolder);
+    const sourceDeletedBefore = sourceBefore.deleted ?? (provider.getDeletedMessageCount
+      ? await provider.getDeletedMessageCount(sourceFolder)
+      : undefined);
     const result = await provider.moveMessages?.(folderRefs, targetFolder);
     if (!result || result.moved < 0 || result.moved > folderRefs.length) {
       throw new Error(`QQ IMAP batch move returned invalid count for ${sourceFolder}: expected 0..${folderRefs.length}, got ${result?.moved ?? 0}`);
@@ -2981,6 +2985,7 @@ async function moveMessagesWithFreshReconciliation(
       targetBefore: targetBefore.exists,
       expectedSourceDelta: result.movedCountStatus === "unknown" ? undefined : -result.moved,
       expectedTargetDelta: result.movedCountStatus === "unknown" ? undefined : result.moved,
+      sourceDeletedBefore,
       maxTargetDelta: folderRefs.length,
     });
     reconciliations.push(reconciliation);
@@ -3007,6 +3012,7 @@ async function waitForFreshReconciliation(input: {
   targetBefore: number;
   expectedSourceDelta?: number;
   expectedTargetDelta?: number;
+  sourceDeletedBefore?: number;
   maxTargetDelta: number;
 }): Promise<MoveMessagesReconciliation> {
   let latest: MoveMessagesReconciliation | undefined;
@@ -3019,9 +3025,15 @@ async function waitForFreshReconciliation(input: {
     const targetDeltaReconciled = providerMoveCountKnown
       ? targetDelta === input.expectedTargetDelta
       : targetDelta >= 0 && targetDelta <= input.maxTargetDelta;
-    const sourceDeltaReliable = providerMoveCountKnown
+    const sourceDeltaMatched = providerMoveCountKnown
       ? sourceDelta === input.expectedSourceDelta
       : sourceDelta === -targetDelta;
+    const sourceDeltaExplainedByDeleted = providerMoveCountKnown
+      && input.expectedSourceDelta !== undefined
+      && input.sourceDeletedBefore !== undefined
+      && sourceDelta < input.expectedSourceDelta
+      && Math.abs(sourceDelta - input.expectedSourceDelta) <= input.sourceDeletedBefore;
+    const sourceDeltaReliable = sourceDeltaMatched || sourceDeltaExplainedByDeleted;
     latest = {
       sourceFolder: input.sourceFolder,
       targetFolder: input.targetFolder,
@@ -3033,10 +3045,13 @@ async function waitForFreshReconciliation(input: {
       targetDelta,
       expectedSourceDelta: input.expectedSourceDelta,
       expectedTargetDelta: input.expectedTargetDelta,
+      sourceDeletedBefore: input.sourceDeletedBefore,
       targetDeltaReconciled,
       sourceDeltaReliable,
-      sourceDeltaStatus: sourceDeltaReliable
+      sourceDeltaStatus: sourceDeltaMatched
         ? "matched"
+        : sourceDeltaExplainedByDeleted
+          ? "matched_with_deleted_expunge"
         : "concurrent_or_external_change",
       reconciliationStatus: providerMoveCountKnown
         ? classifyMoveReconciliationStatus(targetDeltaReconciled, sourceDeltaReliable)

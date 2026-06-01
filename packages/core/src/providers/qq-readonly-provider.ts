@@ -16,7 +16,8 @@ export interface QqReadOnlyClient {
   connect(): Promise<void>;
   logout(): Promise<void>;
   list(): Promise<Array<{ path: string; delimiter?: string; flags?: Set<string> }>>;
-  mailboxOpen(path: string, options?: { readOnly?: boolean }): Promise<{ exists: number; uidValidity?: bigint | number | string; readOnly?: boolean }>;
+  mailboxOpen(path: string, options?: { readOnly?: boolean }): Promise<{ exists: number; deleted?: number; uidValidity?: bigint | number | string; readOnly?: boolean }>;
+  search?(query: Record<string, unknown>, options?: Record<string, unknown>): Promise<number[]>;
   fetch(range: string, query: Record<string, unknown>, options?: Record<string, unknown>): AsyncIterable<{
     uid: number;
     flags?: Set<string>;
@@ -120,8 +121,21 @@ export class QqReadOnlyProvider implements MailProvider {
       return {
         path: folder,
         exists: mailbox.exists,
+        deleted: mailbox.deleted,
         uidValidity: mailbox.uidValidity === undefined ? undefined : String(mailbox.uidValidity),
       };
+    });
+  }
+
+  async getDeletedMessageCount(folder: string): Promise<number> {
+    return this.withClient("get_deleted_message_count", async (client) => {
+      const mailbox = await client.mailboxOpen(folder, { readOnly: true });
+      if (typeof mailbox.deleted === "number") {
+        return mailbox.deleted;
+      }
+      if (!client.search) return 0;
+      const deletedUids = await client.search({ deleted: true }, { uid: true });
+      return deletedUids.length;
     });
   }
 

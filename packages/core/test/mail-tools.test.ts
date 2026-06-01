@@ -2949,6 +2949,80 @@ describe("mail tools", () => {
     });
   });
 
+  it("treats source count drops explained by pre-existing deleted messages as reconciled", async () => {
+    const provider = FixtureMailProvider.demo();
+    const counts = new Map([
+      ["INBOX", 100],
+      ["Archive", 0],
+    ]);
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        scanMailboxMetadata: provider.scanMailboxMetadata.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        getMailboxSummary: async (folder) => ({
+          path: folder,
+          exists: counts.get(folder) ?? 0,
+        }),
+        getDeletedMessageCount: async (folder) => (folder === "INBOX" ? 29 : 0),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async (refs, targetFolder) => {
+          const sourceFolder = refs[0]?.folder ?? "";
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length - 29);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
+          return { moved: refs.length };
+        },
+      },
+    });
+    const previewPlan = createOperationPlan({
+      runId: "run-execute-deleted-expunge",
+      provider: "fixture",
+      action: "move",
+      messageRefs: Array.from({ length: 34 }, (_, index) => ({
+        provider: "fixture" as const,
+        accountAlias: "demo",
+        folder: "INBOX",
+        uid: String(index + 1),
+      })),
+      target: { folder: "Archive" },
+    });
+    const plan = confirmOperationPlan(previewPlan, previewPlan.operationPlanId);
+
+    const result = await tools.executeCleanup({ plan });
+
+    expect(result.result).toMatchObject({
+      status: "executed",
+      moved: 34,
+      attemptedMessages: 34,
+      mutationsAttempted: 34,
+      remainingMessages: 0,
+      reconciliationStatus: "matched",
+      reconciliations: [
+        {
+          sourceDelta: -63,
+          expectedSourceDelta: -34,
+          targetDelta: 34,
+          expectedTargetDelta: 34,
+          targetDeltaReconciled: true,
+          sourceDeletedBefore: 29,
+          sourceDeltaReliable: true,
+          sourceDeltaStatus: "matched_with_deleted_expunge",
+          reconciliationStatus: "matched",
+        },
+      ],
+    });
+  });
+
   it("reports partial provider move counts as partially executed after target reconciliation", async () => {
     const provider = FixtureMailProvider.demo();
     const counts = new Map([

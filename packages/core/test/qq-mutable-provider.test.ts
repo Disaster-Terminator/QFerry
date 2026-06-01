@@ -119,6 +119,74 @@ describe("QQ mutable provider", () => {
     ]);
   });
 
+  it("counts source messages already flagged as deleted before move reconciliation", async () => {
+    const searches: unknown[] = [];
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      sleep: async () => undefined,
+      clientFactory: () => ({
+        capabilities: nativeMoveCapabilities,
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async (path: string, options: unknown) => {
+          searches.push({ path, options });
+          return { exists: 10, uidValidity: 888n };
+        },
+        search: async (query: unknown, options: unknown) => {
+          searches.push({ query, options });
+          return [11, 12, 13];
+        },
+        fetch: async function* () {},
+        messageMove: async () => ({ uidMap: new Map() }),
+      }),
+    });
+
+    await expect(provider.getDeletedMessageCount("INBOX")).resolves.toBe(3);
+    expect(searches).toEqual([
+      { path: "INBOX", options: { readOnly: true } },
+      { query: { deleted: true }, options: { uid: true } },
+    ]);
+  });
+
+  it("uses mailbox summary deleted counts without an extra deleted search when available", async () => {
+    const searches: unknown[] = [];
+    const provider = new QqMutableProvider({
+      accountAlias: "masked@qq.com",
+      auth: { user: "user@qq.com", pass: "secret" },
+      sleep: async () => undefined,
+      clientFactory: () => ({
+        capabilities: nativeMoveCapabilities,
+        connect: async () => undefined,
+        logout: async () => undefined,
+        list: async () => [],
+        mailboxOpen: async (path: string, options: unknown) => {
+          searches.push({ path, options });
+          return { exists: 10, deleted: 4, uidValidity: 888n };
+        },
+        search: async (query: unknown, options: unknown) => {
+          searches.push({ query, options });
+          return [11, 12, 13];
+        },
+        fetch: async function* () {},
+        messageMove: async () => ({ uidMap: new Map() }),
+      }),
+    });
+
+    await expect(provider.getMailboxSummary("INBOX")).resolves.toMatchObject({
+      path: "INBOX",
+      exists: 10,
+      deleted: 4,
+      uidValidity: "888",
+    });
+    await expect(provider.getDeletedMessageCount("INBOX")).resolves.toBe(4);
+    expect(searches).toEqual([
+      { path: "INBOX", options: { readOnly: true } },
+      { path: "INBOX", options: { readOnly: true } },
+    ]);
+  });
+
   it("allows UIDPLUS fallback move because UID EXPUNGE is scoped to selected UIDs", async () => {
     const moved: unknown[] = [];
     const provider = new QqMutableProvider({

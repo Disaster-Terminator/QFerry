@@ -9,6 +9,7 @@ export interface MailboxInfo {
 export interface MailboxSummary {
   path: string;
   exists: number;
+  deleted?: number;
   uidValidity?: string;
 }
 
@@ -71,6 +72,7 @@ export interface MailProvider {
   fetchMessage(ref: MessageRef): Promise<MessageDetail>;
   getCapabilitySnapshot?(): Promise<ProviderCapabilitySnapshot>;
   getMailboxSummary?(folder: string): Promise<MailboxSummary>;
+  getDeletedMessageCount?(folder: string): Promise<number>;
   moveMessages?(refs: MessageRef[], targetFolder: string): Promise<MoveMessagesResult>;
   createMailbox?(folder: string): Promise<{ path: string; created: boolean }>;
 }
@@ -86,9 +88,10 @@ export interface MoveMessagesReconciliation {
   targetDelta: number;
   expectedSourceDelta?: number;
   expectedTargetDelta?: number;
+  sourceDeletedBefore?: number;
   targetDeltaReconciled: boolean;
   sourceDeltaReliable: boolean;
-  sourceDeltaStatus: "matched" | "concurrent_or_external_change";
+  sourceDeltaStatus: "matched" | "matched_with_deleted_expunge" | "concurrent_or_external_change";
   reconciliationStatus: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "provider_result_unreliable";
 }
 
