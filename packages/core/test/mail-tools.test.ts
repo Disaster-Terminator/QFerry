@@ -2832,6 +2832,78 @@ describe("mail tools", () => {
     });
   });
 
+  it("allows bounded source count drift after target reconciliation for larger move batches", async () => {
+    const provider = FixtureMailProvider.demo();
+    const counts = new Map([
+      ["INBOX", 20],
+      ["Archive", 0],
+    ]);
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        scanMailboxMetadata: provider.scanMailboxMetadata.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        getMailboxSummary: async (folder) => ({
+          path: folder,
+          exists: counts.get(folder) ?? 0,
+        }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async (refs, targetFolder) => {
+          const sourceFolder = refs[0]?.folder ?? "";
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length - 1);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
+          return { moved: refs.length };
+        },
+      },
+    });
+    const previewPlan = createOperationPlan({
+      runId: "run-execute-bounded-source-drift",
+      provider: "fixture",
+      action: "move",
+      messageRefs: Array.from({ length: 7 }, (_, index) => ({
+        provider: "fixture" as const,
+        accountAlias: "demo",
+        folder: "INBOX",
+        uid: String(index + 1),
+      })),
+      target: { folder: "Archive" },
+    });
+    const plan = confirmOperationPlan(previewPlan, previewPlan.operationPlanId);
+
+    const result = await tools.executeCleanup({ plan });
+
+    expect(result.result).toMatchObject({
+      status: "executed",
+      moved: 7,
+      attemptedMessages: 7,
+      mutationsAttempted: 7,
+      remainingMessages: 0,
+      reconciliationStatus: "target_reconciled_source_unreliable",
+      reconciliations: [
+        {
+          sourceDelta: -8,
+          expectedSourceDelta: -7,
+          targetDelta: 7,
+          expectedTargetDelta: 7,
+          targetDeltaReconciled: true,
+          sourceDeltaReliable: false,
+          sourceDeltaStatus: "concurrent_or_external_change",
+          reconciliationStatus: "target_reconciled_source_unreliable",
+        },
+      ],
+    });
+  });
+
   it("reports partial provider move counts as partially executed after target reconciliation", async () => {
     const provider = FixtureMailProvider.demo();
     const counts = new Map([

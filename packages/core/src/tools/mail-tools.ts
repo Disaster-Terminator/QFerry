@@ -929,10 +929,11 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         : await input.provider.moveMessages(messageRefsToMove, targetFolder);
       const remainingMessages = plan.messageRefs.length - messageRefsToMove.length;
       const reconciliationStatus = summarizeMoveReconciliationStatus(moveResult.reconciliations);
+      const reconciliationBlocked = hasBlockingMoveReconciliation(moveResult.reconciliations);
       return {
         result: {
           operationPlanId: plan.operationPlanId,
-          status: reconciliationStatus === "target_reconciled_source_unreliable"
+          status: reconciliationBlocked
             ? "blocked"
             : remainingMessages > 0 ? "partially_executed" : "executed",
           action: plan.action,
@@ -3099,6 +3100,35 @@ function summarizeMoveReconciliationStatus(
     return "provider_result_unreliable";
   }
   return "matched";
+}
+
+function hasBlockingMoveReconciliation(reconciliations: MoveMessagesReconciliation[] | undefined): boolean {
+  if (!reconciliations) {
+    return false;
+  }
+  return reconciliations.some((reconciliation) => {
+    if (reconciliation.reconciliationStatus === "target_unreconciled") {
+      return true;
+    }
+    if (reconciliation.reconciliationStatus !== "target_reconciled_source_unreliable") {
+      return false;
+    }
+    return !isSourceDriftWithinTolerance(reconciliation);
+  });
+}
+
+function isSourceDriftWithinTolerance(reconciliation: MoveMessagesReconciliation): boolean {
+  if (
+    reconciliation.expectedSourceDelta === undefined
+    || reconciliation.expectedTargetDelta === undefined
+    || !reconciliation.targetDeltaReconciled
+    || reconciliation.expectedTargetDelta < 5
+  ) {
+    return false;
+  }
+  const sourceDrift = Math.abs(reconciliation.sourceDelta - reconciliation.expectedSourceDelta);
+  const sourceDriftTolerance = Math.max(1, Math.floor(reconciliation.expectedTargetDelta * 0.1));
+  return sourceDrift <= sourceDriftTolerance;
 }
 
 function assertMoveReconciled(reconciliation: MoveMessagesReconciliation): void {
