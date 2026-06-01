@@ -1171,7 +1171,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const targetResolution = resolveOperationTarget({
         provider,
         action: governanceInput.action,
-        target: governanceInput.target,
+        target: governanceInput.target ?? ruleGroup.target,
         classificationParentPath,
       });
       const rulesetPatch = buildRulesetPatchDraft({

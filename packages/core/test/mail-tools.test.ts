@@ -862,6 +862,51 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("uses a requested classification group target for sender governance plans when no explicit target is passed", async () => {
+    const messages = [
+      {
+        ref: { provider: "qqmail" as const, accountAlias: "real", folder: "INBOX", uid: "1", uidValidity: "uv" },
+        from: "GitHub <noreply@github.com>",
+        subject: "Repository notification",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "updated permissions",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.planSenderGovernance({
+      runId: "run-sender-rule-group-target",
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      maxMessageRefs: 10,
+      action: "move",
+      selectedSenderDomains: ["github.com"],
+      ruleGroup: {
+        id: "github_notifications",
+        label: "GitHub通知",
+        target: { folder: "GitHub通知" },
+      },
+    });
+
+    expect(result.plan.target).toEqual({
+      folder: "其他文件夹/GitHub通知",
+      requestedFolder: "GitHub通知",
+      targetResolution: "qqmail_classification_folder",
+    });
+    expect(result.plan.messageRefs.map((ref) => ref.uid)).toEqual(["1"]);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
   it("breaks a noisy domain down into reusable sender-level governance candidates", async () => {
     const messages = [
       {
