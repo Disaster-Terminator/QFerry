@@ -3782,4 +3782,69 @@ describe("mail tools", () => {
     expect(result.plans.map((plan) => plan.messageRefs.length)).toEqual([2, 1]);
     expect(result.mutationsAttempted).toBe(0);
   });
+
+  it("skips ruleset governance groups whose target folder is the source folder", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-ruleset-same-target-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-same-target",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "inbox_group", label: "Inbox Group", target: { folder: "INBOX" } },
+      ],
+      rules: [
+        { id: "inbox-domain", groupId: "inbox_group", match: { fromDomainIncludes: "example.com" } },
+      ],
+    }), "utf8");
+    const messages = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Notice <notice@example.com>",
+        subject: "Already classified",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        scanMailboxMetadataWindow: async () => ({
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "INBOX", exists: messages.length },
+          messages,
+        }),
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.rulesetGovernancePreview({
+      runId: "ruleset-same-target",
+      folder: "INBOX",
+      pageSize: 50,
+      maxPages: 1,
+      maxMessageRefsPerGroup: 50,
+      action: "move",
+      rulesFile,
+      selectedGroupIds: ["inbox_group"],
+    });
+
+    expect(result.preview.groupCounts).toEqual({ inbox_group: 1 });
+    expect(result.preview.groupPlans).toEqual([]);
+    expect(result.preview.skippedGroups).toEqual([
+      {
+        groupId: "inbox_group",
+        label: "Inbox Group",
+        totalMatchedMessages: 1,
+        reason: "target_is_source_folder",
+      },
+    ]);
+    expect(result.preview.campaignReport.planCount).toBe(0);
+    expect(result.plans).toEqual([]);
+    expect(result.mutationsAttempted).toBe(0);
+  });
 });

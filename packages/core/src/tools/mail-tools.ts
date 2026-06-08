@@ -321,7 +321,7 @@ export interface RulesetGovernanceSkippedGroup {
   groupId: string;
   label: string;
   totalMatchedMessages: number;
-  reason: "missing_target_folder" | "no_matched_messages";
+  reason: "missing_target_folder" | "no_matched_messages" | "target_is_source_folder";
 }
 
 export interface RulesetGovernanceCampaignReport {
@@ -1810,6 +1810,13 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           target: group.target,
           classificationParentPath,
         });
+        if (
+          rulesetInput.action === "move"
+          && targetResolution.target?.folder?.trim() === rulesetInput.folder.trim()
+        ) {
+          skippedGroups.push({ groupId, label, totalMatchedMessages, reason: "target_is_source_folder" });
+          continue;
+        }
         const messageRefs = groupClassifications
           .map((classification) => classification.messageRef)
           .slice(0, maxMessageRefsPerGroup);
