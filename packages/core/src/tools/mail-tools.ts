@@ -327,6 +327,7 @@ export interface RulesetGovernanceSkippedGroup {
 export interface RulesetGovernanceCampaignReport {
   scannedMessages: number;
   plannedMessages: number;
+  alreadyInTargetMessages: number;
   unplannedMessages: number;
   coverageBasis: "scanned_window";
   coverageRatio: number;
@@ -1788,6 +1789,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const groupPlans: RulesetGovernanceGroupPlan[] = [];
       const skippedGroups: RulesetGovernanceSkippedGroup[] = [];
       const plannedRefKeys = new Set<string>();
+      const alreadyInTargetRefKeys = new Set<string>();
 
       for (const groupId of selectedGroupIds) {
         const group = groupsById.get(groupId);
@@ -1814,6 +1816,9 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           rulesetInput.action === "move"
           && targetResolution.target?.folder?.trim() === rulesetInput.folder.trim()
         ) {
+          for (const classification of groupClassifications) {
+            alreadyInTargetRefKeys.add(messageRefKey(classification.messageRef));
+          }
           skippedGroups.push({ groupId, label, totalMatchedMessages, reason: "target_is_source_folder" });
           continue;
         }
@@ -1866,6 +1871,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
             groupPlans,
             skippedGroups,
             plannedRefKeys,
+            alreadyInTargetRefKeys,
           }),
           ruleset: resolvedRules.ruleset,
           mutationsAttempted: 0,
@@ -1985,13 +1991,19 @@ function buildRulesetGovernanceCampaignReport(input: {
   groupPlans: RulesetGovernanceGroupPlan[];
   skippedGroups: RulesetGovernanceSkippedGroup[];
   plannedRefKeys: Set<string>;
+  alreadyInTargetRefKeys: Set<string>;
 }): RulesetGovernanceCampaignReport {
   const plannedMessages = input.groupPlans.reduce((sum, plan) => sum + plan.selectedMessageRefs, 0);
+  const handledRefKeys = new Set([...input.plannedRefKeys, ...input.alreadyInTargetRefKeys]);
+  const alreadyInTargetMessages = [...input.alreadyInTargetRefKeys]
+    .filter((refKey) => !input.plannedRefKeys.has(refKey))
+    .length;
   const scannedMessages = input.messages.length;
-  const unplannedMessages = Math.max(scannedMessages - plannedMessages, 0);
+  const handledMessages = handledRefKeys.size;
+  const unplannedMessages = Math.max(scannedMessages - handledMessages, 0);
   const coverageRatio = scannedMessages === 0
     ? 0
-    : Number((plannedMessages / scannedMessages).toFixed(3));
+    : Number((handledMessages / scannedMessages).toFixed(3));
   const truncatedGroups = input.groupPlans
     .filter((plan) => plan.selectedMessageRefs < plan.totalMatchedMessages)
     .map((plan) => ({
@@ -2000,17 +2012,20 @@ function buildRulesetGovernanceCampaignReport(input: {
       selectedMessageRefs: plan.selectedMessageRefs,
       totalMatchedMessages: plan.totalMatchedMessages,
     }));
-  const topUnplannedDomains = summarizeTopUnplannedDomains(input.messages, input.plannedRefKeys);
-  const topUnplannedSenders = summarizeTopUnplannedSenders(input.messages, input.plannedRefKeys);
+  const topUnplannedDomains = summarizeTopUnplannedDomains(input.messages, handledRefKeys);
+  const topUnplannedSenders = summarizeTopUnplannedSenders(input.messages, handledRefKeys);
+  const hasActionableSkippedGroups = input.skippedGroups.some((group) =>
+    group.totalMatchedMessages > 0 && group.reason !== "target_is_source_folder");
   const nextAction = input.groupPlans.length === 0
     ? "no_action"
-    : unplannedMessages > 0 || input.skippedGroups.some((group) => group.totalMatchedMessages > 0) || truncatedGroups.length > 0
+    : unplannedMessages > 0 || hasActionableSkippedGroups || truncatedGroups.length > 0
       ? "review_rules"
       : "confirm_plans";
 
   return {
     scannedMessages,
     plannedMessages,
+    alreadyInTargetMessages,
     unplannedMessages,
     coverageBasis: "scanned_window",
     coverageRatio,

@@ -3740,6 +3740,7 @@ describe("mail tools", () => {
     expect(result.preview.campaignReport).toEqual({
       scannedMessages: 4,
       plannedMessages: 3,
+      alreadyInTargetMessages: 0,
       unplannedMessages: 1,
       coverageBasis: "scanned_window",
       coverageRatio: 0.75,
@@ -3843,8 +3844,147 @@ describe("mail tools", () => {
         reason: "target_is_source_folder",
       },
     ]);
-    expect(result.preview.campaignReport.planCount).toBe(0);
+    expect(result.preview.campaignReport).toEqual({
+      scannedMessages: 1,
+      plannedMessages: 0,
+      alreadyInTargetMessages: 1,
+      unplannedMessages: 0,
+      coverageBasis: "scanned_window",
+      coverageRatio: 1,
+      planCount: 0,
+      truncatedGroups: [],
+      topUnplannedDomains: [],
+      topUnplannedSenders: [],
+      nextAction: "no_action",
+    });
     expect(result.plans).toEqual([]);
+    expect(result.mutationsAttempted).toBe(0);
+  });
+
+  it("counts planned, already-targeted, and unplanned ruleset governance messages separately", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-ruleset-mixed-coverage-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-mixed-coverage",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "ai_tools", label: "AI Tools", target: { folder: "Folders/AI Tools" } },
+        { id: "dev_tools", label: "Dev Tools", target: { folder: "Folders/Dev Tools" } },
+      ],
+      rules: [
+        { id: "ai-domain", groupId: "ai_tools", match: { fromDomainIncludes: "ai.example" } },
+        { id: "dev-domain", groupId: "dev_tools", match: { fromDomainIncludes: "dev.example" } },
+      ],
+    }), "utf8");
+    const messages = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Folders/AI Tools", uid: "1" },
+        from: "AI Notice <notice@ai.example>",
+        subject: "AI already one",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Folders/AI Tools", uid: "2" },
+        from: "AI Notice <notice@ai.example>",
+        subject: "AI already two",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Folders/AI Tools", uid: "3" },
+        from: "Dev Notice <notice@dev.example>",
+        subject: "Move to dev",
+        date: "2026-05-12T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Folders/AI Tools", uid: "4" },
+        from: "Human <human@example.net>",
+        subject: "Manual review",
+        date: "2026-05-13T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        scanMailboxMetadataWindow: async () => ({
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "Folders/AI Tools", exists: messages.length },
+          messages,
+        }),
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.rulesetGovernancePreview({
+      runId: "ruleset-mixed-coverage",
+      folder: "Folders/AI Tools",
+      pageSize: 50,
+      maxPages: 1,
+      maxMessageRefsPerGroup: 50,
+      action: "move",
+      rulesFile,
+      selectedGroupIds: ["ai_tools", "dev_tools"],
+    });
+
+    expect(result.preview.groupCounts).toEqual({
+      ai_tools: 2,
+      dev_tools: 1,
+      review: 1,
+    });
+    expect(result.preview.groupPlans).toEqual([
+      expect.objectContaining({
+        groupId: "dev_tools",
+        label: "Dev Tools",
+        target: { folder: "Folders/Dev Tools" },
+        selectedMessageRefs: 1,
+        totalMatchedMessages: 1,
+      }),
+    ]);
+    expect(result.preview.skippedGroups).toEqual([
+      {
+        groupId: "ai_tools",
+        label: "AI Tools",
+        totalMatchedMessages: 2,
+        reason: "target_is_source_folder",
+      },
+    ]);
+    expect(result.preview.campaignReport).toEqual({
+      scannedMessages: 4,
+      plannedMessages: 1,
+      alreadyInTargetMessages: 2,
+      unplannedMessages: 1,
+      coverageBasis: "scanned_window",
+      coverageRatio: 0.75,
+      planCount: 1,
+      truncatedGroups: [],
+      topUnplannedDomains: [
+        { domain: "example.net", messageCount: 1 },
+      ],
+      topUnplannedSenders: [
+        {
+          sender: "Human <human@example.net>",
+          domain: "example.net",
+          messageCount: 1,
+          sampleSubjects: ["Manual review"],
+        },
+      ],
+      nextAction: "review_rules",
+    });
+    expect(result.plans).toHaveLength(1);
+    expect(result.plans[0]?.messageRefs).toEqual([
+      { provider: "fixture", accountAlias: "demo", folder: "Folders/AI Tools", uid: "3" },
+    ]);
     expect(result.mutationsAttempted).toBe(0);
   });
 });

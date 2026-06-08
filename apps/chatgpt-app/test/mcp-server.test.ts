@@ -299,6 +299,7 @@ describe("QFerry ChatGPT App MCP server", () => {
         campaignReport?: {
           scannedMessages: number;
           plannedMessages: number;
+          alreadyInTargetMessages: number;
           unplannedMessages: number;
           coverageBasis: string;
           coverageRatio: number;
@@ -321,6 +322,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(content.preview?.campaignReport).toEqual({
       scannedMessages: 2,
       plannedMessages: 2,
+      alreadyInTargetMessages: 0,
       unplannedMessages: 0,
       coverageBasis: "scanned_window",
       coverageRatio: 1,
@@ -484,6 +486,7 @@ describe("QFerry ChatGPT App MCP server", () => {
         campaignReport: {
           scannedMessages: 3,
           plannedMessages: 1,
+          alreadyInTargetMessages: 0,
           unplannedMessages: 2,
           coverageBasis: "scanned_window",
           coverageRatio: 0.333,
