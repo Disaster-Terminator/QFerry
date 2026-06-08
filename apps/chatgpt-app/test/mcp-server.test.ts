@@ -52,6 +52,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "classification_sweep",
       "bulk_governance_preview",
       "ruleset_governance_preview",
+      "ruleset_governance_campaign_preview",
       "apply_ruleset_patch",
       "confirm_cleanup_plan",
       "execute_cleanup",
@@ -73,6 +74,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "sender_breakdown")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "bulk_governance_preview")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "ruleset_governance_preview")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "ruleset_governance_campaign_preview")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "apply_ruleset_patch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "confirm_cleanup_plan")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_cleanup")?.annotations?.destructiveHint).toBe(true);
@@ -338,6 +340,135 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(summary).toContain("- operationPlanIds: [");
     expect(summary).toContain("- campaignReport: {");
     expect(summary).toContain("- groupPlans: [");
+    expect(summary).not.toContain("classifications");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("calls compact ruleset governance campaign preview through the MCP server", async () => {
+    const traceRoot = await mkdtemp(join(tmpdir(), "qferry-mcp-ruleset-campaign-"));
+    process.env.QFERRY_MCP_TRACE_ROOT = traceRoot;
+    const rulesFile = join(traceRoot, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-campaign",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "group_alpha", label: "Group Alpha", target: { folder: "Folders/Group Alpha" } },
+        { id: "group_beta", label: "Group Beta", target: { folder: "Folders/Group Beta" } },
+      ],
+      rules: [
+        { id: "alpha-domain", groupId: "group_alpha", match: { fromDomainIncludes: "alpha.example" } },
+        { id: "beta-domain", groupId: "group_beta", match: { fromDomainIncludes: "beta.example" } },
+      ],
+    }), "utf8");
+    const folderMessages: Record<string, MessageSummary[]> = {
+      INBOX: [
+        {
+          ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+          from: "Alpha One <one@alpha.example>",
+          subject: "Alpha one",
+          date: "2026-05-10T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+        {
+          ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+          from: "Beta <notice@beta.example>",
+          subject: "Beta",
+          date: "2026-05-11T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+      ],
+      Archive: [
+        {
+          ref: { provider: "fixture", accountAlias: "demo", folder: "Archive", uid: "3" },
+          from: "Human <human@example.net>",
+          subject: "Manual review",
+          date: "2026-05-12T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+      ],
+    };
+    const provider: MailProvider = {
+      async listMailboxes() {
+        return [];
+      },
+      async scanMailboxMetadata({ folder }) {
+        return folderMessages[folder] ?? [];
+      },
+      async scanMailboxMetadataWindow({ folder }) {
+        return {
+          messages: folderMessages[folder] ?? [],
+          pagesScanned: 1,
+          mailboxSnapshot: { folder, exists: folderMessages[folder]?.length ?? 0 },
+        };
+      },
+      async fetchMessage() {
+        throw new Error("not used");
+      },
+    };
+    const server = createQFerryMcpServer({ provider });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "ruleset_governance_campaign_preview",
+      arguments: {
+        runId: "mcp-ruleset-campaign",
+        folders: ["Archive", "INBOX"],
+        pageSize: 50,
+        maxPagesPerFolder: 1,
+        maxMessageRefsPerGroup: 50,
+        maxConcurrentFolders: 2,
+        action: "move",
+        rulesFile,
+        selectedGroupIds: ["group_alpha", "group_beta"],
+      },
+    });
+
+    const content = result.structuredContent as {
+      plans?: unknown[];
+      classifications?: unknown[];
+      campaign?: {
+        folderReports?: Array<{
+          folder: string;
+          plannedMessages: number;
+          operationPlanIds: string[];
+          groupPlans?: Array<{ runId: string }>;
+        }>;
+        scannedMessages?: number;
+        plannedMessages?: number;
+        executablePlanCount?: number;
+      };
+      audit?: { summaryPath: string };
+    };
+    expect(content.plans).toBeUndefined();
+    expect(content.classifications).toBeUndefined();
+    expect(content.campaign?.scannedMessages).toBe(3);
+    expect(content.campaign?.plannedMessages).toBe(2);
+    expect(content.campaign?.executablePlanCount).toBe(2);
+    expect(content.campaign?.folderReports?.map((report) => report.folder)).toEqual(["INBOX", "Archive"]);
+    expect(content.campaign?.folderReports?.[0]?.operationPlanIds).toEqual([
+      expect.any(String),
+      expect.any(String),
+    ]);
+    expect(content.campaign?.folderReports?.[0]?.groupPlans?.map((plan) => plan.runId)).toEqual([
+      "mcp-ruleset-campaign-inbox-group-alpha",
+      "mcp-ruleset-campaign-inbox-group-beta",
+    ]);
+    expect(JSON.stringify(result.structuredContent)).not.toContain("\"messageRefs\"");
+    const summary = await readFile(String(content.audit?.summaryPath), "utf8");
+    expect(summary).toContain("- operationPlanIds: [");
+    expect(summary).toContain("- folderReports: [");
     expect(summary).not.toContain("classifications");
 
     await client.close();

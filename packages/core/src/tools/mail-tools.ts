@@ -260,6 +260,22 @@ export interface RulesetGovernancePreviewInput {
   order?: "newest" | "oldest";
 }
 
+export interface RulesetGovernanceCampaignPreviewInput {
+  runId: string;
+  folders: string[];
+  pageSize: number;
+  maxPagesPerFolder: number;
+  maxMessageRefsPerGroup: number;
+  action: OperationAction;
+  defaultGroupId?: string;
+  rules?: ClassificationRule[];
+  rulesFile?: string;
+  selectedGroupIds?: string[];
+  scanOffset?: number;
+  order?: "newest" | "oldest";
+  maxConcurrentFolders?: number;
+}
+
 export interface EnsureClassificationFolderInput {
   runId: string;
   displayName: string;
@@ -368,6 +384,70 @@ export interface RulesetGovernancePreview {
   skippedGroups: RulesetGovernanceSkippedGroup[];
   campaignReport: RulesetGovernanceCampaignReport;
   ruleset?: ClassificationRulesetMetadata;
+  mutationsAttempted: 0;
+}
+
+export type RulesetGovernanceCampaignNextAction =
+  | "confirm_plans"
+  | "review_rules"
+  | "stop_low_yield"
+  | "no_action";
+
+export interface RulesetGovernanceFolderReport {
+  provider: string;
+  folder: string;
+  mailboxSnapshot?: MailboxWindowSnapshot;
+  scanOrder: "newest" | "oldest";
+  scanOffset: number;
+  pageSize: number;
+  maxPages: number;
+  pagesScanned: number;
+  scannedMessages: number;
+  plannedMessages: number;
+  alreadyInTargetMessages: number;
+  unplannedMessages: number;
+  coverageBasis: "scanned_window";
+  coverageRatio: number;
+  planCount: number;
+  operationPlanIds: string[];
+  selectedGroupIds: string[];
+  groupCounts: Record<string, number>;
+  groupPlans: Array<{
+    groupId: string;
+    label: string;
+    target: Record<string, string>;
+    selectedMessageRefs: number;
+    totalMatchedMessages: number;
+    operationPlanId: string;
+    runId: string;
+  }>;
+  skippedGroups: RulesetGovernanceSkippedGroup[];
+  topUnplannedDomains: RulesetGovernanceCampaignReport["topUnplannedDomains"];
+  topUnplannedSenders: RulesetGovernanceCampaignReport["topUnplannedSenders"];
+  truncatedGroups: RulesetGovernanceCampaignReport["truncatedGroups"];
+  recommendedNextAction: RulesetGovernanceCampaignNextAction;
+}
+
+export interface RulesetGovernanceCampaignPreview {
+  provider: string;
+  folders: string[];
+  scanOrder: "newest" | "oldest";
+  scanOffset: number;
+  pageSize: number;
+  maxPagesPerFolder: number;
+  maxMessageRefsPerGroup: number;
+  maxConcurrentFolders: number;
+  foldersScanned: number;
+  scannedMessages: number;
+  plannedMessages: number;
+  alreadyInTargetMessages: number;
+  unplannedMessages: number;
+  coverageBasis: "scanned_window";
+  coverageRatio: number;
+  executablePlanCount: number;
+  folderReports: RulesetGovernanceFolderReport[];
+  ruleset?: ClassificationRulesetMetadata;
+  recommendedNextAction: RulesetGovernanceCampaignNextAction;
   mutationsAttempted: 0;
 }
 
@@ -730,6 +810,12 @@ export interface MailTools {
     ruleset?: ClassificationRulesetMetadata;
     mutationsAttempted: 0;
   }>;
+  rulesetGovernanceCampaignPreview(input: RulesetGovernanceCampaignPreviewInput): Promise<{
+    campaign: RulesetGovernanceCampaignPreview;
+    plans: OperationPlan[];
+    ruleset?: ClassificationRulesetMetadata;
+    mutationsAttempted: 0;
+  }>;
   classificationMap(input: ClassificationMapInput): Promise<{
     map: ClassificationMapReport;
     mutationsAttempted: 0;
@@ -742,7 +828,7 @@ export interface MailTools {
 
 export function createMailTools(input: CreateMailToolsInput): MailTools {
   const classificationParentPath = resolveClassificationParentPath(input.runtimeConfig);
-  return {
+  const tools: MailTools = {
     async getStatus() {
       if (input.runtimeConfig) {
         return {
@@ -1882,7 +1968,121 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         mutationsAttempted: 0,
       };
     },
+
+    async rulesetGovernanceCampaignPreview(campaignInput) {
+      const pageSize = Math.max(campaignInput.pageSize, 0);
+      const maxPagesPerFolder = Math.max(campaignInput.maxPagesPerFolder, 0);
+      const maxMessageRefsPerGroup = Math.max(campaignInput.maxMessageRefsPerGroup, 0);
+      const scanOffset = Math.max(campaignInput.scanOffset ?? 0, 0);
+      const scanOrder = campaignInput.order ?? "oldest";
+      const maxConcurrentFolders = Math.min(Math.max(campaignInput.maxConcurrentFolders ?? 3, 1), 10);
+      const resolvedInput = withRuntimeRulesFile(campaignInput, input.runtimeConfig);
+
+      const folderResults = await mapWithConcurrency(campaignInput.folders, maxConcurrentFolders, async (folder) => {
+        const result = await tools.rulesetGovernancePreview({
+          runId: `${campaignInput.runId}-${slugifyRuleId(folder)}`,
+          folder,
+          pageSize,
+          maxPages: maxPagesPerFolder,
+          maxMessageRefsPerGroup,
+          action: campaignInput.action,
+          defaultGroupId: resolvedInput.defaultGroupId,
+          rules: resolvedInput.rules,
+          rulesFile: resolvedInput.rulesFile,
+          selectedGroupIds: campaignInput.selectedGroupIds,
+          scanOffset,
+          order: scanOrder,
+        });
+        const preview = result.preview;
+        const report = preview.campaignReport;
+        const folderReport: RulesetGovernanceFolderReport = {
+          provider: preview.provider,
+          folder: preview.folder,
+          mailboxSnapshot: preview.mailboxSnapshot,
+          scanOrder: preview.scanOrder,
+          scanOffset: preview.scanOffset,
+          pageSize: preview.pageSize,
+          maxPages: preview.maxPages,
+          pagesScanned: preview.pagesScanned,
+          scannedMessages: report.scannedMessages,
+          plannedMessages: report.plannedMessages,
+          alreadyInTargetMessages: report.alreadyInTargetMessages,
+          unplannedMessages: report.unplannedMessages,
+          coverageBasis: report.coverageBasis,
+          coverageRatio: report.coverageRatio,
+          planCount: report.planCount,
+          operationPlanIds: preview.groupPlans.map((plan) => plan.operationPlanId),
+          selectedGroupIds: preview.selectedGroupIds,
+          groupCounts: preview.groupCounts,
+          groupPlans: preview.groupPlans.map((plan) => ({
+            groupId: plan.groupId,
+            label: plan.label,
+            target: plan.target,
+            selectedMessageRefs: plan.selectedMessageRefs,
+            totalMatchedMessages: plan.totalMatchedMessages,
+            operationPlanId: plan.operationPlanId,
+            runId: plan.runId,
+          })),
+          skippedGroups: preview.skippedGroups,
+          topUnplannedDomains: report.topUnplannedDomains,
+          topUnplannedSenders: report.topUnplannedSenders,
+          truncatedGroups: report.truncatedGroups,
+          recommendedNextAction: rulesetFolderNextAction(report),
+        };
+        return { result, folderReport };
+      });
+
+      const sortedFolderResults = folderResults.sort((left, right) =>
+        rulesetFolderActionRank(left.folderReport.recommendedNextAction) - rulesetFolderActionRank(right.folderReport.recommendedNextAction)
+        || right.folderReport.plannedMessages - left.folderReport.plannedMessages
+        || right.folderReport.alreadyInTargetMessages - left.folderReport.alreadyInTargetMessages
+        || right.folderReport.scannedMessages - left.folderReport.scannedMessages
+        || left.folderReport.folder.localeCompare(right.folderReport.folder)
+      );
+      const folderReports = sortedFolderResults.map((entry) => entry.folderReport);
+      const plans = sortedFolderResults.flatMap((entry) => entry.result.plans);
+      const scannedMessages = folderReports.reduce((sum, report) => sum + report.scannedMessages, 0);
+      const plannedMessages = folderReports.reduce((sum, report) => sum + report.plannedMessages, 0);
+      const alreadyInTargetMessages = folderReports.reduce((sum, report) => sum + report.alreadyInTargetMessages, 0);
+      const unplannedMessages = folderReports.reduce((sum, report) => sum + report.unplannedMessages, 0);
+      const handledMessages = plannedMessages + alreadyInTargetMessages;
+      const coverageRatio = scannedMessages === 0
+        ? 0
+        : Number((handledMessages / scannedMessages).toFixed(3));
+      const provider = folderReports.find((report) => report.provider)?.provider
+        ?? input.runtimeConfig?.provider
+        ?? "fixture";
+
+      return {
+        campaign: {
+          provider,
+          folders: campaignInput.folders,
+          scanOrder,
+          scanOffset,
+          pageSize,
+          maxPagesPerFolder,
+          maxMessageRefsPerGroup,
+          maxConcurrentFolders,
+          foldersScanned: folderReports.length,
+          scannedMessages,
+          plannedMessages,
+          alreadyInTargetMessages,
+          unplannedMessages,
+          coverageBasis: "scanned_window" as const,
+          coverageRatio,
+          executablePlanCount: plans.length,
+          folderReports,
+          ruleset: sortedFolderResults.find((entry) => entry.result.ruleset)?.result.ruleset,
+          recommendedNextAction: rulesetCampaignNextAction(folderReports),
+          mutationsAttempted: 0 as const,
+        },
+        plans,
+        ruleset: sortedFolderResults.find((entry) => entry.result.ruleset)?.result.ruleset,
+        mutationsAttempted: 0 as const,
+      };
+    },
   };
+  return tools;
 }
 
 function redactRuntimeConfig(config: QFerryRuntimeConfig): QFerryRuntimeConfig {
@@ -2035,6 +2235,34 @@ function buildRulesetGovernanceCampaignReport(input: {
     truncatedGroups,
     nextAction,
   };
+}
+
+function rulesetFolderNextAction(report: RulesetGovernanceCampaignReport): RulesetGovernanceCampaignNextAction {
+  if (report.planCount === 0) {
+    if (report.scannedMessages === 0 || report.unplannedMessages === 0) return "no_action";
+    return "stop_low_yield";
+  }
+  return report.nextAction === "confirm_plans" ? "confirm_plans" : "review_rules";
+}
+
+function rulesetCampaignNextAction(
+  folderReports: RulesetGovernanceFolderReport[],
+): RulesetGovernanceCampaignNextAction {
+  const plannedMessages = folderReports.reduce((sum, report) => sum + report.plannedMessages, 0);
+  if (plannedMessages === 0) {
+    return folderReports.some((report) => report.unplannedMessages > 0) ? "stop_low_yield" : "no_action";
+  }
+  if (folderReports.some((report) => report.recommendedNextAction === "review_rules")) {
+    return "review_rules";
+  }
+  return "confirm_plans";
+}
+
+function rulesetFolderActionRank(action: RulesetGovernanceCampaignNextAction): number {
+  if (action === "confirm_plans") return 0;
+  if (action === "review_rules") return 1;
+  if (action === "stop_low_yield") return 2;
+  return 3;
 }
 
 function summarizeTopUnplannedDomains(

@@ -3784,6 +3784,179 @@ describe("mail tools", () => {
     expect(result.mutationsAttempted).toBe(0);
   });
 
+  it("summarizes ruleset governance across folders without returning classifications", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-ruleset-campaign-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-campaign",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "group_alpha", label: "Group Alpha", target: { folder: "Folders/Group Alpha" } },
+        { id: "group_beta", label: "Group Beta", target: { folder: "Folders/Group Beta" } },
+      ],
+      rules: [
+        { id: "alpha-domain", groupId: "group_alpha", match: { fromDomainIncludes: "alpha.example" } },
+        { id: "beta-domain", groupId: "group_beta", match: { fromDomainIncludes: "beta.example" } },
+      ],
+    }), "utf8");
+    const folderMessages: Record<string, MessageSummary[]> = {
+      INBOX: [
+        {
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+          from: "Alpha One <one@alpha.example>",
+          subject: "Alpha one",
+          date: "2026-05-10T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+        {
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "2" },
+          from: "Beta <notice@beta.example>",
+          subject: "Beta",
+          date: "2026-05-11T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+        {
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "3" },
+          from: "Friend <friend@example.net>",
+          subject: "Manual review",
+          date: "2026-05-12T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+      ],
+      "Folders/Group Alpha": [
+        {
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Folders/Group Alpha", uid: "4" },
+          from: "Alpha One <one@alpha.example>",
+          subject: "Alpha already one",
+          date: "2026-05-13T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+        {
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Folders/Group Alpha", uid: "5" },
+          from: "Alpha Two <two@alpha.example>",
+          subject: "Alpha already two",
+          date: "2026-05-14T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+        {
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Folders/Group Alpha", uid: "6" },
+          from: "Beta <notice@beta.example>",
+          subject: "Move to beta",
+          date: "2026-05-15T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+        {
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Folders/Group Alpha", uid: "7" },
+          from: "Human <human@example.net>",
+          subject: "Manual review",
+          date: "2026-05-16T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+      ],
+      Archive: [
+        {
+          ref: { provider: "fixture" as const, accountAlias: "demo", folder: "Archive", uid: "8" },
+          from: "Human <human@example.net>",
+          subject: "No matching rule",
+          date: "2026-05-17T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+      ],
+    };
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async ({ folder }) => folderMessages[folder] ?? [],
+        scanMailboxMetadataWindow: async ({ folder }) => ({
+          pagesScanned: 1,
+          mailboxSnapshot: { folder, exists: folderMessages[folder]?.length ?? 0 },
+          messages: folderMessages[folder] ?? [],
+        }),
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.rulesetGovernanceCampaignPreview({
+      runId: "ruleset-campaign",
+      folders: ["Archive", "INBOX", "Folders/Group Alpha"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      maxMessageRefsPerGroup: 50,
+      maxConcurrentFolders: 2,
+      action: "move",
+      rulesFile,
+      selectedGroupIds: ["group_alpha", "group_beta"],
+    });
+
+    expect(result.campaign).toMatchObject({
+      provider: "fixture",
+      foldersScanned: 3,
+      scannedMessages: 8,
+      plannedMessages: 3,
+      alreadyInTargetMessages: 2,
+      unplannedMessages: 3,
+      executablePlanCount: 3,
+      coverageRatio: 0.625,
+      recommendedNextAction: "review_rules",
+      mutationsAttempted: 0,
+    });
+    expect(result.campaign.folderReports.map((report) => report.folder)).toEqual([
+      "INBOX",
+      "Folders/Group Alpha",
+      "Archive",
+    ]);
+    expect(result.campaign.folderReports[0]).toMatchObject({
+      folder: "INBOX",
+      scannedMessages: 3,
+      plannedMessages: 2,
+      alreadyInTargetMessages: 0,
+      unplannedMessages: 1,
+      coverageRatio: 0.667,
+      planCount: 2,
+      operationPlanIds: [
+        expect.any(String),
+        expect.any(String),
+      ],
+    });
+    expect(result.campaign.folderReports[1]).toMatchObject({
+      folder: "Folders/Group Alpha",
+      plannedMessages: 1,
+      alreadyInTargetMessages: 2,
+      unplannedMessages: 1,
+      planCount: 1,
+      operationPlanIds: [expect.any(String)],
+    });
+    expect(result.campaign.folderReports[2]).toMatchObject({
+      folder: "Archive",
+      plannedMessages: 0,
+      alreadyInTargetMessages: 0,
+      unplannedMessages: 1,
+      planCount: 0,
+      operationPlanIds: [],
+      recommendedNextAction: "stop_low_yield",
+    });
+    expect(result.plans.map((plan) => plan.runId)).toEqual([
+      "ruleset-campaign-inbox-group-alpha",
+      "ruleset-campaign-inbox-group-beta",
+      "ruleset-campaign-folders-group-alpha-group-beta",
+    ]);
+    expect(result.campaign.folderReports.flatMap((report) => report.operationPlanIds)).toEqual(
+      result.plans.map((plan) => plan.operationPlanId),
+    );
+    expect((result as { classifications?: unknown[] }).classifications).toBeUndefined();
+  });
+
   it("skips ruleset governance groups whose target folder is the source folder", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-ruleset-same-target-"));
     const rulesFile = join(dir, "qferry.rules.json");

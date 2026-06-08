@@ -551,6 +551,35 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
   );
 
   server.registerTool(
+    "ruleset_governance_campaign_preview",
+    {
+      title: "Ruleset governance campaign preview",
+      description: "Use this for compact multi-folder user-defined ruleset governance: rank folders, summarize coverage, and create preview operation plans without returning full message refs.",
+      inputSchema: {
+        runId: z.string(),
+        folders: z.array(z.string()).min(1).max(50),
+        pageSize: z.number().int().min(1).max(50),
+        maxPagesPerFolder: z.number().int().min(1).max(500),
+        maxMessageRefsPerGroup: z.number().int().min(0).max(500),
+        maxConcurrentFolders: z.number().int().min(1).max(10).optional(),
+        action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
+        defaultGroupId: z.string().optional(),
+        rules: z.array(classificationRuleSchema).optional(),
+        rulesFile: z.string().optional(),
+        selectedGroupIds: z.array(z.string()).optional(),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => {
+      const result = registerOperationPlans(await tools.rulesetGovernanceCampaignPreview(input), planRegistry);
+      const response = compactRulesetGovernanceCampaignPreview(result);
+      return toToolResult(await withMcpAudit("ruleset_governance_campaign_preview", input.runId, input, response));
+    },
+  );
+
+  server.registerTool(
     "apply_ruleset_patch",
     {
       title: "Apply ruleset patch",
@@ -698,6 +727,13 @@ function compactRulesetGovernancePreview<T extends { classifications?: unknown[]
   return compactResult;
 }
 
+function compactRulesetGovernanceCampaignPreview<T extends { plans?: unknown[] }>(
+  result: T,
+): Omit<T, "plans"> {
+  const { plans: _plans, ...compactResult } = result;
+  return compactResult;
+}
+
 function getStoredPlan(
   registry: Map<string, StoredPlan>,
   consumedPlanIds: Set<string>,
@@ -773,6 +809,7 @@ async function writeMcpAudit(
       `- categoryCounts: ${formatSummaryJson(summary.categoryCounts)}`,
       `- groupCounts: ${formatSummaryJson(summary.groupCounts)}`,
       `- campaignReport: ${formatSummaryJson(summary.campaignReport)}`,
+      `- folderReports: ${formatSummaryJson(summary.folderReports)}`,
       `- groupPlans: ${formatSummaryJson(summary.groupPlans)}`,
       `- skippedGroups: ${formatSummaryJson(summary.skippedGroups)}`,
       `- selectedGroupTargets: ${formatSummaryJson(summary.selectedGroupTargets)}`,
@@ -792,13 +829,16 @@ function summarizeMcpToolInput(input: object): Record<string, unknown> {
     runId: typeof raw.runId === "string" ? raw.runId : undefined,
     operationPlanId: typeof raw.operationPlanId === "string" ? raw.operationPlanId : undefined,
     folder: typeof raw.folder === "string" ? raw.folder : undefined,
+    folders: raw.folders,
     action: typeof raw.action === "string" ? raw.action : undefined,
     target: raw.target,
     scanOffset: raw.scanOffset,
     pageSize: raw.pageSize,
     maxPages: raw.maxPages,
+    maxPagesPerFolder: raw.maxPagesPerFolder,
     maxMessageRefs: raw.maxMessageRefs,
     maxMessageRefsPerGroup: raw.maxMessageRefsPerGroup,
+    maxConcurrentFolders: raw.maxConcurrentFolders,
     maxMessages: raw.maxMessages,
     selectedGroupIds: raw.selectedGroupIds,
     selectedCategoryIds: raw.selectedCategoryIds,
@@ -813,13 +853,18 @@ function summarizeMcpToolResult(structuredContent: object): Record<string, unkno
   const plans = content.plans as Array<Record<string, unknown>> | undefined;
   const result = content.result as Record<string, unknown> | undefined;
   const preview = content.preview as Record<string, unknown> | undefined;
+  const campaign = content.campaign as Record<string, unknown> | undefined;
   const report = content.report as Record<string, unknown> | undefined;
   const operationPlanIds = Array.isArray(plans)
     ? plans.map((entry) => entry.operationPlanId).filter((entry) => typeof entry === "string")
+    : Array.isArray(campaign?.folderReports)
+      ? campaign.folderReports
+        .flatMap((entry) => (entry as Record<string, unknown>).operationPlanIds)
+        .filter((entry) => typeof entry === "string")
     : undefined;
 
   return {
-    provider: result?.provider ?? plan?.provider ?? preview?.provider ?? report?.provider,
+    provider: result?.provider ?? plan?.provider ?? preview?.provider ?? campaign?.provider ?? report?.provider,
     operationPlanId: result?.operationPlanId ?? plan?.operationPlanId,
     operationPlanIds,
     status: result?.status ?? plan?.status,
@@ -839,6 +884,7 @@ function summarizeMcpToolResult(structuredContent: object): Record<string, unkno
     categoryCounts: preview?.categoryCounts,
     groupCounts: preview?.groupCounts,
     campaignReport: preview?.campaignReport,
+    folderReports: campaign?.folderReports,
     groupPlans: preview?.groupPlans,
     skippedGroups: preview?.skippedGroups,
     selectedGroupTargets: preview?.selectedGroupTargets,
