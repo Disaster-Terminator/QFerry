@@ -88,9 +88,11 @@ export interface MoveMessagesReconciliation {
   targetDelta: number;
   expectedSourceDelta?: number;
   expectedTargetDelta?: number;
+  sourceDeltaDiscrepancy?: number;
   sourceDeletedBefore?: number;
   targetDeltaReconciled: boolean;
   sourceDeltaReliable: boolean;
+  sourceDriftSeverity: "none" | "low" | "high";
   sourceDeltaStatus: "matched" | "matched_with_deleted_expunge" | "concurrent_or_external_change";
   reconciliationStatus: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "provider_result_unreliable";
 }

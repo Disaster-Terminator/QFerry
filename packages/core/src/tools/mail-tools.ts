@@ -76,6 +76,8 @@ export interface ExecuteCleanupResult {
   mutationsAttempted: number;
   moved?: number;
   reconciliationStatus?: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "provider_result_unreliable" | "unavailable";
+  reconciliationRisk?: "none" | "source_count_drift" | "severe_source_count_drift" | "target_unreconciled" | "provider_result_unreliable";
+  recommendedNextAction?: "continue_plan" | "refresh_preview" | "inspect_provider" | "no_action";
   totalPlanMessages?: number;
   remainingMessages?: number;
   executionBatch?: {
@@ -94,9 +96,11 @@ export interface ExecuteCleanupResult {
     targetDelta: number;
     expectedSourceDelta?: number;
     expectedTargetDelta?: number;
+    sourceDeltaDiscrepancy?: number;
     sourceDeletedBefore?: number;
     targetDeltaReconciled: boolean;
     sourceDeltaReliable: boolean;
+    sourceDriftSeverity: "none" | "low" | "high";
     sourceDeltaStatus: "matched" | "matched_with_deleted_expunge" | "concurrent_or_external_change";
     reconciliationStatus: "matched" | "target_reconciled_source_unreliable" | "target_unreconciled" | "provider_result_unreliable";
   }>;
@@ -938,7 +942,10 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         : await input.provider.moveMessages(messageRefsToMove, targetFolder);
       const remainingMessages = plan.messageRefs.length - messageRefsToMove.length;
       const reconciliationStatus = summarizeMoveReconciliationStatus(moveResult.reconciliations);
-      const reconciliationBlocked = hasBlockingMoveReconciliation(moveResult.reconciliations);
+      const reconciliationRisk = summarizeMoveReconciliationRisk(moveResult.reconciliations);
+      const severeSourceDriftBlocksContinuation = reconciliationRisk === "severe_source_count_drift" && remainingMessages > 0;
+      const reconciliationBlocked = hasBlockingMoveReconciliation(moveResult.reconciliations)
+        || severeSourceDriftBlocksContinuation;
       return {
         result: {
           operationPlanId: plan.operationPlanId,
@@ -950,6 +957,8 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           mutationsAttempted: messageRefsToMove.length,
           moved: moveResult.moved,
           reconciliationStatus,
+          reconciliationRisk,
+          recommendedNextAction: recommendPostMoveAction(reconciliationRisk, remainingMessages),
           totalPlanMessages: plan.messageRefs.length,
           remainingMessages,
           ...(executionLimit === undefined
@@ -3042,6 +3051,16 @@ async function waitForFreshReconciliation(input: {
       && sourceDelta < input.expectedSourceDelta
       && Math.abs(sourceDelta - input.expectedSourceDelta) <= input.sourceDeletedBefore;
     const sourceDeltaReliable = sourceDeltaMatched || sourceDeltaExplainedByDeleted;
+    const sourceDeltaDiscrepancy = input.expectedSourceDelta === undefined
+      ? undefined
+      : sourceDelta - input.expectedSourceDelta;
+    const sourceDriftSeverity = classifySourceDriftSeverity({
+      sourceDeltaReliable,
+      sourceDeltaDiscrepancy,
+      expectedTargetDelta: input.expectedTargetDelta,
+      maxTargetDelta: input.maxTargetDelta,
+      targetDeltaReconciled,
+    });
     latest = {
       sourceFolder: input.sourceFolder,
       targetFolder: input.targetFolder,
@@ -3053,9 +3072,11 @@ async function waitForFreshReconciliation(input: {
       targetDelta,
       expectedSourceDelta: input.expectedSourceDelta,
       expectedTargetDelta: input.expectedTargetDelta,
+      sourceDeltaDiscrepancy,
       sourceDeletedBefore: input.sourceDeletedBefore,
       targetDeltaReconciled,
       sourceDeltaReliable,
+      sourceDriftSeverity,
       sourceDeltaStatus: sourceDeltaMatched
         ? "matched"
         : sourceDeltaExplainedByDeleted
@@ -3099,6 +3120,20 @@ function classifyUnknownMoveReconciliationStatus(
   return targetDeltaReconciled ? "provider_result_unreliable" : "target_unreconciled";
 }
 
+function classifySourceDriftSeverity(input: {
+  sourceDeltaReliable: boolean;
+  sourceDeltaDiscrepancy?: number;
+  expectedTargetDelta?: number;
+  maxTargetDelta: number;
+  targetDeltaReconciled: boolean;
+}): MoveMessagesReconciliation["sourceDriftSeverity"] {
+  if (input.sourceDeltaReliable || !input.targetDeltaReconciled || input.sourceDeltaDiscrepancy === undefined) {
+    return "none";
+  }
+  const toleratedDrift = Math.max(5, Math.abs(input.expectedTargetDelta ?? input.maxTargetDelta));
+  return Math.abs(input.sourceDeltaDiscrepancy) > toleratedDrift ? "high" : "low";
+}
+
 function summarizeMoveReconciliationStatus(
   reconciliations: MoveMessagesReconciliation[] | undefined,
 ): ExecuteCleanupResult["reconciliationStatus"] {
@@ -3123,6 +3158,48 @@ function summarizeMoveReconciliationStatus(
     return "provider_result_unreliable";
   }
   return "matched";
+}
+
+function summarizeMoveReconciliationRisk(
+  reconciliations: MoveMessagesReconciliation[] | undefined,
+): ExecuteCleanupResult["reconciliationRisk"] {
+  if (!reconciliations) {
+    return "none";
+  }
+  if (reconciliations.some((reconciliation) => reconciliation.reconciliationStatus === "target_unreconciled")) {
+    return "target_unreconciled";
+  }
+  if (reconciliations.some((reconciliation) => reconciliation.sourceDriftSeverity === "high")) {
+    return "severe_source_count_drift";
+  }
+  if (
+    reconciliations.some(
+      (reconciliation) => reconciliation.reconciliationStatus === "target_reconciled_source_unreliable",
+    )
+  ) {
+    return "source_count_drift";
+  }
+  if (
+    reconciliations.some(
+      (reconciliation) => reconciliation.reconciliationStatus === "provider_result_unreliable",
+    )
+  ) {
+    return "provider_result_unreliable";
+  }
+  return "none";
+}
+
+function recommendPostMoveAction(
+  risk: ExecuteCleanupResult["reconciliationRisk"],
+  remainingMessages: number,
+): ExecuteCleanupResult["recommendedNextAction"] {
+  if (risk === "target_unreconciled") {
+    return "inspect_provider";
+  }
+  if (risk === "severe_source_count_drift") {
+    return "refresh_preview";
+  }
+  return remainingMessages > 0 ? "continue_plan" : "no_action";
 }
 
 function hasBlockingMoveReconciliation(reconciliations: MoveMessagesReconciliation[] | undefined): boolean {

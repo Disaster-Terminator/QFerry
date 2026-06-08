@@ -3245,6 +3245,79 @@ describe("mail tools", () => {
     ]);
   });
 
+  it("blocks continuing a partial move plan when source count drift is severe", async () => {
+    const provider = FixtureMailProvider.demo();
+    const counts = new Map([
+      ["INBOX", 10],
+      ["Archive", 0],
+    ]);
+    const tools = createMailTools({
+      provider: {
+        ...provider,
+        listMailboxes: provider.listMailboxes.bind(provider),
+        scanMailboxMetadata: provider.scanMailboxMetadata.bind(provider),
+        fetchMessage: provider.fetchMessage.bind(provider),
+        getMailboxSummary: async (folder) => ({
+          path: folder,
+          exists: counts.get(folder) ?? 0,
+        }),
+        getCapabilitySnapshot: async () => ({
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 10,
+        }),
+        moveMessages: async (refs, targetFolder) => {
+          const sourceFolder = refs[0]?.folder ?? "";
+          counts.set(sourceFolder, (counts.get(sourceFolder) ?? 0) - refs.length - 6);
+          counts.set(targetFolder, (counts.get(targetFolder) ?? 0) + refs.length);
+          return { moved: refs.length };
+        },
+      },
+    });
+    const previewPlan = createOperationPlan({
+      runId: "run-execute-severe-source-drift",
+      provider: "fixture",
+      action: "move",
+      messageRefs: [
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "3" },
+        { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "4" },
+      ],
+      target: { folder: "Archive" },
+    });
+    const plan = confirmOperationPlan(previewPlan, previewPlan.operationPlanId);
+
+    const result = await tools.executeCleanup({ plan, maxMessages: 2 });
+
+    expect(result.result).toMatchObject({
+      status: "blocked",
+      attemptedMessages: 2,
+      mutationsAttempted: 2,
+      moved: 2,
+      remainingMessages: 2,
+      reconciliationStatus: "target_reconciled_source_unreliable",
+      reconciliationRisk: "severe_source_count_drift",
+      recommendedNextAction: "refresh_preview",
+      reconciliations: [
+        {
+          sourceDelta: -8,
+          expectedSourceDelta: -2,
+          targetDelta: 2,
+          expectedTargetDelta: 2,
+          sourceDeltaDiscrepancy: -6,
+          sourceDriftSeverity: "high",
+          reconciliationStatus: "target_reconciled_source_unreliable",
+        },
+      ],
+    });
+  });
+
   it("keeps prototype provider mutation methods when using fresh reconciliation", async () => {
     const fixture = FixtureMailProvider.demo();
     const movedRefs: unknown[] = [];
