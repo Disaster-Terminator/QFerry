@@ -439,11 +439,17 @@ describe("QFerry ChatGPT App MCP server", () => {
       plans?: unknown[];
       classifications?: unknown[];
       campaign?: {
+        selectedGroupIds?: string[];
         folderReports?: Array<{
           folder: string;
           plannedMessages: number;
           operationPlanIds: string[];
           groupPlans?: Array<{ runId: string }>;
+          selectedGroupIds?: string[];
+          skippedGroups?: Array<{ reason: string }>;
+          skippedGroupSummary?: {
+            noMatchedMessages: number;
+          };
         }>;
         scannedMessages?: number;
         plannedMessages?: number;
@@ -456,11 +462,15 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(content.campaign?.scannedMessages).toBe(3);
     expect(content.campaign?.plannedMessages).toBe(2);
     expect(content.campaign?.executablePlanCount).toBe(2);
+    expect(content.campaign?.selectedGroupIds).toEqual(["group_alpha", "group_beta"]);
     expect(content.campaign?.folderReports?.map((report) => report.folder)).toEqual(["INBOX", "Archive"]);
     expect(content.campaign?.folderReports?.[0]?.operationPlanIds).toEqual([
       expect.any(String),
       expect.any(String),
     ]);
+    expect(content.campaign?.folderReports?.[0]?.selectedGroupIds).toBeUndefined();
+    expect(content.campaign?.folderReports?.[1]?.skippedGroups).toEqual([]);
+    expect(content.campaign?.folderReports?.[1]?.skippedGroupSummary?.noMatchedMessages).toBe(2);
     expect(content.campaign?.folderReports?.[0]?.groupPlans?.map((plan) => plan.runId)).toEqual([
       "mcp-ruleset-campaign-inbox-group-alpha",
       "mcp-ruleset-campaign-inbox-group-beta",

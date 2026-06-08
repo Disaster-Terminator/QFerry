@@ -410,7 +410,6 @@ export interface RulesetGovernanceFolderReport {
   coverageRatio: number;
   planCount: number;
   operationPlanIds: string[];
-  selectedGroupIds: string[];
   groupCounts: Record<string, number>;
   groupPlans: Array<{
     groupId: string;
@@ -422,6 +421,11 @@ export interface RulesetGovernanceFolderReport {
     runId: string;
   }>;
   skippedGroups: RulesetGovernanceSkippedGroup[];
+  skippedGroupSummary: {
+    missingTargetFolder: number;
+    noMatchedMessages: number;
+    targetIsSourceFolder: number;
+  };
   topUnplannedDomains: RulesetGovernanceCampaignReport["topUnplannedDomains"];
   topUnplannedSenders: RulesetGovernanceCampaignReport["topUnplannedSenders"];
   truncatedGroups: RulesetGovernanceCampaignReport["truncatedGroups"];
@@ -445,6 +449,7 @@ export interface RulesetGovernanceCampaignPreview {
   coverageBasis: "scanned_window";
   coverageRatio: number;
   executablePlanCount: number;
+  selectedGroupIds: string[];
   folderReports: RulesetGovernanceFolderReport[];
   ruleset?: ClassificationRulesetMetadata;
   recommendedNextAction: RulesetGovernanceCampaignNextAction;
@@ -1980,7 +1985,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
 
       const folderResults = await mapWithConcurrency(campaignInput.folders, maxConcurrentFolders, async (folder) => {
         const result = await tools.rulesetGovernancePreview({
-          runId: `${campaignInput.runId}-${slugifyRuleId(folder)}`,
+          runId: `${campaignInput.runId}-${campaignFolderRunIdSuffix(folder)}`,
           folder,
           pageSize,
           maxPages: maxPagesPerFolder,
@@ -2012,7 +2017,6 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           coverageRatio: report.coverageRatio,
           planCount: report.planCount,
           operationPlanIds: preview.groupPlans.map((plan) => plan.operationPlanId),
-          selectedGroupIds: preview.selectedGroupIds,
           groupCounts: preview.groupCounts,
           groupPlans: preview.groupPlans.map((plan) => ({
             groupId: plan.groupId,
@@ -2023,7 +2027,8 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
             operationPlanId: plan.operationPlanId,
             runId: plan.runId,
           })),
-          skippedGroups: preview.skippedGroups,
+          skippedGroups: compactRulesetSkippedGroups(preview.skippedGroups),
+          skippedGroupSummary: summarizeRulesetSkippedGroups(preview.skippedGroups),
           topUnplannedDomains: report.topUnplannedDomains,
           topUnplannedSenders: report.topUnplannedSenders,
           truncatedGroups: report.truncatedGroups,
@@ -2071,6 +2076,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           coverageBasis: "scanned_window" as const,
           coverageRatio,
           executablePlanCount: plans.length,
+          selectedGroupIds: sortedFolderResults[0]?.result.preview.selectedGroupIds ?? campaignInput.selectedGroupIds ?? [],
           folderReports,
           ruleset: sortedFolderResults.find((entry) => entry.result.ruleset)?.result.ruleset,
           recommendedNextAction: rulesetCampaignNextAction(folderReports),
@@ -2263,6 +2269,29 @@ function rulesetFolderActionRank(action: RulesetGovernanceCampaignNextAction): n
   if (action === "review_rules") return 1;
   if (action === "stop_low_yield") return 2;
   return 3;
+}
+
+function campaignFolderRunIdSuffix(folder: string): string {
+  const slug = slugifyRuleId(folder);
+  return slug === "unknown" ? `folder-${stableHexHash(folder)}` : slug;
+}
+
+function compactRulesetSkippedGroups(
+  skippedGroups: RulesetGovernanceSkippedGroup[],
+): RulesetGovernanceSkippedGroup[] {
+  return skippedGroups.filter((group) => group.reason !== "no_matched_messages");
+}
+
+function summarizeRulesetSkippedGroups(skippedGroups: RulesetGovernanceSkippedGroup[]): {
+  missingTargetFolder: number;
+  noMatchedMessages: number;
+  targetIsSourceFolder: number;
+} {
+  return {
+    missingTargetFolder: skippedGroups.filter((group) => group.reason === "missing_target_folder").length,
+    noMatchedMessages: skippedGroups.filter((group) => group.reason === "no_matched_messages").length,
+    targetIsSourceFolder: skippedGroups.filter((group) => group.reason === "target_is_source_folder").length,
+  };
 }
 
 function summarizeTopUnplannedDomains(

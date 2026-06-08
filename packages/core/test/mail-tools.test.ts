@@ -3911,11 +3911,13 @@ describe("mail tools", () => {
       recommendedNextAction: "review_rules",
       mutationsAttempted: 0,
     });
+    expect(result.campaign.selectedGroupIds).toEqual(["group_alpha", "group_beta"]);
     expect(result.campaign.folderReports.map((report) => report.folder)).toEqual([
       "INBOX",
       "Folders/Group Alpha",
       "Archive",
     ]);
+    expect(result.campaign.folderReports[0]).not.toHaveProperty("selectedGroupIds");
     expect(result.campaign.folderReports[0]).toMatchObject({
       folder: "INBOX",
       scannedMessages: 3,
@@ -3924,6 +3926,11 @@ describe("mail tools", () => {
       unplannedMessages: 1,
       coverageRatio: 0.667,
       planCount: 2,
+      skippedGroupSummary: {
+        missingTargetFolder: 0,
+        noMatchedMessages: 0,
+        targetIsSourceFolder: 0,
+      },
       operationPlanIds: [
         expect.any(String),
         expect.any(String),
@@ -3935,6 +3942,11 @@ describe("mail tools", () => {
       alreadyInTargetMessages: 2,
       unplannedMessages: 1,
       planCount: 1,
+      skippedGroupSummary: {
+        missingTargetFolder: 0,
+        noMatchedMessages: 0,
+        targetIsSourceFolder: 1,
+      },
       operationPlanIds: [expect.any(String)],
     });
     expect(result.campaign.folderReports[2]).toMatchObject({
@@ -3944,8 +3956,16 @@ describe("mail tools", () => {
       unplannedMessages: 1,
       planCount: 0,
       operationPlanIds: [],
+      skippedGroups: [],
+      skippedGroupSummary: {
+        missingTargetFolder: 0,
+        noMatchedMessages: 2,
+        targetIsSourceFolder: 0,
+      },
       recommendedNextAction: "stop_low_yield",
     });
+    expect(result.campaign.folderReports.flatMap((report) => report.skippedGroups))
+      .not.toContainEqual(expect.objectContaining({ reason: "no_matched_messages" }));
     expect(result.plans.map((plan) => plan.runId)).toEqual([
       "ruleset-campaign-inbox-group-alpha",
       "ruleset-campaign-inbox-group-beta",
@@ -3955,6 +3975,63 @@ describe("mail tools", () => {
       result.plans.map((plan) => plan.operationPlanId),
     );
     expect((result as { classifications?: unknown[] }).classifications).toBeUndefined();
+  });
+
+  it("uses stable folder run id suffixes for non-ascii campaign folders", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-ruleset-campaign-unicode-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-campaign-unicode",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "group_beta", label: "Group Beta", target: { folder: "Folders/Group Beta" } },
+      ],
+      rules: [
+        { id: "beta-domain", groupId: "group_beta", match: { fromDomainIncludes: "beta.example" } },
+      ],
+    }), "utf8");
+    const folder = "其他文件夹/账号安全";
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder, uid: "1" },
+        from: "Beta <notice@beta.example>",
+        subject: "Beta",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        scanMailboxMetadataWindow: async () => ({
+          pagesScanned: 1,
+          mailboxSnapshot: { folder, exists: messages.length },
+          messages,
+        }),
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.rulesetGovernanceCampaignPreview({
+      runId: "ruleset-campaign-unicode",
+      folders: [folder],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      maxMessageRefsPerGroup: 50,
+      action: "move",
+      rulesFile,
+      selectedGroupIds: ["group_beta"],
+    });
+
+    expect(result.plans).toHaveLength(1);
+    expect(result.plans[0]?.runId).toMatch(/^ruleset-campaign-unicode-folder-[a-f0-9]{8}-group-beta$/);
+    expect(result.plans[0]?.runId).not.toContain("unknown");
+    expect(result.campaign.folderReports[0]?.groupPlans[0]?.runId).toBe(result.plans[0]?.runId);
   });
 
   it("skips ruleset governance groups whose target folder is the source folder", async () => {
