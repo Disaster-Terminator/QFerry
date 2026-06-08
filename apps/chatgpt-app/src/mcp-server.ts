@@ -64,6 +64,7 @@ const rulesetPatchSchema = z.object({
     }).optional(),
   }),
   candidateRuleCount: z.number().int().min(0),
+  rulesToReplace: z.array(classificationRuleSchema).optional(),
   rulesToAdd: z.array(classificationRuleSchema),
   skippedDuplicateRules: z.array(z.object({
     ruleId: z.string(),
@@ -553,7 +554,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     "apply_ruleset_patch",
     {
       title: "Apply ruleset patch",
-      description: "Use this to dry-run or explicitly apply a local QFerry ruleset patch. This only writes the local rules file when apply is true and never mutates the mailbox.",
+      description: "Use this to dry-run or explicitly apply a local QFerry ruleset patch, including appending rules or replacing stale rules by id. This only writes the local rules file when apply is true and never mutates the mailbox.",
       inputSchema: {
         rulesFile: z.string(),
         apply: z.boolean().default(false),

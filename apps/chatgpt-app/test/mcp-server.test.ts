@@ -2501,6 +2501,75 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("dry-runs ruleset rule replacement through the MCP server", async () => {
+    const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mcp-rules-replace-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, `${JSON.stringify({
+      version: "existing",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Needs review" },
+        { id: "account_security", label: "Account security" },
+      ],
+      rules: [
+        { id: "sender-domain-tm-openai-com", groupId: "account_security", match: { fromDomainIncludes: "tm.openai.com" } },
+      ],
+    }, null, 2)}\n`, "utf8");
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "apply_ruleset_patch",
+      arguments: {
+        rulesFile,
+        apply: false,
+        patch: {
+          groupToEnsure: { id: "account_security", label: "Account security" },
+          candidateRuleCount: 1,
+          rulesToReplace: [
+            {
+              id: "sender-domain-tm-openai-com",
+              groupId: "account_security",
+              match: { fromDomainIncludes: "tm.openai.com", subjectIncludes: "verification" },
+            },
+          ],
+          rulesToAdd: [],
+          skippedDuplicateRules: [],
+        },
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      applied: false,
+      beforeRuleCount: 1,
+      afterRuleCount: 1,
+      addedRuleCount: 0,
+      replacedRuleCount: 1,
+      renderedDraft: {
+        rules: [
+          {
+            id: "sender-domain-tm-openai-com",
+            groupId: "account_security",
+            match: { fromDomainIncludes: "tm.openai.com", subjectIncludes: "verification" },
+          },
+        ],
+      },
+    });
+    expect(JSON.parse(await readFile(rulesFile, "utf8")).rules[0].match).toEqual({ fromDomainIncludes: "tm.openai.com" });
+
+    await client.close();
+    await server.close();
+  });
+
   it("rejects applying ruleset patches to non-ruleset files", async () => {
     const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
     const { join } = await import("node:path");

@@ -73,10 +73,66 @@ describe("ruleset patch rendering", () => {
     expect(() => parseClassificationRuleset(draft, "draft")).not.toThrow();
   });
 
+  it("replaces existing rules in place before appending new rules", () => {
+    const existing = parseClassificationRuleset({
+      version: "existing",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Needs review" },
+        { id: "account_security", label: "Account security" },
+        { id: "ai_dev_tools", label: "AI dev tools" },
+      ],
+      rules: [
+        { id: "sender-domain-tm-openai-com", groupId: "account_security", match: { fromDomainIncludes: "tm.openai.com" } },
+        { id: "keep", groupId: "review", match: { subjectIncludes: "keep" } },
+      ],
+    }, "memory");
+    const patch = {
+      groupToEnsure: { id: "ai_dev_tools", label: "AI dev tools" } as const,
+      candidateRuleCount: 2,
+      rulesToReplace: [
+        {
+          id: "sender-domain-tm-openai-com",
+          groupId: "account_security",
+          match: { fromDomainIncludes: "tm.openai.com", subjectIncludes: "verification" },
+        },
+      ],
+      rulesToAdd: [
+        {
+          id: "sender-domain-tm-openai-com-task-update",
+          groupId: "ai_dev_tools",
+          match: { fromDomainIncludes: "tm.openai.com", subjectIncludes: "[Task Update]" },
+        },
+      ],
+      skippedDuplicateRules: [],
+      ruleset: existing.metadata,
+    };
+
+    const draft = renderRulesetPatchDraft(patch, existing);
+
+    expect(draft.rules.map(({ priority, ...rule }) => rule)).toEqual([
+      {
+        id: "sender-domain-tm-openai-com",
+        groupId: "account_security",
+        match: { fromDomainIncludes: "tm.openai.com", subjectIncludes: "verification" },
+      },
+      { id: "keep", groupId: "review", match: { subjectIncludes: "keep" } },
+      {
+        id: "sender-domain-tm-openai-com-task-update",
+        groupId: "ai_dev_tools",
+        match: { fromDomainIncludes: "tm.openai.com", subjectIncludes: "[Task Update]" },
+      },
+    ]);
+    expect(() => parseClassificationRuleset(draft, "draft")).not.toThrow();
+  });
+
   it("formats a human-readable changelog for added and skipped rules", () => {
     const changelog = formatRulesetPatchChangelog({
       groupToEnsure: { id: "sender_governance", label: "Sender governance" },
       candidateRuleCount: 2,
+      rulesToReplace: [
+        { id: "replace-me", groupId: "sender_governance", match: { fromDomainIncludes: "old.example.com" } },
+      ],
       rulesToAdd: [
         { id: "sender-domain-example-com", groupId: "sender_governance", match: { fromDomainIncludes: "example.com" } },
       ],
@@ -90,6 +146,8 @@ describe("ruleset patch rendering", () => {
     });
 
     expect(changelog).toContain("rulesToAdd: 1");
+    expect(changelog).toContain("rulesToReplace: 1");
+    expect(changelog).toContain("~ rule replace-me");
     expect(changelog).toContain("+ rule sender-domain-example-com");
     expect(changelog).toContain("skipped existing-example-domain");
   });
@@ -169,6 +227,83 @@ describe("ruleset patch rendering", () => {
         { id: "sender-domain-example-com", groupId: "sender_governance", match: { fromDomainIncludes: "example.com" } },
       ],
     });
+  });
+
+  it("rejects missing replacement rule ids without writing the rules file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-replace-missing-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    const original = `${JSON.stringify({
+      version: "existing",
+      defaultGroupId: "review",
+      groups: [{ id: "review", label: "Review" }],
+      rules: [{ id: "keep", groupId: "review", match: { subjectIncludes: "keep" } }],
+    }, null, 2)}\n`;
+    await writeFile(rulesFile, original, "utf8");
+    const patch = {
+      groupToEnsure: { id: "review", label: "Review" } as const,
+      candidateRuleCount: 1,
+      rulesToReplace: [
+        { id: "missing-rule", groupId: "review", match: { subjectIncludes: "missing" } },
+      ],
+      rulesToAdd: [],
+      skippedDuplicateRules: [],
+    };
+
+    await expect(applyRulesetPatchDraft({ rulesFile, patch, apply: true }))
+      .rejects.toThrow("replacement target not found");
+    expect(await readFile(rulesFile, "utf8")).toBe(original);
+  });
+
+  it("rejects rule ids that are both replaced and added without writing the rules file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-replace-overlap-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    const original = `${JSON.stringify({
+      version: "existing",
+      defaultGroupId: "review",
+      groups: [{ id: "review", label: "Review" }],
+      rules: [{ id: "overlap", groupId: "review", match: { subjectIncludes: "old" } }],
+    }, null, 2)}\n`;
+    await writeFile(rulesFile, original, "utf8");
+    const patch = {
+      groupToEnsure: { id: "review", label: "Review" } as const,
+      candidateRuleCount: 2,
+      rulesToReplace: [
+        { id: "overlap", groupId: "review", match: { subjectIncludes: "new" } },
+      ],
+      rulesToAdd: [
+        { id: "overlap", groupId: "review", match: { subjectIncludes: "also-new" } },
+      ],
+      skippedDuplicateRules: [],
+    };
+
+    await expect(applyRulesetPatchDraft({ rulesFile, patch, apply: true }))
+      .rejects.toThrow("cannot both replace and add rule id");
+    expect(await readFile(rulesFile, "utf8")).toBe(original);
+  });
+
+  it("rejects replacement rules that reference undeclared groups without writing the rules file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-replace-unknown-group-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    const original = `${JSON.stringify({
+      version: "existing",
+      defaultGroupId: "review",
+      groups: [{ id: "review", label: "Review" }],
+      rules: [{ id: "move-me", groupId: "review", match: { subjectIncludes: "old" } }],
+    }, null, 2)}\n`;
+    await writeFile(rulesFile, original, "utf8");
+    const patch = {
+      groupToEnsure: { id: "review", label: "Review" } as const,
+      candidateRuleCount: 1,
+      rulesToReplace: [
+        { id: "move-me", groupId: "missing_group", match: { subjectIncludes: "new" } },
+      ],
+      rulesToAdd: [],
+      skippedDuplicateRules: [],
+    };
+
+    await expect(applyRulesetPatchDraft({ rulesFile, patch, apply: true }))
+      .rejects.toThrow("unknown groupId");
+    expect(await readFile(rulesFile, "utf8")).toBe(original);
   });
 
   it("rejects applying a ruleset patch to a non-standard file name", async () => {

@@ -82,7 +82,7 @@ For GitHub-heavy inbox治理, do not put all `github.com` mail into one broad fo
 
 For real QQ Mail after any move batch, treat `classification_sweep` counts and `nextScanOffset` as advisory only. QQ IMAP sequence windows and `INBOX exists` can fold after moves, so a later `scanOffset: 0` preview may see a different current front window. Use `ruleset_governance_preview` or `bulk_governance_preview` `selectedMessageRefs`, `preview.mailboxSnapshot`, and generated UID refs as the authoritative execution input. Do not claim a category tail is fully exhausted solely from a prior sweep; re-preview the chosen group/category and rely on target-folder reconciliation after execution.
 
-Use `apply_ruleset_patch` only for local QFerry rules files. Default to `apply: false` for review. `apply: true` writes the local rules file but does not mutate QQ Mail, labels, folders, messages, or server-side blocklists.
+Use `apply_ruleset_patch` only for local QFerry rules files. Default to `apply: false` for review. It can append new rules with `rulesToAdd` and replace stale broad rules by id with `rulesToReplace`; replacements keep the original rule order and fail when the requested rule id is missing, so they do not silently become append-only patches. `apply: true` writes the local rules file but does not mutate QQ Mail, labels, folders, messages, or server-side blocklists.
 
 When a tool response includes `ruleset`, keep `ruleset.version`, `ruleset.ruleCount`, and `ruleset.source` in the acceptance summary. Inline rules are still acceptable for one-off classification.
 

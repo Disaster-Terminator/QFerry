@@ -6,6 +6,7 @@ import { basename, dirname, extname, resolve } from "node:path";
 export interface RulesetPatchDraft {
   groupToEnsure: ClassificationGroup;
   candidateRuleCount: number;
+  rulesToReplace?: ClassificationRule[];
   rulesToAdd: ClassificationRule[];
   skippedDuplicateRules: Array<{
     ruleId: string;
@@ -36,6 +37,7 @@ export interface ApplyRulesetPatchDraftResult {
   beforeRuleCount: number;
   afterRuleCount: number;
   addedRuleCount: number;
+  replacedRuleCount: number;
   skippedDuplicateRuleCount: number;
   renderedDraft: ClassificationRulesetJsonDraft;
   changelog: string;
@@ -63,19 +65,45 @@ export function renderRulesetPatchDraft(
   const groups = base.groups.some((group) => group.id === patch.groupToEnsure.id)
     ? base.groups
     : [...base.groups, patch.groupToEnsure];
+  const replacementRules = patch.rulesToReplace ?? [];
+  assertReplacementRuleIdsAreUnambiguous(replacementRules, patch.rulesToAdd);
+  const replacementById = new Map(replacementRules.map((rule) => [rule.id, rule]));
+  const replacedRuleIds = new Set<string>();
+  const rules = base.rules.map((rule) => {
+    const replacement = replacementById.get(rule.id);
+    if (!replacement) {
+      return rule;
+    }
+    replacedRuleIds.add(rule.id);
+    return replacement;
+  });
+  const missingReplacementIds = replacementRules
+    .map((rule) => rule.id)
+    .filter((ruleId) => !replacedRuleIds.has(ruleId));
+
+  if (missingReplacementIds.length > 0) {
+    throw new Error(`QFerry ruleset patch replacement target not found: ${missingReplacementIds.join(", ")}`);
+  }
 
   return {
     version: base.version,
     defaultGroupId: base.defaultGroupId,
     groups,
-    rules: [...base.rules, ...patch.rulesToAdd],
+    rules: [...rules, ...patch.rulesToAdd],
   };
 }
 
 export function formatRulesetPatchChangelog(patch: RulesetPatchDraft): string {
+  const replacementRules = patch.rulesToReplace ?? [];
   return [
     `groupToEnsure: ${patch.groupToEnsure.id}`,
     `candidateRuleCount: ${patch.candidateRuleCount}`,
+    ...(replacementRules.length > 0
+      ? [
+        `rulesToReplace: ${replacementRules.length}`,
+        ...replacementRules.map((rule) => `~ rule ${rule.id} (${formatMatch(rule.match)})`),
+      ]
+      : []),
     `rulesToAdd: ${patch.rulesToAdd.length}`,
     ...patch.rulesToAdd.map((rule) => `+ rule ${rule.id} (${formatMatch(rule.match)})`),
     `skippedDuplicateRules: ${patch.skippedDuplicateRules.length}`,
@@ -89,6 +117,7 @@ export async function applyRulesetPatchDraft(
 ): Promise<ApplyRulesetPatchDraftResult> {
   const existing = await loadPatchableRuleset(input.rulesFile);
   const renderedDraft = renderRulesetPatchDraft(input.patch, existing);
+  parseClassificationRuleset(renderedDraft, "ruleset patch draft");
   const changelog = formatRulesetPatchChangelog(input.patch);
 
   if (input.apply) {
@@ -102,10 +131,30 @@ export async function applyRulesetPatchDraft(
     beforeRuleCount: existing.rules.length,
     afterRuleCount: renderedDraft.rules.length,
     addedRuleCount: input.patch.rulesToAdd.length,
+    replacedRuleCount: input.patch.rulesToReplace?.length ?? 0,
     skippedDuplicateRuleCount: input.patch.skippedDuplicateRules.length,
     renderedDraft,
     changelog,
   };
+}
+
+function assertReplacementRuleIdsAreUnambiguous(
+  replacementRules: ClassificationRule[],
+  addedRules: ClassificationRule[],
+): void {
+  const replacementIds = new Set<string>();
+  for (const rule of replacementRules) {
+    if (replacementIds.has(rule.id)) {
+      throw new Error(`QFerry ruleset patch duplicate replacement rule id: ${rule.id}`);
+    }
+    replacementIds.add(rule.id);
+  }
+
+  const addedIds = new Set(addedRules.map((rule) => rule.id));
+  const overlappingIds = [...replacementIds].filter((ruleId) => addedIds.has(ruleId));
+  if (overlappingIds.length > 0) {
+    throw new Error(`QFerry ruleset patch cannot both replace and add rule id: ${overlappingIds.join(", ")}`);
+  }
 }
 
 async function loadPatchableRuleset(rulesFile: string): Promise<ClassificationRuleset> {
