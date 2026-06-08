@@ -562,6 +562,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         maxPagesPerFolder: z.number().int().min(1).max(500),
         maxMessageRefsPerGroup: z.number().int().min(0).max(500),
         maxConcurrentFolders: z.number().int().min(1).max(10).optional(),
+        maxUnplannedHintsPerFolder: z.number().int().min(0).max(10).optional(),
         action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
         defaultGroupId: z.string().optional(),
         rules: z.array(classificationRuleSchema).optional(),

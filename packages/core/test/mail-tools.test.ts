@@ -4034,6 +4034,98 @@ describe("mail tools", () => {
     expect(result.campaign.folderReports[0]?.groupPlans[0]?.runId).toBe(result.plans[0]?.runId);
   });
 
+  it("limits ruleset governance campaign unplanned hints", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-ruleset-campaign-hints-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "rules-campaign-hints",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "group_alpha", label: "Group Alpha", target: { folder: "Folders/Group Alpha" } },
+      ],
+      rules: [
+        { id: "alpha-domain", groupId: "group_alpha", match: { fromDomainIncludes: "alpha.example" } },
+      ],
+    }), "utf8");
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Alpha <notice@alpha.example>",
+        subject: "Alpha",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+      ...["one.example", "two.example", "three.example", "four.example", "five.example"].map((domain, index) => ({
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: String(index + 2) },
+        from: `Sender ${index} <sender@${domain}>`,
+        subject: `Unplanned ${index}`,
+        date: `2026-05-${11 + index}T00:00:00.000Z`,
+        snippet: "",
+        flags: [],
+      })),
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        scanMailboxMetadataWindow: async () => ({
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "INBOX", exists: messages.length },
+          messages,
+        }),
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const baseInput = {
+      runId: "ruleset-campaign-hints",
+      folders: ["INBOX"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      maxMessageRefsPerGroup: 50,
+      action: "move" as const,
+      rulesFile,
+      selectedGroupIds: ["group_alpha"],
+    };
+
+    const result = await tools.rulesetGovernanceCampaignPreview(baseInput);
+
+    expect(result.campaign.maxUnplannedHintsPerFolder).toBe(3);
+    expect(result.campaign.folderReports[0]?.topUnplannedDomains).toHaveLength(3);
+    expect(result.campaign.folderReports[0]?.topUnplannedSenders).toHaveLength(3);
+
+    const explicitOne = await tools.rulesetGovernanceCampaignPreview({
+      ...baseInput,
+      runId: "ruleset-campaign-hints-one",
+      maxUnplannedHintsPerFolder: 1,
+    });
+    expect(explicitOne.campaign.maxUnplannedHintsPerFolder).toBe(1);
+    expect(explicitOne.campaign.folderReports[0]?.topUnplannedDomains).toHaveLength(1);
+    expect(explicitOne.campaign.folderReports[0]?.topUnplannedSenders).toHaveLength(1);
+
+    const clampedLow = await tools.rulesetGovernanceCampaignPreview({
+      ...baseInput,
+      runId: "ruleset-campaign-hints-low",
+      maxUnplannedHintsPerFolder: -1,
+    });
+    expect(clampedLow.campaign.maxUnplannedHintsPerFolder).toBe(0);
+    expect(clampedLow.campaign.folderReports[0]?.topUnplannedDomains).toHaveLength(0);
+    expect(clampedLow.campaign.folderReports[0]?.topUnplannedSenders).toHaveLength(0);
+
+    const clampedHigh = await tools.rulesetGovernanceCampaignPreview({
+      ...baseInput,
+      runId: "ruleset-campaign-hints-high",
+      maxUnplannedHintsPerFolder: 50,
+    });
+    expect(clampedHigh.campaign.maxUnplannedHintsPerFolder).toBe(10);
+    expect(clampedHigh.campaign.folderReports[0]?.topUnplannedDomains).toHaveLength(5);
+    expect(clampedHigh.campaign.folderReports[0]?.topUnplannedSenders).toHaveLength(5);
+  });
+
   it("skips ruleset governance groups whose target folder is the source folder", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-ruleset-same-target-"));
     const rulesFile = join(dir, "qferry.rules.json");

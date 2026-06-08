@@ -391,6 +391,22 @@ describe("QFerry ChatGPT App MCP server", () => {
           snippet: "",
           flags: [],
         },
+        {
+          ref: { provider: "fixture", accountAlias: "demo", folder: "Archive", uid: "4" },
+          from: "Ops <ops@example.org>",
+          subject: "Ops review",
+          date: "2026-05-13T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
+        {
+          ref: { provider: "fixture", accountAlias: "demo", folder: "Archive", uid: "5" },
+          from: "Other <other@example.dev>",
+          subject: "Other review",
+          date: "2026-05-14T00:00:00.000Z",
+          snippet: "",
+          flags: [],
+        },
       ],
     };
     const provider: MailProvider = {
@@ -429,6 +445,7 @@ describe("QFerry ChatGPT App MCP server", () => {
         maxPagesPerFolder: 1,
         maxMessageRefsPerGroup: 50,
         maxConcurrentFolders: 2,
+        maxUnplannedHintsPerFolder: 1,
         action: "move",
         rulesFile,
         selectedGroupIds: ["group_alpha", "group_beta"],
@@ -447,10 +464,13 @@ describe("QFerry ChatGPT App MCP server", () => {
           groupPlans?: Array<{ runId: string }>;
           selectedGroupIds?: string[];
           skippedGroups?: Array<{ reason: string }>;
+          topUnplannedDomains?: Array<{ domain: string; messageCount: number }>;
+          topUnplannedSenders?: Array<{ sender: string; domain: string; messageCount: number }>;
           skippedGroupSummary?: {
             noMatchedMessages: number;
           };
         }>;
+        maxUnplannedHintsPerFolder?: number;
         scannedMessages?: number;
         plannedMessages?: number;
         executablePlanCount?: number;
@@ -459,7 +479,8 @@ describe("QFerry ChatGPT App MCP server", () => {
     };
     expect(content.plans).toBeUndefined();
     expect(content.classifications).toBeUndefined();
-    expect(content.campaign?.scannedMessages).toBe(3);
+    expect(content.campaign?.maxUnplannedHintsPerFolder).toBe(1);
+    expect(content.campaign?.scannedMessages).toBe(5);
     expect(content.campaign?.plannedMessages).toBe(2);
     expect(content.campaign?.executablePlanCount).toBe(2);
     expect(content.campaign?.selectedGroupIds).toEqual(["group_alpha", "group_beta"]);
@@ -471,6 +492,8 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(content.campaign?.folderReports?.[0]?.selectedGroupIds).toBeUndefined();
     expect(content.campaign?.folderReports?.[1]?.skippedGroups).toEqual([]);
     expect(content.campaign?.folderReports?.[1]?.skippedGroupSummary?.noMatchedMessages).toBe(2);
+    expect(content.campaign?.folderReports?.[1]?.topUnplannedDomains).toHaveLength(1);
+    expect(content.campaign?.folderReports?.[1]?.topUnplannedSenders).toHaveLength(1);
     expect(content.campaign?.folderReports?.[0]?.groupPlans?.map((plan) => plan.runId)).toEqual([
       "mcp-ruleset-campaign-inbox-group-alpha",
       "mcp-ruleset-campaign-inbox-group-beta",
@@ -480,6 +503,36 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(summary).toContain("- operationPlanIds: [");
     expect(summary).toContain("- folderReports: [");
     expect(summary).not.toContain("classifications");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("rejects invalid ruleset campaign unplanned hint limits at the MCP schema boundary", async () => {
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "ruleset_governance_campaign_preview",
+      arguments: {
+        runId: "mcp-ruleset-campaign-invalid-hints",
+        folders: ["INBOX"],
+        pageSize: 50,
+        maxPagesPerFolder: 1,
+        maxMessageRefsPerGroup: 50,
+        maxUnplannedHintsPerFolder: 11,
+        action: "move",
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("maxUnplannedHintsPerFolder");
 
     await client.close();
     await server.close();

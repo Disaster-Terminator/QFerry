@@ -274,6 +274,7 @@ export interface RulesetGovernanceCampaignPreviewInput {
   scanOffset?: number;
   order?: "newest" | "oldest";
   maxConcurrentFolders?: number;
+  maxUnplannedHintsPerFolder?: number;
 }
 
 export interface EnsureClassificationFolderInput {
@@ -441,6 +442,7 @@ export interface RulesetGovernanceCampaignPreview {
   maxPagesPerFolder: number;
   maxMessageRefsPerGroup: number;
   maxConcurrentFolders: number;
+  maxUnplannedHintsPerFolder: number;
   foldersScanned: number;
   scannedMessages: number;
   plannedMessages: number;
@@ -1981,6 +1983,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       const scanOffset = Math.max(campaignInput.scanOffset ?? 0, 0);
       const scanOrder = campaignInput.order ?? "oldest";
       const maxConcurrentFolders = Math.min(Math.max(campaignInput.maxConcurrentFolders ?? 3, 1), 10);
+      const maxUnplannedHintsPerFolder = Math.min(Math.max(campaignInput.maxUnplannedHintsPerFolder ?? 3, 0), 10);
       const resolvedInput = withRuntimeRulesFile(campaignInput, input.runtimeConfig);
 
       const folderResults = await mapWithConcurrency(campaignInput.folders, maxConcurrentFolders, async (folder) => {
@@ -2029,8 +2032,8 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           })),
           skippedGroups: compactRulesetSkippedGroups(preview.skippedGroups),
           skippedGroupSummary: summarizeRulesetSkippedGroups(preview.skippedGroups),
-          topUnplannedDomains: report.topUnplannedDomains,
-          topUnplannedSenders: report.topUnplannedSenders,
+          topUnplannedDomains: report.topUnplannedDomains.slice(0, maxUnplannedHintsPerFolder),
+          topUnplannedSenders: report.topUnplannedSenders.slice(0, maxUnplannedHintsPerFolder),
           truncatedGroups: report.truncatedGroups,
           recommendedNextAction: rulesetFolderNextAction(report),
         };
@@ -2068,6 +2071,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           maxPagesPerFolder,
           maxMessageRefsPerGroup,
           maxConcurrentFolders,
+          maxUnplannedHintsPerFolder,
           foldersScanned: folderReports.length,
           scannedMessages,
           plannedMessages,
