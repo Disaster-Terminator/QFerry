@@ -29,6 +29,7 @@ export interface ApplyRulesetPatchDraftInput {
   rulesFile: string;
   patch: RulesetPatchDraft;
   apply: boolean;
+  includeRenderedDraft?: boolean;
 }
 
 export interface ApplyRulesetPatchDraftResult {
@@ -39,7 +40,7 @@ export interface ApplyRulesetPatchDraftResult {
   addedRuleCount: number;
   replacedRuleCount: number;
   skippedDuplicateRuleCount: number;
-  renderedDraft: ClassificationRulesetJsonDraft;
+  renderedDraft?: ClassificationRulesetJsonDraft;
   changelog: string;
 }
 
@@ -133,8 +134,8 @@ export async function applyRulesetPatchDraft(
     addedRuleCount: input.patch.rulesToAdd.length,
     replacedRuleCount: input.patch.rulesToReplace?.length ?? 0,
     skippedDuplicateRuleCount: input.patch.skippedDuplicateRules.length,
-    renderedDraft,
     changelog,
+    ...(input.includeRenderedDraft ? { renderedDraft } : {}),
   };
 }
 

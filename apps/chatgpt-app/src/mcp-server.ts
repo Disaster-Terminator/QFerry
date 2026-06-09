@@ -584,10 +584,11 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     "apply_ruleset_patch",
     {
       title: "Apply ruleset patch",
-      description: "Use this to dry-run or explicitly apply a local QFerry ruleset patch, including appending rules or replacing stale rules by id. This only writes the local rules file when apply is true and never mutates the mailbox.",
+      description: "Use this to dry-run or explicitly apply a local QFerry ruleset patch, including appending rules or replacing stale rules by id. It returns a compact result by default; pass includeRenderedDraft only when the full merged draft is needed. This only writes the local rules file when apply is true and never mutates the mailbox.",
       inputSchema: {
         rulesFile: z.string(),
         apply: z.boolean().default(false),
+        includeRenderedDraft: z.boolean().default(false),
         patch: rulesetPatchSchema,
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },

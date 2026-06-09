@@ -2695,6 +2695,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       afterRuleCount: 2,
       addedRuleCount: 1,
     });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("renderedDraft");
     expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toHaveLength(1);
 
     await client.close();
@@ -2732,6 +2733,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       arguments: {
         rulesFile,
         apply: false,
+        includeRenderedDraft: true,
         patch: {
           groupToEnsure: { id: "account_security", label: "Account security" },
           candidateRuleCount: 1,

@@ -181,12 +181,20 @@ describe("ruleset patch rendering", () => {
       skippedDuplicateRuleCount: 0,
     });
     expect(dryRun.changelog).toContain("+ rule sender-domain-example-com");
+    expect(dryRun.renderedDraft).toBeUndefined();
+    const dryRunWithDraft = await applyRulesetPatchDraft({
+      rulesFile,
+      patch,
+      apply: false,
+      includeRenderedDraft: true,
+    });
+    expect(dryRunWithDraft.renderedDraft?.rules).toHaveLength(2);
     expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toHaveLength(1);
 
     const applied = await applyRulesetPatchDraft({ rulesFile, patch, apply: true });
 
     expect(applied.applied).toBe(true);
-    expect(applied.renderedDraft.rules).toHaveLength(2);
+    expect(applied.renderedDraft).toBeUndefined();
     expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toHaveLength(2);
   });
 
