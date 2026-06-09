@@ -1391,7 +1391,6 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         ruleGroup,
         ruleset: existingRuleset?.metadata,
       });
-      const renderedDraft = renderRulesetPatchDraft(rulesetPatch, existingRuleset);
       const changelog = formatRulesetPatchChangelog(rulesetPatch);
       const lowYieldDomainCandidates = allCandidates.length - allHighYieldCandidates.length;
       const recommendedNextAction = directCandidates.length > 0
@@ -1425,7 +1424,6 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         },
         rulesetPatch: {
           ...rulesetPatch,
-          renderedDraft,
           changelog,
         },
         mutationsAttempted: 0,
@@ -1543,7 +1541,6 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         ruleGroup,
         ruleset: existingRuleset?.metadata,
       });
-      const renderedDraft = renderRulesetPatchDraft(rulesetPatch, existingRuleset);
       const changelog = formatRulesetPatchChangelog(rulesetPatch);
       const recommendedNextAction = draftRuleFolders > 0
         ? "draft_rules"
@@ -1575,7 +1572,6 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
         },
         rulesetPatch: {
           ...rulesetPatch,
-          renderedDraft,
           changelog,
         },
         mutationsAttempted: 0,

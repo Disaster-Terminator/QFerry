@@ -1335,6 +1335,8 @@ describe("mail tools", () => {
       },
     ]);
     expect(result.rulesetPatch.rulesToAdd).toHaveLength(1);
+    expect(result.rulesetPatch.renderedDraft).toBeUndefined();
+    expect(result.rulesetPatch.changelog).toContain("rulesToAdd: 1");
   });
 
   it("uses runtime rules when planning high-yield governance drafts", async () => {
@@ -1398,7 +1400,8 @@ describe("mail tools", () => {
         match: { fromDomainIncludes: "steampowered.com" },
       },
     ]);
-    expect(result.rulesetPatch.renderedDraft?.rules).toHaveLength(1);
+    expect(result.rulesetPatch.renderedDraft).toBeUndefined();
+    expect(result.rulesetPatch.changelog).toContain("skippedDuplicateRules: 1");
   });
 
   it("ranks folders for mailbox-wide high-yield governance campaigns", async () => {
@@ -1497,6 +1500,8 @@ describe("mail tools", () => {
       },
     ]);
     expect(result.rulesetPatch.rulesToAdd[0]?.id).toMatch(/^sender-domain-steampowered-com-in-archive-[a-f0-9]{8}$/);
+    expect(result.rulesetPatch.renderedDraft).toBeUndefined();
+    expect(result.rulesetPatch.changelog).toContain("rulesToAdd: 1");
   });
 
   it("uses runtime rules when planning mailbox-wide governance campaigns", async () => {
@@ -1570,7 +1575,8 @@ describe("mail tools", () => {
         match: { fromDomainIncludes: "steampowered.com", folderEquals: "Archive" },
       },
     ]);
-    expect(result.rulesetPatch.renderedDraft?.rules).toHaveLength(1);
+    expect(result.rulesetPatch.renderedDraft).toBeUndefined();
+    expect(result.rulesetPatch.changelog).toContain("skippedDuplicateRules: 1");
   });
 
   it("keeps scoped campaign rule ids unique for non-ascii folders", async () => {

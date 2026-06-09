@@ -124,7 +124,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 `get_status` 会同时暴露兼容字段 `mutationAllowed`、当前可用性字段 `authConfigured` / `providerReady` / `mutationOperationallyReady`，以及 `mutationCapable` / `mutationRequiresConfirmation`。真实 QQ 邮箱只有在凭据齐全时才报告当前 mutation 可用；任何 mutation 都仍需要 preview plan、用户确认和 server-side `operationPlanId`。
 
-Gmail-like 治理优先从用户规则集开始：先用 `search` / `sender_breakdown` / `plan_sender_governance` 发现稳定 sender、domain、subject 或 snippet 特征，沉淀到 `qferry.rules.json` 的自定义 group 和 `target.folder`；再用 `ruleset_governance_preview` 一次性按 group 生成可审计 preview plans。`classification_sweep`、`classification_map` 和 `bulk_governance_preview` 保留为 legacy discovery helpers，适合探索未知邮箱结构，不再作为推荐主流程。真实执行只用于确认后的计划子集，不把大范围 dry-run 等同于无人值守清理。
+Gmail-like 治理优先从用户规则集开始：先用 `search` / `sender_breakdown` / `plan_sender_governance` 发现稳定 sender、domain、subject 或 snippet 特征，沉淀到 `qferry.rules.json` 的自定义 group 和 `target.folder`；再用 `ruleset_governance_preview` 一次性按 group 生成可审计 preview plans。`plan_high_yield_governance` / `plan_mailbox_governance_campaign` 只返回紧凑候选和 patch 摘要，完整规则草案通过 `apply_ruleset_patch` dry-run 生成，避免大规则集反复占用上下文。`classification_sweep`、`classification_map` 和 `bulk_governance_preview` 保留为 legacy discovery helpers，适合探索未知邮箱结构，不再作为推荐主流程。真实执行只用于确认后的计划子集，不把大范围 dry-run 等同于无人值守清理。
 
 QQ IMAP 在多轮移动后可能重新折叠 sequence 窗口和收件箱 `exists` 计数。QFerry 因此把 sweep 结果视为导航信号，把 `ruleset_governance_preview` / `bulk_governance_preview` 返回的 UID refs、`selectedMessageRefs` 和 `mailboxSnapshot` 作为真实执行依据；移动后的硬校验以目标文件夹增量为准，源文件夹 delta 进入审计日志但不单独判失败。
 

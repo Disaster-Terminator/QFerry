@@ -122,6 +122,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       mutationsAttempted: 0,
     });
     expect(JSON.stringify(result.structuredContent)).not.toContain("operationPlanId");
+    expect(JSON.stringify(result.structuredContent)).not.toContain("renderedDraft");
 
     await client.close();
     await server.close();
@@ -2415,6 +2416,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       mutationsAttempted: 0,
     });
     expect(JSON.stringify(result.structuredContent)).not.toContain("operationPlanId");
+    expect(JSON.stringify(result.structuredContent)).not.toContain("renderedDraft");
 
     await client.close();
     await server.close();
@@ -2503,6 +2505,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     });
     expect((result.structuredContent as any).rulesetPatch.rulesToAdd[0]?.id).toMatch(/^sender-domain-steampowered-com-in-archive-[a-f0-9]{8}$/);
     expect(JSON.stringify(result.structuredContent)).not.toContain("operationPlanId");
+    expect(JSON.stringify(result.structuredContent)).not.toContain("renderedDraft");
 
     await client.close();
     await server.close();
