@@ -75,6 +75,14 @@ Use `sender_breakdown` before `plan_sender_governance` when a single domain is t
 
 For high-throughput sender or rule cleanup, prefer one window-backed campaign preview over manual offset stitching. Pass enough `pageSize * maxPagesPerFolder` to cover each explicit target folder window, then use `ruleset_governance_campaign_preview` against the persisted ruleset for all matching groups and folders. If the campaign shows weak coverage, use `plan_sender_governance` with `ruleGroup` to draft reusable classification rules for recurring domains, dry-run the patch with `apply_ruleset_patch`, and rerun the campaign. These tools use the provider bulk metadata window when available, so they should produce UID-ref operation plans for user-defined groups instead of requiring multiple `scanOffset` retries.
 
+When iterating outside MCP or trying to avoid Codex plugin reloads, prefer the repo-local CLI workflow before spending agent tokens on manual mailbox governance:
+
+```powershell
+rtk pnpm run qferry:cli -- campaign-workflow --input .\workflow.json
+```
+
+This command chains multi-folder high-yield discovery, local ruleset patch validation/application, and ruleset campaign preview. It does not call `confirm_cleanup_plan` or `execute_cleanup`; `applyRulesetPatch: true` writes only the local `qferry.rules.json` file and is not a QQ Mail mutation.
+
 Prefer `ruleset_governance_campaign_preview` over repeated single-folder calls when a user ruleset already exists. It is the token-efficient Gmail-like path: one compact response ranks explicit folders by coverage and executable plan opportunities, while preserving operation plan ids for later confirmation.
 
 Before drafting sender/domain rules, use `plan_mailbox_governance_campaign` when comparing multiple explicit folders, or `plan_high_yield_governance` for one folder, with a practical `minMessageCount` such as 10 or 20. These discovery tools intentionally return a compact `rulesetPatch` plus `changelog` without `renderedDraft`; call `apply_ruleset_patch` with `apply: false` for the selected patch when validation is needed, and pass `includeRenderedDraft: true` only when the full merged draft is worth the token cost. Draft rules only for candidates whose `recommendedAction` is `draft_domain_rule`; for `break_down_sender`, call `sender_breakdown` and choose concrete senders instead. If `recommendedNextAction` is `stop_low_yield`, stop real mailbox governance for that folder or campaign rather than spending tokens on long-tail cleanup.

@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { JsonlTraceWriter } from "@qferry/core";
 
 export interface CliAuditInfo {
@@ -15,8 +15,10 @@ export async function writeCliAudit(input: {
   cliInput: Record<string, unknown>;
   result: Record<string, unknown>;
 }): Promise<CliAuditInfo> {
-  const tracePath = join(input.root, "logs", "runs", `${input.runId}.jsonl`);
-  const artifactDir = join(input.root, "artifacts", "e2e", input.runId);
+  const root = resolve(input.root);
+  const runId = validateRunId(input.runId);
+  const tracePath = safePathInside(root, "logs", "runs", `${runId}.jsonl`);
+  const artifactDir = safePathInside(root, "artifacts", "e2e", runId);
   const summaryPath = join(artifactDir, "summary.md");
   const summary = summarizeCliResult(input.result);
   const trace = new JsonlTraceWriter(tracePath);
@@ -38,6 +40,8 @@ export async function writeCliAudit(input: {
       `- provider: ${summary.provider ?? "<none>"}`,
       `- folder: ${summary.folder ?? "<none>"}`,
       `- folders: ${formatSummaryJson(summary.folders)}`,
+      `- workflowPhases: ${formatWorkflowPhases(summary.workflowPhases)}`,
+      `- error: ${summary.error ?? "<none>"}`,
       `- scanOffset: ${summary.scanOffset ?? "<none>"}`,
       `- scannedMessages: ${summary.scannedMessages ?? "<none>"}`,
       `- plannedMessages: ${summary.plannedMessages ?? "<none>"}`,
@@ -60,6 +64,22 @@ export async function writeCliAudit(input: {
   return { runId: input.runId, tracePath, summaryPath };
 }
 
+function validateRunId(runId: string): string {
+  if (!/^[A-Za-z0-9._-]{1,200}$/.test(runId)) {
+    throw new Error("QFerry runId may only contain letters, numbers, dot, underscore, and dash");
+  }
+  return runId;
+}
+
+function safePathInside(root: string, ...segments: string[]): string {
+  const target = resolve(root, ...segments);
+  const pathFromRoot = relative(root, target);
+  if (pathFromRoot.startsWith("..") || isAbsolute(pathFromRoot)) {
+    throw new Error("QFerry audit path must stay inside the trace root");
+  }
+  return target;
+}
+
 function summarizeCliInput(input: Record<string, unknown>): Record<string, unknown> {
   return {
     runId: input.runId,
@@ -80,31 +100,46 @@ function summarizeCliInput(input: Record<string, unknown>): Record<string, unkno
 }
 
 function summarizeCliResult(result: Record<string, unknown>): Record<string, unknown> {
+  const workflow = record(result.workflow);
+  const workflowDiscovery = record(workflow?.discovery);
+  const workflowPreview = record(workflow?.preview);
+  const workflowPatch = record(workflow?.rulesetPatch);
   const planner = record(result.planner);
-  const preview = record(result.preview);
-  const campaign = record(result.campaign);
-  const rulesetPatch = record(result.rulesetPatch);
+  const preview = record(result.preview) ?? workflowPreview;
+  const campaign = record(result.campaign) ?? record(workflowDiscovery?.campaign);
+  const rulesetPatch = record(result.rulesetPatch) ?? workflowPatch;
   const campaignReport = record(preview?.campaignReport);
+  const previewCampaign = record(workflowPreview?.campaign);
 
   return {
-    provider: planner?.provider ?? preview?.provider ?? campaign?.provider,
+    provider: planner?.provider ?? preview?.provider ?? campaign?.provider ?? previewCampaign?.provider,
+    error: typeof result.error === "string" ? result.error : undefined,
+    workflowPhases: workflow?.phases,
     folder: planner?.folder ?? preview?.folder,
-    folders: campaign?.folders,
-    scanOffset: planner?.scanOffset ?? preview?.scanOffset ?? campaign?.scanOffset,
-    scannedMessages: planner?.scannedMessages ?? preview?.scannedMessages ?? campaign?.scannedMessages,
-    plannedMessages: campaign?.plannedMessages ?? campaignReport?.plannedMessages,
-    recommendedNextAction: planner?.recommendedNextAction ?? campaign?.recommendedNextAction,
-    rulesToAdd: Array.isArray(rulesetPatch?.rulesToAdd) ? rulesetPatch.rulesToAdd.length : undefined,
-    rulesToReplace: Array.isArray(rulesetPatch?.rulesToReplace) ? rulesetPatch.rulesToReplace.length : undefined,
-    skippedDuplicateRules: Array.isArray(rulesetPatch?.skippedDuplicateRules) ? rulesetPatch.skippedDuplicateRules.length : undefined,
+    folders: previewCampaign?.folders ?? campaign?.folders,
+    scanOffset: planner?.scanOffset ?? preview?.scanOffset ?? previewCampaign?.scanOffset ?? campaign?.scanOffset,
+    scannedMessages: planner?.scannedMessages ?? preview?.scannedMessages ?? previewCampaign?.scannedMessages ?? campaign?.scannedMessages,
+    plannedMessages: previewCampaign?.plannedMessages ?? campaign?.plannedMessages ?? campaignReport?.plannedMessages,
+    recommendedNextAction: workflow?.recommendedNextAction ?? planner?.recommendedNextAction ?? previewCampaign?.recommendedNextAction ?? campaign?.recommendedNextAction,
+    rulesToAdd: typeof rulesetPatch?.addedRuleCount === "number"
+      ? rulesetPatch.addedRuleCount
+      : Array.isArray(rulesetPatch?.rulesToAdd) ? rulesetPatch.rulesToAdd.length : undefined,
+    rulesToReplace: typeof rulesetPatch?.replacedRuleCount === "number"
+      ? rulesetPatch.replacedRuleCount
+      : Array.isArray(rulesetPatch?.rulesToReplace) ? rulesetPatch.rulesToReplace.length : undefined,
+    skippedDuplicateRules: typeof rulesetPatch?.skippedDuplicateRuleCount === "number"
+      ? rulesetPatch.skippedDuplicateRuleCount
+      : Array.isArray(rulesetPatch?.skippedDuplicateRules) ? rulesetPatch.skippedDuplicateRules.length : undefined,
     mutationsAttempted: result.mutationsAttempted
+      ?? workflow?.mutationsAttempted
       ?? planner?.mutationsAttempted
       ?? preview?.mutationsAttempted
+      ?? previewCampaign?.mutationsAttempted
       ?? campaign?.mutationsAttempted
       ?? 0,
     groupCounts: preview?.groupCounts,
-    campaignReport: preview?.campaignReport,
-    folderReports: campaign?.folderReports,
+    campaignReport: preview?.campaignReport ?? previewCampaign,
+    folderReports: previewCampaign?.folderReports ?? campaign?.folderReports,
     groupPlans: preview?.groupPlans,
     skippedGroups: preview?.skippedGroups,
   };
@@ -118,4 +153,10 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function formatSummaryJson(value: unknown): string {
   return value === undefined ? "<none>" : JSON.stringify(value);
+}
+
+function formatWorkflowPhases(value: unknown): string {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? value.join(" -> ")
+    : "<none>";
 }

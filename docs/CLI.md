@@ -7,6 +7,7 @@ CLI 复用 `@qferry/core`，不复制分类器、不绕过安全策略。当前�
 - 可以读取运行状态、文件夹列表和文件夹摘要。
 - 可以对 bounded metadata 窗口做 high-yield governance 规划。
 - 可以用 JSON 输入生成 ruleset governance preview / campaign preview。
+- 可以把 discovery、ruleset patch 校验/应用和 campaign preview 串成一个 `campaign-workflow`。
 - 可以 dry-run 或显式 `--apply` 本地 `qferry.rules.json` patch。
 - 不确认、不执行真实邮箱移动；真实 mutation 仍保留在 preview + 用户确认链路中。
 
@@ -54,6 +55,57 @@ rtk pnpm run qferry:cli -- high-yield `
 rtk pnpm run qferry:cli -- ruleset-preview --input .\preview.json
 rtk pnpm run qferry:cli -- ruleset-campaign-preview --input .\campaign-preview.json
 ```
+
+## Campaign Workflow
+
+`campaign-workflow` 是大范围 dry-run 的首选热迭代入口。它复用 core 的三段能力：
+
+1. `planMailboxGovernanceCampaign`：跨多个显式文件夹发现高收益 sender/domain 规则候选。
+2. `applyRulesetPatchDraft`：校验候选规则 patch，默认 dry-run；只有 `applyRulesetPatch: true` 才写本地规则文件。
+3. `rulesetGovernanceCampaignPreview`：用当前 ruleset 生成多文件夹 compact preview 和 operation plan 摘要。
+
+示例输入：
+
+```json
+{
+  "runId": "qferry-cli-campaign-workflow-inbox",
+  "folders": ["INBOX", "其他文件夹/GitHub通知"],
+  "pageSize": 50,
+  "maxPagesPerFolder": 10,
+  "order": "oldest",
+  "minMessageCount": 10,
+  "maxCandidatesPerFolder": 8,
+  "maxDistinctSendersForDomainRule": 2,
+  "maxConcurrentFolders": 3,
+  "rulesFile": "C:\\Users\\Disas\\AppData\\Local\\qferry\\qferry.rules.json",
+  "ruleGroup": {
+    "id": "advertising_marketing",
+    "label": "广告营销",
+    "target": { "folder": "广告营销" }
+  },
+  "applyRulesetPatch": false,
+  "preview": {
+    "enabled": true,
+    "action": "move",
+    "maxMessageRefsPerGroup": 100,
+    "selectedGroupIds": ["advertising_marketing"],
+    "maxUnplannedHintsPerFolder": 5
+  }
+}
+```
+
+运行：
+
+```powershell
+rtk pnpm run qferry:cli -- campaign-workflow --input .\workflow.json
+```
+
+注意：
+
+- `applyRulesetPatch: false` 只校验 patch，不写 ruleset。
+- `applyRulesetPatch: true` 只写本地 `qferry.rules.json`，不会移动、删除、标记真实邮件。
+- workflow 不调用 `confirm_cleanup_plan` 或 `execute_cleanup`。
+- preview 必须提供 `rulesFile`，避免在 CLI 里生成不可复用的一次性分类。
 
 本地规则 patch：
 
