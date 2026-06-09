@@ -24,6 +24,7 @@
     "qferry:e2e:plugin-fixture": "node scripts/run-qferry-plugin-fixture-e2e.mjs",
     "qferry:e2e:plugin-qq-readonly": "node scripts/run-qferry-plugin-qq-readonly-e2e.mjs",
     "qferry:e2e:plugin-qq-move-spam": "node scripts/run-qferry-plugin-qq-move-spam-e2e.mjs",
+    "qferry:cli": "pnpm --filter @qferry/cli cli",
     "dev:install-hooks": "node scripts/install-git-hooks.mjs"
   },
   "devDependencies": {

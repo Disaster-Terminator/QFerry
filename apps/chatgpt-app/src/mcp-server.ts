@@ -5,11 +5,9 @@ import {
   createMailTools,
   applyRulesetPatchDraft,
   confirmOperationPlan,
-  FixtureMailProvider,
+  createMailProviderFromRuntimeConfig,
   JsonlTraceWriter,
   loadQFerryRuntimeConfigSync,
-  loadQFerryRuntimeSecretsSync,
-  QqMutableProvider,
   type MailProvider,
   type MessageRef,
   type OperationPlan,
@@ -118,7 +116,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     version: "0.0.0",
   });
   const runtimeConfig = options.runtimeConfig ?? loadQFerryRuntimeConfigSync();
-  const provider = options.provider ?? createProviderFromConfig(runtimeConfig);
+  const provider = options.provider ?? createMailProviderFromRuntimeConfig(runtimeConfig);
   const tools = createMailTools({ provider, runtimeConfig });
   const planRegistry = new Map<string, StoredPlan>();
   const consumedPlanIds = new Set<string>();
@@ -899,59 +897,6 @@ function formatSummaryJson(value: unknown): string {
 
 function errorToMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function createProviderFromConfig(runtimeConfig: QFerryRuntimeConfig): MailProvider {
-  if (runtimeConfig.provider !== "qqmail") {
-    return FixtureMailProvider.demo();
-  }
-
-  const user = runtimeConfig.qqmail?.email;
-  const pass = loadQFerryRuntimeSecretsSync().qqmailKey;
-  if (!user || !pass) {
-    return new UnavailableMailProvider(runtimeConfig);
-  }
-
-  return new QqMutableProvider({
-    accountAlias: runtimeConfig.accountAlias,
-    host: runtimeConfig.qqmail?.imapHost || "imap.qq.com",
-    port: runtimeConfig.qqmail?.imapPort || 993,
-    maxRecommendedScanLimit: runtimeConfig.metadataSampleLimit,
-    auth: { user, pass },
-  });
-}
-
-class UnavailableMailProvider implements MailProvider {
-  constructor(private readonly runtimeConfig: QFerryRuntimeConfig) {}
-
-  async listMailboxes(): Promise<never> {
-    throw this.error();
-  }
-
-  async scanMailboxMetadata(): Promise<never> {
-    throw this.error();
-  }
-
-  async fetchMessage(): Promise<never> {
-    throw this.error();
-  }
-
-  async getCapabilitySnapshot() {
-    return {
-      provider: this.runtimeConfig.provider,
-      accountAlias: this.runtimeConfig.accountAlias,
-      supportsListMailboxes: false,
-      supportsMetadataScan: false,
-      supportsFetchMessage: false,
-      supportsMutation: false,
-      mutationActions: [],
-      maxRecommendedScanLimit: this.runtimeConfig.metadataSampleLimit,
-    };
-  }
-
-  private error(): Error {
-    return new Error(`QFerry provider is not ready: ${this.runtimeConfig.statusWarnings.join("; ")}`);
-  }
 }
 
 function toToolResult<T extends object>(structuredContent: T) {

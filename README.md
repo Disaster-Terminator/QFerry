@@ -141,7 +141,7 @@ artifacts/e2e/<runId>/summary.md
 
 ## 开发者文档
 
-普通安装优先看本 README。开发、验收和插件结构细节见 [QFerry Codex 插件安装与验收](docs/CODEX_PLUGIN_ACCEPTANCE.md)。
+普通安装优先看本 README。开发、验收和插件结构细节见 [QFerry Codex 插件安装与验收](docs/CODEX_PLUGIN_ACCEPTANCE.md)。本地热迭代和终端治理入口见 [QFerry CLI](docs/CLI.md)。
 
 常用开发检查：
 

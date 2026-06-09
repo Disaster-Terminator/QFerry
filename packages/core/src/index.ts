@@ -5,6 +5,7 @@ export * from "./ruleset.js";
 export * from "./ruleset-patch.js";
 export * from "./governance-ledger.js";
 export * from "./runtime-config.js";
+export * from "./provider-factory.js";
 export * from "./search-query.js";
 export * from "./providers/types.js";
 export * from "./providers/fixture-provider.js";

@@ -87,6 +87,20 @@ export class QqReadOnlyProvider implements MailProvider {
     this.sleep = input.sleep ?? defaultSleep;
   }
 
+  toJSON(): Record<string, unknown> {
+    return {
+      provider: "qqmail",
+      accountAlias: this.input.accountAlias,
+      host: this.input.host ?? "imap.qq.com",
+      port: this.input.port ?? 993,
+      maxRecommendedScanLimit: this.maxRecommendedScanLimit,
+      auth: {
+        user: this.input.auth.user,
+        pass: "<redacted>",
+      },
+    };
+  }
+
   protected sleepFor(ms: number): Promise<void> {
     return this.sleep(ms);
   }

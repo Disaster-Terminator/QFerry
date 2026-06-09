@@ -252,3 +252,23 @@ Findings:
 
 - Retinue did not return usable review content for this slice; this is Retinue pressure-test evidence, not QFerry review evidence.
 - QFerry proceeded from TDD coverage, full local gate, real QQ read-only e2e, and installed plugin cache sync.
+
+## 2026-06-09 CLI architecture and staged review attempt
+
+Context:
+
+- Retinue was used for a read-only architecture review before implementing the repo-local QFerry CLI.
+- Retinue was then used as a staged diff review pressure test after the main thread implemented and verified the CLI.
+- The main thread kept all implementation, safety decisions, verification, plugin cache sync, commit, and push control.
+
+Observed jobs:
+
+- `job_7c93b5e3-78f6-4d02-940f-a547c2b76719` completed a read-only CLI architecture review. It recommended `apps/cli`, core provider-factory reuse, no MCP SDK dependency, and minimal argument parsing.
+- `job_4908b0ea-5b2a-45dd-a5ae-357ff90f33f6` stalled with `provider_blank_assistant`.
+- Recovery attempt `job_05ad59e6-5f86-49e5-a781-2b5b3389275c` also stalled with malformed read tool input `{}` and returned no usable review conclusion.
+
+Findings:
+
+- The successful architecture review aligned with the implemented direction: CLI is a thin adapter over `@qferry/core`, while mailbox mutation confirmation remains out of the first CLI slice.
+- The staged code review attempt is Retinue pressure-test evidence, not QFerry review evidence.
+- QFerry proceeded from TDD coverage, full local gate, real QQ read-only e2e, and installed plugin cache sync.
