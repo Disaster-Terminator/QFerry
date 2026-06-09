@@ -40,10 +40,15 @@ export async function writeCliAudit(input: {
       `- provider: ${summary.provider ?? "<none>"}`,
       `- folder: ${summary.folder ?? "<none>"}`,
       `- folders: ${formatSummaryJson(summary.folders)}`,
+      `- fromDomainIncludes: ${summary.fromDomainIncludes ?? "<none>"}`,
+      `- fromIncludes: ${summary.fromIncludes ?? "<none>"}`,
+      `- maxSenderCandidates: ${summary.maxSenderCandidates ?? "<none>"}`,
       `- workflowPhases: ${formatWorkflowPhases(summary.workflowPhases)}`,
       `- error: ${summary.error ?? "<none>"}`,
       `- scanOffset: ${summary.scanOffset ?? "<none>"}`,
       `- scannedMessages: ${summary.scannedMessages ?? "<none>"}`,
+      `- matchedMessages: ${summary.matchedMessages ?? "<none>"}`,
+      `- senderCandidates: ${summary.senderCandidates ?? "<none>"}`,
       `- plannedMessages: ${summary.plannedMessages ?? "<none>"}`,
       `- recommendedNextAction: ${summary.recommendedNextAction ?? "<none>"}`,
       `- rulesToAdd: ${summary.rulesToAdd ?? "<none>"}`,
@@ -95,6 +100,9 @@ function summarizeCliInput(input: Record<string, unknown>): Record<string, unkno
     maxMessageRefsPerGroup: input.maxMessageRefsPerGroup,
     selectedGroupIds: input.selectedGroupIds,
     selectedCategoryIds: input.selectedCategoryIds,
+    fromDomainIncludes: input.fromDomainIncludes,
+    fromIncludes: input.fromIncludes,
+    maxSenderCandidates: input.maxSenderCandidates,
     rulesFile: input.rulesFile,
   };
 }
@@ -107,18 +115,24 @@ function summarizeCliResult(result: Record<string, unknown>): Record<string, unk
   const planner = record(result.planner);
   const preview = record(result.preview) ?? workflowPreview;
   const campaign = record(result.campaign) ?? record(workflowDiscovery?.campaign);
+  const breakdown = record(result.breakdown);
   const rulesetPatch = record(result.rulesetPatch) ?? workflowPatch;
   const campaignReport = record(preview?.campaignReport);
   const previewCampaign = record(workflowPreview?.campaign);
 
   return {
-    provider: planner?.provider ?? preview?.provider ?? campaign?.provider ?? previewCampaign?.provider,
+    provider: planner?.provider ?? preview?.provider ?? campaign?.provider ?? previewCampaign?.provider ?? breakdown?.provider,
     error: typeof result.error === "string" ? result.error : undefined,
     workflowPhases: workflow?.phases,
-    folder: planner?.folder ?? preview?.folder,
+    folder: planner?.folder ?? preview?.folder ?? breakdown?.folder,
     folders: previewCampaign?.folders ?? campaign?.folders,
+    fromDomainIncludes: breakdown?.fromDomainIncludes,
+    fromIncludes: breakdown?.fromIncludes,
+    maxSenderCandidates: record(breakdown?.candidateSummary)?.maxSenderCandidates,
     scanOffset: planner?.scanOffset ?? preview?.scanOffset ?? previewCampaign?.scanOffset ?? campaign?.scanOffset,
-    scannedMessages: planner?.scannedMessages ?? preview?.scannedMessages ?? previewCampaign?.scannedMessages ?? campaign?.scannedMessages,
+    scannedMessages: planner?.scannedMessages ?? preview?.scannedMessages ?? previewCampaign?.scannedMessages ?? campaign?.scannedMessages ?? breakdown?.scannedMessages,
+    matchedMessages: breakdown?.matchedMessages,
+    senderCandidates: record(breakdown?.candidateSummary)?.returnedSenderCandidates,
     plannedMessages: previewCampaign?.plannedMessages ?? campaign?.plannedMessages ?? campaignReport?.plannedMessages,
     recommendedNextAction: workflow?.recommendedNextAction ?? planner?.recommendedNextAction ?? previewCampaign?.recommendedNextAction ?? campaign?.recommendedNextAction,
     rulesToAdd: typeof rulesetPatch?.addedRuleCount === "number"

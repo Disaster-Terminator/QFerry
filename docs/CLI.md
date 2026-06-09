@@ -35,6 +35,23 @@ rtk pnpm run qferry:cli -- high-yield `
   --target-folder 广告营销
 ```
 
+当 discovery 返回 `break_down_sender`，或看到 `qq.com` 这类混合域时，用 sender breakdown 拆到具体发信人，而不是直接起草 domain 规则：
+
+```powershell
+rtk pnpm run qferry:cli -- sender-breakdown `
+  --run-id qferry-cli-inbox-qq-breakdown `
+  --folder INBOX `
+  --from-domain-includes qq.com `
+  --page-size 50 `
+  --max-pages 5 `
+  --max-sender-candidates 20 `
+  --group-id qq_mail_system `
+  --group-label QQ邮箱系统 `
+  --target-folder QQ邮箱系统
+```
+
+`sender-breakdown` 是只读命令，不创建 operation plan。它返回具体 sender 候选和 sender-level suggested rules，适合后续手动选择 `plan_sender_governance.selectedFromIncludes` 或本地 ruleset patch。
+
 复杂 preview 建议写 JSON 输入，避免命令行参数变成第二套 schema：
 
 ```json
@@ -106,6 +123,7 @@ rtk pnpm run qferry:cli -- campaign-workflow --input .\workflow.json
 - `applyRulesetPatch: true` 只写本地 `qferry.rules.json`，不会移动、删除、标记真实邮件。
 - workflow 不调用 `confirm_cleanup_plan` 或 `execute_cleanup`。
 - preview 必须提供 `rulesFile`，避免在 CLI 里生成不可复用的一次性分类。
+- 如果 discovery 遇到混合域，输出会包含 `mixedDomainNextSteps`，直接给出建议的 `sender-breakdown` 命令。
 
 本地规则 patch：
 

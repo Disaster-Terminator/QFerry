@@ -14,6 +14,7 @@ import {
   type OperationAction,
   type RulesetGovernanceCampaignPreviewInput,
   type RulesetGovernancePreviewInput,
+  type SenderBreakdownInput,
 } from "@qferry/core";
 import { writeCliAudit } from "./audit.js";
 
@@ -90,6 +91,13 @@ export async function runCli(args: string[] = process.argv.slice(2), options: Cl
         const input = highYieldInput(parsed.flags);
         cliInput = { ...input, runId };
         result = await tools.planHighYieldGovernance(input);
+        break;
+      }
+      case "sender-breakdown": {
+        runId = validateRunId(optionalString(parsed.flags, "run-id") ?? createRunId("qferry-cli-sender-breakdown"));
+        const input = senderBreakdownInput(parsed.flags);
+        cliInput = { ...input, runId };
+        result = await tools.senderBreakdown(input);
         break;
       }
       case "mailbox-campaign": {
@@ -417,12 +425,84 @@ async function runCampaignWorkflow(
       ],
       discovery,
       rulesetPatch,
+      mixedDomainNextSteps: buildMixedDomainNextSteps(discovery, input),
       ...(preview ? { preview } : {}),
       recommendedNextAction: workflowNextAction(discovery, preview),
       mutationsAttempted: 0,
     },
     mutationsAttempted: 0,
   };
+}
+
+function buildMixedDomainNextSteps(
+  discovery: Awaited<ReturnType<MailTools["planMailboxGovernanceCampaign"]>>,
+  input: CampaignWorkflowInput,
+): Array<{
+  folder: string;
+  domain: string;
+  messageCount: number;
+  uniqueSenderCount: number;
+  args: string[];
+  command: string;
+}> {
+  return discovery.campaign.folderPlans.flatMap((plan) =>
+    plan.candidates
+      .filter((candidate) => candidate.recommendedAction === "break_down_sender")
+      .map((candidate) => {
+        const args = senderBreakdownArgs({
+          folder: plan.folder,
+          domain: candidate.domain,
+          pageSize: input.pageSize,
+          maxPages: input.maxPagesPerFolder,
+          scanOffset: input.scanOffset,
+          order: input.order,
+          ruleGroup: input.ruleGroup,
+        });
+        return {
+          folder: plan.folder,
+          domain: candidate.domain,
+          messageCount: candidate.messageCount,
+          uniqueSenderCount: candidate.uniqueSenderCount,
+          args,
+          command: `qferry ${args.map(quoteCommandValue).join(" ")}`,
+        };
+      })
+  );
+}
+
+function senderBreakdownArgs(input: {
+  folder: string;
+  domain: string;
+  pageSize: number;
+  maxPages: number;
+  scanOffset?: number;
+  order?: "newest" | "oldest";
+  ruleGroup?: ClassificationGroup;
+}): string[] {
+  return [
+    "sender-breakdown",
+    "--folder",
+    input.folder,
+    "--from-domain-includes",
+    input.domain,
+    "--page-size",
+    String(input.pageSize),
+    "--max-pages",
+    String(input.maxPages),
+    ...(input.scanOffset !== undefined ? ["--scan-offset", String(input.scanOffset)] : []),
+    ...(input.order ? ["--order", input.order] : []),
+    ...(input.ruleGroup ? [
+      "--group-id",
+      input.ruleGroup.id,
+      "--group-label",
+      input.ruleGroup.label,
+      ...(input.ruleGroup.target ? ["--target-folder", input.ruleGroup.target.folder] : []),
+    ] : []),
+  ];
+}
+
+function quoteCommandValue(value: string): string {
+  return JSON.stringify(value);
 }
 
 function compactCampaignWorkflowInput(input: CampaignWorkflowInput & { runId: string }): Record<string, unknown> {
@@ -478,6 +558,23 @@ function highYieldInput(flags: ParsedArgs["flags"]): HighYieldGovernanceInput {
       : {}),
     ...(ruleGroup ? { ruleGroup } : {}),
     ...(optionalString(flags, "rules-file") ? { rulesFile: optionalString(flags, "rules-file") } : {}),
+  };
+}
+
+function senderBreakdownInput(flags: ParsedArgs["flags"]): SenderBreakdownInput {
+  const ruleGroup = optionalRuleGroup(flags);
+  return {
+    folder: requiredString(flags, "folder"),
+    pageSize: optionalInteger(flags, "page-size") ?? DEFAULT_PAGE_SIZE,
+    maxPages: optionalInteger(flags, "max-pages") ?? DEFAULT_MAX_PAGES,
+    ...(optionalInteger(flags, "scan-offset") !== undefined ? { scanOffset: optionalInteger(flags, "scan-offset") } : {}),
+    ...(optionalString(flags, "order") ? { order: orderFlag(flags) } : {}),
+    ...(optionalString(flags, "from-domain-includes") ? { fromDomainIncludes: optionalString(flags, "from-domain-includes") } : {}),
+    ...(optionalString(flags, "from-includes") ? { fromIncludes: optionalString(flags, "from-includes") } : {}),
+    ...(optionalInteger(flags, "max-sender-candidates") !== undefined
+      ? { maxSenderCandidates: optionalInteger(flags, "max-sender-candidates") }
+      : {}),
+    ...(ruleGroup ? { ruleGroup } : {}),
   };
 }
 
@@ -572,6 +669,7 @@ function usage(): string {
     "  qferry list-mailboxes",
     "  qferry mailbox-summary --folder INBOX",
     "  qferry high-yield --folder INBOX --page-size 50 --max-pages 2 --group-id ads --group-label Ads --target-folder Ads",
+    "  qferry sender-breakdown --folder INBOX --from-domain-includes qq.com --page-size 50 --max-pages 2",
     "  qferry mailbox-campaign --input campaign.json",
     "  qferry ruleset-preview --input preview.json",
     "  qferry ruleset-campaign-preview --input campaign-preview.json",

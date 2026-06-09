@@ -106,6 +106,61 @@ describe("qferry cli", () => {
     expect(summary).toContain("- mutationsAttempted: 0");
   });
 
+  it("breaks down senders from the CLI and writes trace artifacts", async () => {
+    const traceRoot = await mkdtemp(join(tmpdir(), "qferry-cli-sender-breakdown-trace-"));
+    const result = await invoke([
+      "sender-breakdown",
+      "--run-id",
+      "cli-sender-breakdown-test",
+      "--folder",
+      "INBOX",
+      "--page-size",
+      "50",
+      "--max-pages",
+      "1",
+      "--from-domain-includes",
+      "example.com",
+      "--max-sender-candidates",
+      "10",
+      "--group-id",
+      "bulk_platform",
+      "--group-label",
+      "Bulk platform",
+      "--target-folder",
+      "Bulk platform",
+    ], { env: { QFERRY_CLI_TRACE_ROOT: traceRoot } });
+
+    expect(result.code).toBe(0);
+    expect(result.json).toMatchObject({
+      ok: true,
+      command: "sender-breakdown",
+      runId: "cli-sender-breakdown-test",
+      result: {
+        breakdown: {
+          provider: "fixture",
+          folder: "INBOX",
+          fromDomainIncludes: "example.com",
+          matchedMessages: 2,
+          mutationsAttempted: 0,
+          candidateSummary: {
+            returnedSenderCandidates: 2,
+          },
+        },
+        mutationsAttempted: 0,
+      },
+    });
+    expect(result.json.result.breakdown.senderCandidates[0].suggestedRule.groupId).toBe("bulk_platform");
+    const traceText = await readFile(join(traceRoot, "logs", "runs", "cli-sender-breakdown-test.jsonl"), "utf8");
+    expect(traceText).toContain("\"command\":\"sender-breakdown\"");
+    const summary = await readFile(join(traceRoot, "artifacts", "e2e", "cli-sender-breakdown-test", "summary.md"), "utf8");
+    expect(summary).toContain("- provider: fixture");
+    expect(summary).toContain("- folder: INBOX");
+    expect(summary).toContain("- fromDomainIncludes: example.com");
+    expect(summary).toContain("- mutationsAttempted: 0");
+    expect(summary).toContain("- matchedMessages: 2");
+    expect(summary).toContain("- senderCandidates: 2");
+  });
+
   it("dry-runs a ruleset patch compactly unless rendered draft is requested", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-cli-rules-"));
     const rulesFile = join(dir, "qferry.rules.json");
@@ -216,6 +271,52 @@ describe("qferry cli", () => {
     expect(summary).toContain("- workflowPhases: discovery -> ruleset_patch -> preview");
     expect(summary).toContain("- rulesToAdd:");
     expect(summary).toContain("- campaignReport:");
+  });
+
+  it("returns sender-breakdown next steps for mixed-domain workflow candidates", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cli-workflow-mixed-"));
+    const workflowFile = join(dir, "workflow.json");
+    await writeFile(workflowFile, JSON.stringify({
+      runId: "cli-campaign-workflow-mixed-test",
+      folders: ["INBOX"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      minMessageCount: 1,
+      maxCandidatesPerFolder: 3,
+      maxDistinctSendersForDomainRule: 1,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      preview: { enabled: false },
+    }), "utf8");
+
+    const result = await invoke(["campaign-workflow", "--input", workflowFile], { cwd: dir });
+
+    expect(result.code).toBe(0);
+    expect(result.json.result.workflow.recommendedNextAction).toBe("break_down_mixed_domains");
+    expect(result.json.result.workflow.mixedDomainNextSteps).toEqual([
+      expect.objectContaining({
+        folder: "INBOX",
+        domain: "example.com",
+        command: expect.stringContaining("sender-breakdown"),
+        args: [
+          "sender-breakdown",
+          "--folder",
+          "INBOX",
+          "--from-domain-includes",
+          "example.com",
+          "--page-size",
+          "50",
+          "--max-pages",
+          "1",
+          "--group-id",
+          "bulk_platform",
+          "--group-label",
+          "Bulk platform",
+          "--target-folder",
+          "Bulk platform",
+        ],
+      }),
+    ]);
+    expect(result.json.result.workflow.rulesetPatch.addedRuleCount).toBe(0);
   });
 
   it("can apply a campaign workflow patch to only the local rules file", async () => {
