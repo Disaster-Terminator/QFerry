@@ -4040,6 +4040,59 @@ describe("mail tools", () => {
     expect(result.campaign.folderReports[0]?.groupPlans[0]?.runId).toBe(result.plans[0]?.runId);
   });
 
+  it("uses inline groups to target ruleset governance campaign preview plans", async () => {
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture" as const, accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Alpha <notice@alpha.example>",
+        subject: "Alpha",
+        date: "2026-05-11T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const tools = createMailTools({
+      provider: {
+        listMailboxes: async () => [],
+        scanMailboxMetadata: async () => messages,
+        scanMailboxMetadataWindow: async ({ folder }) => ({
+          pagesScanned: 1,
+          mailboxSnapshot: { folder, exists: messages.length },
+          messages,
+        }),
+        fetchMessage: async () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const result = await tools.rulesetGovernanceCampaignPreview({
+      runId: "ruleset-campaign-inline-groups",
+      folders: ["INBOX"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      maxMessageRefsPerGroup: 50,
+      action: "move",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "group_alpha", label: "Group Alpha", target: { folder: "Folders/Group Alpha" } },
+      ],
+      rules: [
+        { id: "alpha-domain", groupId: "group_alpha", match: { fromDomainIncludes: "alpha.example" } },
+      ],
+      selectedGroupIds: ["group_alpha"],
+    });
+
+    expect(result.campaign.plannedMessages).toBe(1);
+    expect(result.campaign.executablePlanCount).toBe(1);
+    expect(result.campaign.folderReports[0]?.groupPlans[0]).toMatchObject({
+      groupId: "group_alpha",
+      target: { folder: "Folders/Group Alpha" },
+      selectedMessageRefs: 1,
+    });
+  });
+
   it("limits ruleset governance campaign unplanned hints", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-mail-tools-ruleset-campaign-hints-"));
     const rulesFile = join(dir, "qferry.rules.json");

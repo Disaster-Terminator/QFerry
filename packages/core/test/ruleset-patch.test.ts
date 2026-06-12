@@ -237,6 +237,34 @@ describe("ruleset patch rendering", () => {
     });
   });
 
+  it("dry-runs an empty patch against a local rules file that has no rules", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-empty-noop-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, `${JSON.stringify({
+      version: "empty-local",
+      defaultGroupId: "review",
+      groups: [{ id: "review", label: "Review" }],
+      rules: [],
+    }, null, 2)}\n`, "utf8");
+    const patch = {
+      groupToEnsure: { id: "sender_governance", label: "Sender governance" } as const,
+      candidateRuleCount: 0,
+      rulesToAdd: [],
+      skippedDuplicateRules: [],
+    };
+
+    const dryRun = await applyRulesetPatchDraft({ rulesFile, patch, apply: false });
+
+    expect(dryRun).toMatchObject({
+      applied: false,
+      beforeRuleCount: 0,
+      afterRuleCount: 0,
+      addedRuleCount: 0,
+      skippedDuplicateRuleCount: 0,
+    });
+    expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toEqual([]);
+  });
+
   it("rejects missing replacement rule ids without writing the rules file", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-replace-missing-"));
     const rulesFile = join(dir, "qferry.rules.json");

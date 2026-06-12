@@ -117,9 +117,22 @@ export async function applyRulesetPatchDraft(
   input: ApplyRulesetPatchDraftInput,
 ): Promise<ApplyRulesetPatchDraftResult> {
   const existing = await loadPatchableRuleset(input.rulesFile);
+  const changelog = formatRulesetPatchChangelog(input.patch);
+  if (!hasRulesetPatchChanges(input.patch)) {
+    return {
+      applied: false,
+      rulesFile: input.rulesFile,
+      beforeRuleCount: existing.rules.length,
+      afterRuleCount: existing.rules.length,
+      addedRuleCount: 0,
+      replacedRuleCount: 0,
+      skippedDuplicateRuleCount: input.patch.skippedDuplicateRules.length,
+      changelog,
+      ...(input.includeRenderedDraft ? { renderedDraft: renderRulesetPatchDraft(input.patch, existing) } : {}),
+    };
+  }
   const renderedDraft = renderRulesetPatchDraft(input.patch, existing);
   parseClassificationRuleset(renderedDraft, "ruleset patch draft");
-  const changelog = formatRulesetPatchChangelog(input.patch);
 
   if (input.apply) {
     const safeRulesFile = await resolveWritableRulesFile(input.rulesFile);
@@ -137,6 +150,10 @@ export async function applyRulesetPatchDraft(
     changelog,
     ...(input.includeRenderedDraft ? { renderedDraft } : {}),
   };
+}
+
+function hasRulesetPatchChanges(patch: RulesetPatchDraft): boolean {
+  return patch.rulesToAdd.length > 0 || (patch.rulesToReplace?.length ?? 0) > 0;
 }
 
 function assertReplacementRuleIdsAreUnambiguous(
@@ -158,7 +175,7 @@ function assertReplacementRuleIdsAreUnambiguous(
   }
 }
 
-async function loadPatchableRuleset(rulesFile: string): Promise<ClassificationRuleset> {
+export async function loadPatchableRuleset(rulesFile: string): Promise<ClassificationRuleset> {
   try {
     return await loadClassificationRuleset(rulesFile);
   } catch (error) {

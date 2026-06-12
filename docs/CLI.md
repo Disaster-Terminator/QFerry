@@ -100,6 +100,13 @@ rtk pnpm run qferry:cli -- ruleset-campaign-preview --input .\campaign-preview.j
     "label": "广告营销",
     "target": { "folder": "广告营销" }
   },
+  "breakdownMixedDomains": {
+    "enabled": true,
+    "draftSenderRules": true,
+    "maxDomains": 5,
+    "maxSenderCandidatesPerDomain": 20,
+    "minSenderMessageCount": 2
+  },
   "applyRulesetPatch": false,
   "preview": {
     "enabled": true,
@@ -124,6 +131,9 @@ rtk pnpm run qferry:cli -- campaign-workflow --input .\workflow.json
 - workflow 不调用 `confirm_cleanup_plan` 或 `execute_cleanup`。
 - preview 必须提供 `rulesFile`，避免在 CLI 里生成不可复用的一次性分类。
 - 如果 discovery 遇到混合域，输出会包含 `mixedDomainNextSteps`，直接给出建议的 `sender-breakdown` 命令。
+- `breakdownMixedDomains.enabled: true` 会在同一次 workflow 里只读拆分这些混合域；默认只返回 sender-level 候选证据，不移动真实邮件，也不把候选吸附进当前分类。
+- `breakdownMixedDomains.draftSenderRules: true` 才会把候选 sender-level suggested rules 合并进本地 ruleset patch，适用于当前 `ruleGroup` 已经是明确分类目标的场景。
+- `applyRulesetPatch: false` 时，如果 workflow 产生了 dry-run ruleset patch，preview 会使用内存中的草案规则估算覆盖和 operation plan，不要求先写入本地 ruleset 再跑第二轮。
 
 本地规则 patch：
 

@@ -319,6 +319,313 @@ describe("qferry cli", () => {
     expect(result.json.result.workflow.rulesetPatch.addedRuleCount).toBe(0);
   });
 
+  it("can auto-break down mixed-domain workflow candidates into sender-level rules", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cli-workflow-mixed-auto-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    const workflowFile = join(dir, "workflow.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "workflow-mixed-auto-test-rules",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      ],
+      rules: [{ id: "review-placeholder", groupId: "review", match: { subjectIncludes: "__never_match__" } }],
+    }), "utf8");
+    await writeFile(workflowFile, JSON.stringify({
+      runId: "cli-campaign-workflow-mixed-auto-test",
+      folders: ["INBOX"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      minMessageCount: 1,
+      maxCandidatesPerFolder: 3,
+      maxDistinctSendersForDomainRule: 1,
+      rulesFile,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      breakdownMixedDomains: {
+        enabled: true,
+        draftSenderRules: true,
+        minSenderMessageCount: 1,
+        maxSenderCandidatesPerDomain: 10,
+      },
+      preview: { enabled: false },
+    }), "utf8");
+
+    const result = await invoke(["campaign-workflow", "--input", workflowFile], { cwd: dir });
+
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.json.result.workflow.phases).toEqual(["discovery", "mixed_domain_breakdown", "ruleset_patch"]);
+    expect(result.json.result.workflow.recommendedNextAction).toBe("review_or_apply_ruleset_patch");
+    expect(result.json.result.workflow.rulesetPatch.addedRuleCount).toBe(2);
+    expect(result.json.result.workflow.mixedDomainBreakdowns).toEqual([
+      expect.objectContaining({
+        folder: "INBOX",
+        domain: "example.com",
+        selectedSenderRules: 2,
+        skippedSenderRules: 0,
+      }),
+    ]);
+    expect(result.json.result.workflow.mixedDomainRulesetPatch.rulesToAdd).toHaveLength(2);
+    expect(result.json.result.workflow.mixedDomainRulesetPatch.rulesToAdd).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        groupId: "bulk_platform",
+        match: { fromIncludes: "newsletter@example.com", folderEquals: "INBOX" },
+      }),
+      expect.objectContaining({
+        groupId: "bulk_platform",
+        match: { fromIncludes: "security@example.com", folderEquals: "INBOX" },
+      }),
+    ]));
+  });
+
+  it("keeps mixed-domain auto-breakdown as candidate evidence unless sender rule drafting is explicit", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cli-workflow-mixed-evidence-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    const workflowFile = join(dir, "workflow.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "workflow-mixed-evidence-test-rules",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      ],
+      rules: [{ id: "review-placeholder", groupId: "review", match: { subjectIncludes: "__never_match__" } }],
+    }), "utf8");
+    await writeFile(workflowFile, JSON.stringify({
+      runId: "cli-campaign-workflow-mixed-evidence-test",
+      folders: ["INBOX"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      minMessageCount: 1,
+      maxCandidatesPerFolder: 3,
+      maxDistinctSendersForDomainRule: 1,
+      rulesFile,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      breakdownMixedDomains: {
+        enabled: true,
+        minSenderMessageCount: 1,
+      },
+      preview: { enabled: false },
+    }), "utf8");
+
+    const result = await invoke(["campaign-workflow", "--input", workflowFile], { cwd: dir });
+
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.json.result.workflow.recommendedNextAction).toBe("break_down_mixed_domains");
+    expect(result.json.result.workflow.rulesetPatch.addedRuleCount).toBe(0);
+    expect(result.json.result.workflow.mixedDomainBreakdowns).toEqual([
+      expect.objectContaining({
+        candidateSenderRules: 2,
+        selectedSenderRules: 0,
+        skippedSenderRules: 0,
+        draftSenderRules: false,
+      }),
+    ]);
+    expect(result.json.result.workflow.mixedDomainRulesetPatch.rulesToAdd).toEqual([]);
+  });
+
+  it("previews campaign coverage from the dry-run workflow ruleset patch", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cli-workflow-mixed-preview-draft-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    const workflowFile = join(dir, "workflow.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "workflow-mixed-preview-draft-test-rules",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      ],
+      rules: [{ id: "review-placeholder", groupId: "review", match: { subjectIncludes: "__never_match__" } }],
+    }), "utf8");
+    await writeFile(workflowFile, JSON.stringify({
+      runId: "cli-campaign-workflow-mixed-preview-draft-test",
+      folders: ["INBOX"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      minMessageCount: 1,
+      maxCandidatesPerFolder: 3,
+      maxDistinctSendersForDomainRule: 1,
+      rulesFile,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      breakdownMixedDomains: {
+        enabled: true,
+        draftSenderRules: true,
+        minSenderMessageCount: 1,
+      },
+      applyRulesetPatch: false,
+      preview: {
+        enabled: true,
+        action: "move",
+        maxMessageRefsPerGroup: 10,
+        selectedGroupIds: ["bulk_platform"],
+      },
+    }), "utf8");
+
+    const result = await invoke(["campaign-workflow", "--input", workflowFile], { cwd: dir });
+    const savedRules = JSON.parse(await readFile(rulesFile, "utf8"));
+
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.json.result.workflow.rulesetPatch.applied).toBe(false);
+    expect(savedRules.rules).toHaveLength(1);
+    expect(result.json.result.workflow.preview.campaign.plannedMessages).toBe(2);
+    expect(result.json.result.workflow.preview.campaign.executablePlanCount).toBe(1);
+    expect(result.json.result.workflow.preview.campaign.folderReports[0]).toMatchObject({
+      plannedMessages: 2,
+      recommendedNextAction: "confirm_plans",
+    });
+  });
+
+  it("keeps mixed-domain next steps when auto-breakdown yields no rules", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cli-workflow-mixed-noop-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    const workflowFile = join(dir, "workflow.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "workflow-mixed-noop-test-rules",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      ],
+      rules: [],
+    }), "utf8");
+    await writeFile(workflowFile, JSON.stringify({
+      runId: "cli-campaign-workflow-mixed-noop-test",
+      folders: ["INBOX"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      minMessageCount: 1,
+      maxCandidatesPerFolder: 3,
+      maxDistinctSendersForDomainRule: 1,
+      rulesFile,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      breakdownMixedDomains: {
+        enabled: true,
+        maxDomains: 0,
+      },
+      preview: { enabled: false },
+    }), "utf8");
+
+    const result = await invoke(["campaign-workflow", "--input", workflowFile], { cwd: dir });
+
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.json.result.workflow.rulesetPatch).toMatchObject({
+      applied: false,
+      addedRuleCount: 0,
+      beforeRuleCount: 0,
+      afterRuleCount: 0,
+    });
+    expect(result.json.result.workflow.recommendedNextAction).toBe("break_down_mixed_domains");
+    expect(result.json.result.workflow.mixedDomainNextSteps).toHaveLength(1);
+    expect(result.json.result.workflow.mixedDomainBreakdowns).toEqual([]);
+  });
+
+  it("skips scoped sender rules when an existing unscoped sender rule already covers them", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cli-workflow-mixed-covered-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    const workflowFile = join(dir, "workflow.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "workflow-mixed-covered-test-rules",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      ],
+      rules: [
+        { id: "review-placeholder", groupId: "review", match: { subjectIncludes: "__never_match__" } },
+        { id: "newsletter-existing", groupId: "bulk_platform", match: { fromIncludes: "newsletter@example.com" } },
+      ],
+    }), "utf8");
+    await writeFile(workflowFile, JSON.stringify({
+      runId: "cli-campaign-workflow-mixed-covered-test",
+      folders: ["INBOX"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      minMessageCount: 1,
+      maxCandidatesPerFolder: 3,
+      maxDistinctSendersForDomainRule: 1,
+      rulesFile,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      breakdownMixedDomains: {
+        enabled: true,
+        draftSenderRules: true,
+        minSenderMessageCount: 1,
+      },
+      preview: { enabled: false },
+    }), "utf8");
+
+    const result = await invoke(["campaign-workflow", "--input", workflowFile], { cwd: dir });
+
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.json.result.workflow.rulesetPatch.addedRuleCount).toBe(1);
+    expect(result.json.result.workflow.mixedDomainBreakdowns).toEqual([
+      expect.objectContaining({
+        selectedSenderRules: 1,
+        skippedSenderRules: 1,
+      }),
+    ]);
+    expect(result.json.result.workflow.mixedDomainRulesetPatch.skippedDuplicateRules).toEqual([
+      expect.objectContaining({ ruleId: "newsletter-existing" }),
+    ]);
+    expect(result.json.result.workflow.mixedDomainRulesetPatch.rulesToAdd).toEqual([
+      expect.objectContaining({
+        match: { fromIncludes: "security@example.com", folderEquals: "INBOX" },
+      }),
+    ]);
+  });
+
+  it("does not skip sender rules covered by a different classification group", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cli-workflow-mixed-cross-group-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    const workflowFile = join(dir, "workflow.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "workflow-mixed-cross-group-test-rules",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "account", label: "Account", target: { folder: "Account" } },
+        { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      ],
+      rules: [
+        { id: "review-placeholder", groupId: "review", match: { subjectIncludes: "__never_match__" } },
+        { id: "newsletter-account", groupId: "account", match: { fromIncludes: "newsletter@example.com" } },
+      ],
+    }), "utf8");
+    await writeFile(workflowFile, JSON.stringify({
+      runId: "cli-campaign-workflow-mixed-cross-group-test",
+      folders: ["INBOX"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      minMessageCount: 1,
+      maxCandidatesPerFolder: 3,
+      maxDistinctSendersForDomainRule: 1,
+      rulesFile,
+      ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      breakdownMixedDomains: {
+        enabled: true,
+        draftSenderRules: true,
+        minSenderMessageCount: 1,
+      },
+      preview: { enabled: false },
+    }), "utf8");
+
+    const result = await invoke(["campaign-workflow", "--input", workflowFile], { cwd: dir });
+
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.json.result.workflow.rulesetPatch.addedRuleCount).toBe(2);
+    expect(result.json.result.workflow.mixedDomainBreakdowns).toEqual([
+      expect.objectContaining({
+        selectedSenderRules: 2,
+        skippedSenderRules: 0,
+      }),
+    ]);
+  });
+
   it("can apply a campaign workflow patch to only the local rules file", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-cli-workflow-apply-"));
     const rulesFile = join(dir, "qferry.rules.json");
@@ -408,6 +715,25 @@ describe("qferry cli", () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("QFerry runId may only contain letters, numbers, dot, underscore, and dash");
     await expect(readFile(join(traceRoot, "logs", "outside.jsonl"), "utf8")).rejects.toThrow();
+  });
+
+  it("accepts JSON input files with a UTF-8 BOM", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cli-bom-input-"));
+    const workflowFile = join(dir, "workflow.json");
+    await writeFile(workflowFile, `\uFEFF${JSON.stringify({
+      runId: "cli-bom-input-test",
+      folders: ["INBOX"],
+      pageSize: 50,
+      maxPagesPerFolder: 1,
+      preview: { enabled: false },
+    })}`, "utf8");
+
+    const result = await invoke(["campaign-workflow", "--input", workflowFile], { cwd: dir });
+
+    expect(result.code).toBe(0);
+    expect(result.json.runId).toBe("cli-bom-input-test");
+    expect(result.json.result.workflow.phases).toContain("discovery");
+    expect(result.json.result.workflow.mutationsAttempted).toBe(0);
   });
 
   it("validates campaign workflow runtime input before scanning", async () => {

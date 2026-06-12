@@ -3,7 +3,7 @@ import { classifyMessages, type ClassificationRule, type MessageClassification, 
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
 import type { MailboxInfo, MailboxSummary, MailProvider, MailboxWindowSnapshot, MessageDetail, MessageSummary, MoveMessagesReconciliation, ProviderCapabilitySnapshot, ScanMailboxMetadataWindowResult } from "../providers/types.js";
 import { loadClassificationRuleset, type ClassificationGroup, type ClassificationRulesetMetadata } from "../ruleset.js";
-import { formatRulesetPatchChangelog, renderRulesetPatchDraft, type RulesetPatchDraft } from "../ruleset-patch.js";
+import { formatRulesetPatchChangelog, loadPatchableRuleset, renderRulesetPatchDraft, type RulesetPatchDraft } from "../ruleset-patch.js";
 import type { QFerryRuntimeConfig } from "../runtime-config.js";
 import { parseSearchQuery, type ParsedSearchQuery } from "../search-query.js";
 
@@ -254,6 +254,7 @@ export interface RulesetGovernancePreviewInput {
   action: OperationAction;
   defaultGroupId?: string;
   rules?: ClassificationRule[];
+  groups?: ClassificationGroup[];
   rulesFile?: string;
   selectedGroupIds?: string[];
   scanOffset?: number;
@@ -269,6 +270,7 @@ export interface RulesetGovernanceCampaignPreviewInput {
   action: OperationAction;
   defaultGroupId?: string;
   rules?: ClassificationRule[];
+  groups?: ClassificationGroup[];
   rulesFile?: string;
   selectedGroupIds?: string[];
   scanOffset?: number;
@@ -1247,7 +1249,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
 
     async planSenderGovernance(governanceInput) {
       const existingRuleset = governanceInput.rulesFile
-        ? await loadClassificationRuleset(governanceInput.rulesFile)
+        ? await loadPatchableRuleset(governanceInput.rulesFile)
         : undefined;
       const existingRules = existingRuleset?.rules ?? governanceInput.rules ?? [];
       const pageSize = Math.max(governanceInput.pageSize, 0);
@@ -1344,7 +1346,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     async planHighYieldGovernance(plannerInput) {
       const resolvedInput = withRuntimeRulesFile(plannerInput, input.runtimeConfig);
       const existingRuleset = resolvedInput.rulesFile
-        ? await loadClassificationRuleset(resolvedInput.rulesFile)
+        ? await loadPatchableRuleset(resolvedInput.rulesFile)
         : undefined;
       const existingRules = existingRuleset?.rules ?? resolvedInput.rules ?? [];
       const pageSize = Math.max(plannerInput.pageSize, 0);
@@ -1433,7 +1435,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     async planMailboxGovernanceCampaign(campaignInput) {
       const resolvedInput = withRuntimeRulesFile(campaignInput, input.runtimeConfig);
       const existingRuleset = resolvedInput.rulesFile
-        ? await loadClassificationRuleset(resolvedInput.rulesFile)
+        ? await loadPatchableRuleset(resolvedInput.rulesFile)
         : undefined;
       const existingRules = existingRuleset?.rules ?? resolvedInput.rules ?? [];
       const pageSize = Math.max(campaignInput.pageSize, 0);
@@ -1992,6 +1994,7 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
           action: campaignInput.action,
           defaultGroupId: resolvedInput.defaultGroupId,
           rules: resolvedInput.rules,
+          groups: resolvedInput.groups,
           rulesFile: resolvedInput.rulesFile,
           selectedGroupIds: campaignInput.selectedGroupIds,
           scanOffset,
@@ -3504,6 +3507,7 @@ function sleep(ms: number): Promise<void> {
 
 async function resolveRules(input: {
   rules?: ClassificationRule[];
+  groups?: ClassificationGroup[];
   defaultGroupId?: string;
   rulesFile?: string;
 }): Promise<{
@@ -3532,6 +3536,7 @@ async function resolveRules(input: {
   return {
     rules: input.rules,
     defaultGroupId: input.defaultGroupId,
+    groups: input.groups,
   };
 }
 

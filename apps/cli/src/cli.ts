@@ -7,11 +7,16 @@ import {
   createMailProviderFromRuntimeConfig,
   createMailTools,
   createRunId,
+  loadPatchableRuleset,
   loadQFerryRuntimeConfigSync,
+  renderRulesetPatchDraft,
   type ClassificationGroup,
+  type ClassificationRule,
+  type ClassificationRulesetJsonDraft,
   type HighYieldGovernanceInput,
   type MailboxGovernanceCampaignInput,
   type OperationAction,
+  type RulesetPatchDraft,
   type RulesetGovernanceCampaignPreviewInput,
   type RulesetGovernancePreviewInput,
   type SenderBreakdownInput,
@@ -36,11 +41,36 @@ type RulesetCampaignPreviewCompact = Omit<
   Awaited<ReturnType<MailTools["rulesetGovernanceCampaignPreview"]>>,
   "plans"
 >;
+type MixedDomainNextStep = {
+  folder: string;
+  domain: string;
+  messageCount: number;
+  uniqueSenderCount: number;
+  args: string[];
+  command: string;
+};
+type MixedDomainBreakdownReport = {
+  folder: string;
+  domain: string;
+  matchedMessages: number;
+  returnedSenderCandidates: number;
+  candidateSenderRules: number;
+  selectedSenderRules: number;
+  skippedSenderRules: number;
+  draftSenderRules: boolean;
+};
 
 interface CampaignWorkflowInput extends MailboxGovernanceCampaignInput {
   runId?: string;
   applyRulesetPatch?: boolean;
   includeRenderedDraft?: boolean;
+  breakdownMixedDomains?: {
+    enabled?: boolean;
+    draftSenderRules?: boolean;
+    maxDomains?: number;
+    maxSenderCandidatesPerDomain?: number;
+    minSenderMessageCount?: number;
+  };
   preview?: {
     enabled?: boolean;
     action?: OperationAction;
@@ -260,8 +290,25 @@ function validateCampaignWorkflowInput(value: CampaignWorkflowInput): CampaignWo
     throw new Error("campaign-workflow includeRenderedDraft must be a boolean");
   }
   validateRuleGroup(value.ruleGroup);
+  validateWorkflowBreakdown(value.breakdownMixedDomains);
   validateWorkflowPreview(value.preview);
   return value;
+}
+
+function validateWorkflowBreakdown(breakdown: CampaignWorkflowInput["breakdownMixedDomains"]): void {
+  if (breakdown === undefined) return;
+  if (!isRecord(breakdown)) {
+    throw new Error("campaign-workflow breakdownMixedDomains must be an object");
+  }
+  if (breakdown.enabled !== undefined && typeof breakdown.enabled !== "boolean") {
+    throw new Error("campaign-workflow breakdownMixedDomains.enabled must be a boolean");
+  }
+  if (breakdown.draftSenderRules !== undefined && typeof breakdown.draftSenderRules !== "boolean") {
+    throw new Error("campaign-workflow breakdownMixedDomains.draftSenderRules must be a boolean");
+  }
+  validateOptionalInteger(breakdown.maxDomains, "breakdownMixedDomains.maxDomains", 0, 100);
+  validateOptionalInteger(breakdown.maxSenderCandidatesPerDomain, "breakdownMixedDomains.maxSenderCandidatesPerDomain", 0, 100);
+  validateOptionalInteger(breakdown.minSenderMessageCount, "breakdownMixedDomains.minSenderMessageCount", 1, 100_000);
 }
 
 function validateWorkflowPreview(preview: CampaignWorkflowInput["preview"]): void {
@@ -379,10 +426,20 @@ async function runCampaignWorkflow(
     ...(input.rulesFile ? { rulesFile: input.rulesFile } : {}),
   });
 
+  const mixedDomainBreakdownEnabled = input.breakdownMixedDomains?.enabled === true;
+  const mixedDomainNextSteps = buildMixedDomainNextSteps(discovery, input);
+  const mixedDomainBreakdown = mixedDomainBreakdownEnabled
+    ? await runMixedDomainBreakdowns(tools, discovery, input)
+    : undefined;
+  const workflowPatchDraft = mergeRulesetPatches(
+    discovery.rulesetPatch,
+    mixedDomainBreakdown?.rulesetPatch,
+  );
+
   const rulesetPatch = input.rulesFile
     ? await applyRulesetPatchDraft({
         rulesFile: input.rulesFile,
-        patch: discovery.rulesetPatch,
+        patch: workflowPatchDraft,
         apply: input.applyRulesetPatch === true,
         includeRenderedDraft: input.includeRenderedDraft === true,
       })
@@ -391,11 +448,14 @@ async function runCampaignWorkflow(
         rulesFile: "<none>",
         beforeRuleCount: 0,
         afterRuleCount: 0,
-        addedRuleCount: discovery.rulesetPatch.rulesToAdd.length,
-        replacedRuleCount: discovery.rulesetPatch.rulesToReplace?.length ?? 0,
-        skippedDuplicateRuleCount: discovery.rulesetPatch.skippedDuplicateRules.length,
-        changelog: discovery.rulesetPatch.changelog ?? "",
+        addedRuleCount: workflowPatchDraft.rulesToAdd.length,
+        replacedRuleCount: workflowPatchDraft.rulesToReplace?.length ?? 0,
+        skippedDuplicateRuleCount: workflowPatchDraft.skippedDuplicateRules.length,
+        changelog: workflowPatchDraft.changelog ?? "",
       };
+  const previewRuleset = previewEnabled
+    ? await buildWorkflowPreviewRuleset(input, workflowPatchDraft)
+    : undefined;
 
   const preview = previewEnabled
     ? compactRulesetGovernanceCampaignPreview(await tools.rulesetGovernanceCampaignPreview({
@@ -405,7 +465,13 @@ async function runCampaignWorkflow(
         maxPagesPerFolder: input.maxPagesPerFolder,
         maxMessageRefsPerGroup: input.preview?.maxMessageRefsPerGroup ?? 100,
         action: input.preview?.action ?? "move",
-        ...(input.rulesFile ? { rulesFile: input.rulesFile } : {}),
+        ...(previewRuleset
+          ? {
+              rules: previewRuleset.rules,
+              groups: previewRuleset.groups,
+              defaultGroupId: previewRuleset.defaultGroupId,
+            }
+          : input.rulesFile ? { rulesFile: input.rulesFile } : {}),
         ...(input.preview?.selectedGroupIds ? { selectedGroupIds: input.preview.selectedGroupIds } : {}),
         ...(input.scanOffset !== undefined ? { scanOffset: input.scanOffset } : {}),
         ...(input.order ? { order: input.order } : {}),
@@ -420,14 +486,19 @@ async function runCampaignWorkflow(
     workflow: {
       phases: [
         "discovery",
+        ...(mixedDomainBreakdownEnabled ? ["mixed_domain_breakdown"] : []),
         "ruleset_patch",
         ...(previewEnabled ? ["preview"] : []),
       ],
       discovery,
       rulesetPatch,
-      mixedDomainNextSteps: buildMixedDomainNextSteps(discovery, input),
+      ...(mixedDomainBreakdown ? {
+        mixedDomainBreakdowns: mixedDomainBreakdown.reports,
+        mixedDomainRulesetPatch: mixedDomainBreakdown.rulesetPatch,
+      } : {}),
+      mixedDomainNextSteps,
       ...(preview ? { preview } : {}),
-      recommendedNextAction: workflowNextAction(discovery, preview),
+      recommendedNextAction: workflowNextAction(preview, rulesetPatch, mixedDomainNextSteps),
       mutationsAttempted: 0,
     },
     mutationsAttempted: 0,
@@ -437,14 +508,7 @@ async function runCampaignWorkflow(
 function buildMixedDomainNextSteps(
   discovery: Awaited<ReturnType<MailTools["planMailboxGovernanceCampaign"]>>,
   input: CampaignWorkflowInput,
-): Array<{
-  folder: string;
-  domain: string;
-  messageCount: number;
-  uniqueSenderCount: number;
-  args: string[];
-  command: string;
-}> {
+): MixedDomainNextStep[] {
   return discovery.campaign.folderPlans.flatMap((plan) =>
     plan.candidates
       .filter((candidate) => candidate.recommendedAction === "break_down_sender")
@@ -468,6 +532,236 @@ function buildMixedDomainNextSteps(
         };
       })
   );
+}
+
+async function runMixedDomainBreakdowns(
+  tools: MailTools,
+  discovery: Awaited<ReturnType<MailTools["planMailboxGovernanceCampaign"]>>,
+  input: CampaignWorkflowInput,
+): Promise<{ reports: MixedDomainBreakdownReport[]; rulesetPatch: RulesetPatchDraft }> {
+  const ruleGroup = input.ruleGroup ?? { id: "sender_governance", label: "Sender governance" };
+  const draftSenderRules = input.breakdownMixedDomains?.draftSenderRules === true;
+  const maxDomains = input.breakdownMixedDomains?.maxDomains ?? 5;
+  const maxSenderCandidatesPerDomain = input.breakdownMixedDomains?.maxSenderCandidatesPerDomain ?? DEFAULT_PAGE_SIZE;
+  const minSenderMessageCount = input.breakdownMixedDomains?.minSenderMessageCount ?? 1;
+  const targets = buildMixedDomainNextSteps(discovery, input).slice(0, maxDomains);
+  const existingRules = await loadWorkflowExistingRules(input);
+  let accumulatedRules: ClassificationRule[] = [
+    ...existingRules,
+    ...discovery.rulesetPatch.rulesToAdd,
+    ...(discovery.rulesetPatch.rulesToReplace ?? []),
+  ];
+  const reports: MixedDomainBreakdownReport[] = [];
+  const patches: RulesetPatchDraft[] = [];
+
+  for (const target of targets) {
+    const breakdown = await tools.senderBreakdown({
+      folder: target.folder,
+      pageSize: input.pageSize,
+      maxPages: input.maxPagesPerFolder,
+      fromDomainIncludes: target.domain,
+      maxSenderCandidates: maxSenderCandidatesPerDomain,
+      ...(input.scanOffset !== undefined ? { scanOffset: input.scanOffset } : {}),
+      ...(input.order ? { order: input.order } : {}),
+      ruleGroup,
+    });
+    const selectedCandidates = breakdown.breakdown.senderCandidates
+      .filter((candidate) => candidate.messageCount >= minSenderMessageCount);
+    const patch = draftSenderRules
+      ? buildWorkflowRulesetPatch({
+          candidateRules: selectedCandidates.map((candidate) => candidate.suggestedRule),
+          existingRules: accumulatedRules,
+          ruleGroup,
+          ruleset: discovery.rulesetPatch.ruleset,
+          ...(input.scopeDraftRulesToSourceFolder === false ? {} : { scopeFolder: target.folder }),
+        })
+      : emptyWorkflowRulesetPatch(ruleGroup, discovery.rulesetPatch.ruleset);
+    accumulatedRules = [
+      ...accumulatedRules,
+      ...patch.rulesToAdd,
+      ...(patch.rulesToReplace ?? []),
+    ];
+    patches.push(patch);
+    reports.push({
+      folder: target.folder,
+      domain: target.domain,
+      matchedMessages: breakdown.breakdown.matchedMessages,
+      returnedSenderCandidates: breakdown.breakdown.candidateSummary.returnedSenderCandidates,
+      candidateSenderRules: selectedCandidates.length,
+      selectedSenderRules: patch.rulesToAdd.length,
+      skippedSenderRules: patch.skippedDuplicateRules.length,
+      draftSenderRules,
+    });
+  }
+
+  return {
+    reports,
+    rulesetPatch: mergeRulesetPatches(emptyWorkflowRulesetPatch(ruleGroup, discovery.rulesetPatch.ruleset), ...patches),
+  };
+}
+
+async function loadWorkflowExistingRules(input: CampaignWorkflowInput): Promise<ClassificationRule[]> {
+  if (input.rulesFile) {
+    return (await loadPatchableRuleset(input.rulesFile)).rules;
+  }
+  return input.rules ?? [];
+}
+
+async function buildWorkflowPreviewRuleset(
+  input: CampaignWorkflowInput,
+  workflowPatchDraft: RulesetPatchDraft,
+): Promise<ClassificationRulesetJsonDraft | undefined> {
+  if (!input.rulesFile || input.applyRulesetPatch === true || !hasRulesetPatchChanges(workflowPatchDraft)) {
+    return undefined;
+  }
+  const existing = await loadPatchableRuleset(input.rulesFile);
+  return renderRulesetPatchDraft(workflowPatchDraft, existing);
+}
+
+function emptyWorkflowRulesetPatch(
+  ruleGroup: ClassificationGroup,
+  ruleset: RulesetPatchDraft["ruleset"],
+): RulesetPatchDraft {
+  return {
+    groupToEnsure: ruleGroup,
+    candidateRuleCount: 0,
+    rulesToAdd: [],
+    skippedDuplicateRules: [],
+    ruleset,
+  };
+}
+
+function hasRulesetPatchChanges(patch: RulesetPatchDraft): boolean {
+  return patch.rulesToAdd.length > 0 || (patch.rulesToReplace?.length ?? 0) > 0;
+}
+
+function mergeRulesetPatches(...patches: Array<RulesetPatchDraft | undefined>): RulesetPatchDraft {
+  const definedPatches = patches.filter((patch): patch is RulesetPatchDraft => patch !== undefined);
+  const [firstPatch] = definedPatches;
+  if (!firstPatch) {
+    throw new Error("QFerry cannot merge an empty ruleset patch list");
+  }
+  const merged: RulesetPatchDraft = {
+    groupToEnsure: firstPatch.groupToEnsure,
+    candidateRuleCount: definedPatches.reduce((sum, patch) => sum + patch.candidateRuleCount, 0),
+    rulesToReplace: definedPatches.flatMap((patch) => patch.rulesToReplace ?? []),
+    rulesToAdd: definedPatches.flatMap((patch) => patch.rulesToAdd),
+    skippedDuplicateRules: definedPatches.flatMap((patch) => patch.skippedDuplicateRules),
+    ruleset: definedPatches.find((patch) => patch.ruleset)?.ruleset,
+  };
+  return {
+    ...merged,
+    changelog: formatWorkflowRulesetPatchChangelog(merged),
+  };
+}
+
+function buildWorkflowRulesetPatch(input: {
+  candidateRules: ClassificationRule[];
+  existingRules: ClassificationRule[];
+  ruleGroup: ClassificationGroup;
+  ruleset?: RulesetPatchDraft["ruleset"];
+  scopeFolder?: string;
+}): RulesetPatchDraft {
+  const selectedRules = input.candidateRules
+    .map((rule) => input.scopeFolder ? scopeWorkflowRuleToSourceFolder(rule, input.scopeFolder) : rule);
+  const rulesToAdd: ClassificationRule[] = [];
+  const skippedDuplicateRules: RulesetPatchDraft["skippedDuplicateRules"] = [];
+
+  for (const rule of selectedRules) {
+    const duplicate = input.existingRules.find((existingRule) => workflowRuleCoversCandidate(existingRule, rule));
+    if (duplicate) {
+      skippedDuplicateRules.push({
+        ruleId: duplicate.id,
+        reason: "match already covered by existing rule",
+        match: duplicate.match,
+      });
+    } else if (!rulesToAdd.some((existingRule) => workflowRuleCoversCandidate(existingRule, rule))) {
+      rulesToAdd.push(rule);
+    }
+  }
+
+  return {
+    groupToEnsure: input.ruleGroup,
+    candidateRuleCount: selectedRules.length,
+    rulesToAdd,
+    skippedDuplicateRules,
+    ruleset: input.ruleset,
+    changelog: "",
+  };
+}
+
+function scopeWorkflowRuleToSourceFolder(rule: ClassificationRule, folder: string): ClassificationRule {
+  return {
+    ...rule,
+    id: `${rule.id}-in-${scopedWorkflowRuleIdSuffix(folder)}`,
+    match: {
+      ...rule.match,
+      folderEquals: folder,
+    },
+  };
+}
+
+function workflowRuleCoversCandidate(existing: ClassificationRule, candidate: ClassificationRule): boolean {
+  return existing.groupId === candidate.groupId && workflowRuleMatchCovers(existing.match, candidate.match);
+}
+
+function workflowRuleMatchCovers(
+  existing: ClassificationRule["match"],
+  candidate: ClassificationRule["match"],
+): boolean {
+  return workflowMatchFieldCovers(existing.fromIncludes, candidate.fromIncludes)
+    && workflowMatchFieldCovers(existing.fromDomainIncludes, candidate.fromDomainIncludes)
+    && workflowMatchFieldCovers(existing.subjectIncludes, candidate.subjectIncludes)
+    && workflowMatchFieldCovers(existing.snippetIncludes, candidate.snippetIncludes)
+    && workflowMatchFieldCovers(existing.folderEquals, candidate.folderEquals)
+    && workflowMatchFieldCovers(existing.hasFlag, candidate.hasFlag);
+}
+
+function workflowMatchFieldCovers(existing: string | undefined, candidate: string | undefined): boolean {
+  return existing === undefined || normalizeWorkflowOptional(existing) === normalizeWorkflowOptional(candidate);
+}
+
+function normalizeWorkflowOptional(value: string | undefined): string | undefined {
+  return value?.toLocaleLowerCase();
+}
+
+function slugifyWorkflowRuleId(value: string): string {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "unknown";
+}
+
+function scopedWorkflowRuleIdSuffix(value: string): string {
+  const slug = slugifyWorkflowRuleId(value);
+  const readableSlug = slug === "unknown" ? "folder" : slug;
+  return `${readableSlug}-${stableWorkflowHexHash(value)}`;
+}
+
+function stableWorkflowHexHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function formatWorkflowRulesetPatchChangelog(patch: RulesetPatchDraft): string {
+  const replacementRules = patch.rulesToReplace ?? [];
+  return [
+    `groupToEnsure: ${patch.groupToEnsure.id}`,
+    `candidateRuleCount: ${patch.candidateRuleCount}`,
+    ...(replacementRules.length > 0 ? [`rulesToReplace: ${replacementRules.length}`] : []),
+    `rulesToAdd: ${patch.rulesToAdd.length}`,
+    ...patch.rulesToAdd.map((rule) => `+ rule ${rule.id} (${formatWorkflowRuleMatch(rule.match)})`),
+    `skippedDuplicateRules: ${patch.skippedDuplicateRules.length}`,
+    ...patch.skippedDuplicateRules.map((duplicate) =>
+      `skipped ${duplicate.ruleId}: ${duplicate.reason} (${formatWorkflowRuleMatch(duplicate.match)})`),
+  ].join("\n");
+}
+
+function formatWorkflowRuleMatch(match: ClassificationRule["match"]): string {
+  return Object.entries(match)
+    .map(([key, value]) => `${key}: ${String(value)}`)
+    .join(", ");
 }
 
 function senderBreakdownArgs(input: {
@@ -517,18 +811,20 @@ function compactCampaignWorkflowInput(input: CampaignWorkflowInput & { runId: st
     selectedGroupIds: input.preview?.selectedGroupIds,
     rulesFile: input.rulesFile,
     applyRulesetPatch: input.applyRulesetPatch === true,
+    breakdownMixedDomains: input.breakdownMixedDomains,
     previewEnabled: input.preview?.enabled !== false,
   };
 }
 
 function workflowNextAction(
-  discovery: Awaited<ReturnType<MailTools["planMailboxGovernanceCampaign"]>>,
   preview: RulesetCampaignPreviewCompact | undefined,
+  rulesetPatch: { addedRuleCount?: number; replacedRuleCount?: number },
+  mixedDomainNextSteps: MixedDomainNextStep[],
 ): string {
   if (preview?.campaign.recommendedNextAction === "confirm_plans") return "review_preview_plans";
   if (preview?.campaign.recommendedNextAction === "review_rules") return "improve_ruleset";
-  if (discovery.campaign.recommendedNextAction === "draft_rules") return "review_or_apply_ruleset_patch";
-  if (discovery.campaign.recommendedNextAction === "review_mixed_domains") return "break_down_mixed_domains";
+  if ((rulesetPatch.addedRuleCount ?? 0) > 0 || (rulesetPatch.replacedRuleCount ?? 0) > 0) return "review_or_apply_ruleset_patch";
+  if (mixedDomainNextSteps.length > 0) return "break_down_mixed_domains";
   return "stop_low_yield";
 }
 
@@ -599,7 +895,12 @@ async function jsonInput<T>(cwd: string, flags: ParsedArgs["flags"]): Promise<T>
 }
 
 async function readJson(path: string): Promise<unknown> {
-  return JSON.parse(await readFile(path, "utf8")) as unknown;
+  const text = await readFile(path, "utf8");
+  return JSON.parse(stripUtf8Bom(text)) as unknown;
+}
+
+function stripUtf8Bom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 function compactRulesetGovernancePreview<T extends { classifications?: unknown[] }>(

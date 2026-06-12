@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -20,7 +20,12 @@ await build({
   logLevel: "silent",
 });
 
-const targetText = await readFile(target, "utf8");
+const generatedText = await readFile(target, "utf8");
+const targetText = generatedText.replace(/[ \t]+$/gm, "");
+if (targetText !== generatedText) {
+  await writeFile(target, targetText, "utf8");
+}
+
 for (const forbidden of ["tsx", "apps/chatgpt-app/src", "../../.."]) {
   if (targetText.includes(forbidden)) {
     throw new Error(`QFerry plugin runtime bundle contains forbidden reference: ${forbidden}`);

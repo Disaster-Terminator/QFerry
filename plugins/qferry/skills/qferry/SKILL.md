@@ -83,7 +83,7 @@ rtk pnpm run qferry:cli -- campaign-workflow --input .\workflow.json
 
 This command chains multi-folder high-yield discovery, local ruleset patch validation/application, and ruleset campaign preview. It does not call `confirm_cleanup_plan` or `execute_cleanup`; `applyRulesetPatch: true` writes only the local `qferry.rules.json` file and is not a QQ Mail mutation.
 
-If the CLI workflow returns `mixedDomainNextSteps`, run the suggested `qferry sender-breakdown` command before drafting sender/domain rules. The sender breakdown CLI is read-only and returns concrete sender candidates plus sender-level suggested rules, which is the preferred path for broad domains such as `qq.com`.
+If the CLI workflow returns `mixedDomainNextSteps`, run the suggested `qferry sender-breakdown` command before drafting sender/domain rules. When using the repo-local CLI for rule iteration, prefer `breakdownMixedDomains.enabled: true` in `campaign-workflow` to fold that read-only sender breakdown into the same workflow. This returns sender-level candidate evidence by default. Set `breakdownMixedDomains.draftSenderRules: true` only when the current `ruleGroup` is already the intended classification target for those senders; then the workflow may merge sender-level suggested rules into the local ruleset patch and preview the dry-run draft without writing the rules file.
 
 Prefer `ruleset_governance_campaign_preview` over repeated single-folder calls when a user ruleset already exists. It is the token-efficient Gmail-like path: one compact response ranks explicit folders by coverage and executable plan opportunities, while preserving operation plan ids for later confirmation.
 
