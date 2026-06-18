@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -1008,6 +1008,63 @@ describe("QFerry ChatGPT App MCP server", () => {
 
     await client.close();
     await server.close();
+  });
+
+  it("can confirm a preview plan after the MCP server is recreated", async () => {
+    const planStoreDir = await mkdtemp(join(tmpdir(), "qferry-plan-store-"));
+    process.env.QFERRY_OPERATION_PLAN_STORE_DIR = planStoreDir;
+    const firstServer = createQFerryMcpServer();
+    const firstClient = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [firstClientTransport, firstServerTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      firstServer.connect(firstServerTransport),
+      firstClient.connect(firstClientTransport),
+    ]);
+
+    const preview = await firstClient.callTool({
+      name: "plan_cleanup",
+      arguments: {
+        runId: "mcp-cross-server-plan",
+        folder: "INBOX",
+        limit: 10,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedGroupIds: ["archive"],
+        rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+      },
+    });
+    const previewContent = preview.structuredContent as { plan?: { operationPlanId?: string } } | undefined;
+    const operationPlanId = String(previewContent?.plan?.operationPlanId);
+    expect(operationPlanId).toEqual(expect.stringMatching(/^op_/));
+
+    await firstClient.close();
+    await firstServer.close();
+
+    const secondServer = createQFerryMcpServer();
+    const secondClient = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [secondClientTransport, secondServerTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      secondServer.connect(secondServerTransport),
+      secondClient.connect(secondClientTransport),
+    ]);
+
+    const confirmed = await secondClient.callTool({
+      name: "confirm_cleanup_plan",
+      arguments: { operationPlanId },
+    });
+
+    expect(confirmed.structuredContent).toMatchObject({
+      plan: {
+        operationPlanId,
+        status: "confirmed",
+      },
+    });
+
+    await secondClient.close();
+    await secondServer.close();
+    await rm(planStoreDir, { recursive: true, force: true });
   });
 
   it("calls runtime status through the MCP server", async () => {

@@ -13,7 +13,8 @@ import {
   type OperationPlan,
   type QFerryRuntimeConfig,
 } from "@qferry/core";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -94,8 +95,17 @@ interface StoredPlan {
   previewSummary?: Record<string, unknown>;
 }
 
+interface OperationPlanStore {
+  get(operationPlanId: string): Promise<StoredPlan | undefined>;
+  set(operationPlanId: string, storedPlan: StoredPlan): Promise<void>;
+  delete(operationPlanId: string): Promise<void>;
+  isConsumed(operationPlanId: string): Promise<boolean>;
+  markConsumed(operationPlanId: string): Promise<void>;
+}
+
 export interface CreateQFerryMcpServerOptions {
   provider?: MailProvider;
+  operationPlanStore?: OperationPlanStore;
   runtimeConfig?: QFerryRuntimeConfig;
 }
 
@@ -120,8 +130,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
   const runtimeConfig = options.runtimeConfig ?? loadQFerryRuntimeConfigSync();
   const provider = options.provider ?? createMailProviderFromRuntimeConfig(runtimeConfig);
   const tools = createMailTools({ provider, runtimeConfig });
-  const planRegistry = new Map<string, StoredPlan>();
-  const consumedPlanIds = new Set<string>();
+  const planStore = options.operationPlanStore ?? createFileOperationPlanStore();
   let mutationExecutionQueue: Promise<void> = Promise.resolve();
   const enqueueMutationExecution = async <T>(run: () => Promise<T>): Promise<T> => {
     const previous = mutationExecutionQueue;
@@ -284,7 +293,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => {
-      const result = registerPlan(await tools.planCleanup(input), planRegistry);
+      const result = await registerPlan(await tools.planCleanup(input), planStore);
       return toToolResult(await withMcpAudit("plan_cleanup", input.runId, input, result));
     },
   );
@@ -303,7 +312,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     },
     async (input) => {
       const result = await tools.ensureClassificationFolder(input);
-      const registered = result.plan ? registerPlan({ ...result, plan: result.plan }, planRegistry) : result;
+      const registered = result.plan ? await registerPlan({ ...result, plan: result.plan }, planStore) : result;
       return toToolResult(await withMcpAudit("ensure_classification_folder", input.runId, input, registered));
     },
   );
@@ -331,7 +340,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => {
-      const result = registerPlan(await tools.previewCleanupBatch(input), planRegistry);
+      const result = await registerPlan(await tools.previewCleanupBatch(input), planStore);
       return toToolResult(await withMcpAudit("preview_cleanup_batch", input.runId, input, result));
     },
   );
@@ -361,7 +370,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => {
-      const result = registerPlan(await tools.planSenderGovernance(input), planRegistry);
+      const result = await registerPlan(await tools.planSenderGovernance(input), planStore);
       return toToolResult(await withMcpAudit("plan_sender_governance", input.runId, input, result));
     },
   );
@@ -456,7 +465,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => {
-      const result = registerOperationPlans(await tools.campaignWorkflow(input), planRegistry);
+      const result = await registerOperationPlans(await tools.campaignWorkflow(input), planStore);
       const response = compactRulesetGovernanceCampaignPreview(result);
       return toToolResult(await withMcpAudit("campaign_workflow", input.runId, input, response));
     },
@@ -538,7 +547,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => {
-      const result = registerPlan(await tools.bulkGovernancePreview(input), planRegistry);
+      const result = await registerPlan(await tools.bulkGovernancePreview(input), planStore);
       return toToolResult(await withMcpAudit("bulk_governance_preview", input.runId, input, withLegacyDiscoveryWarning(result)));
     },
   );
@@ -567,7 +576,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => {
-      const result = registerOperationPlans(await tools.rulesetGovernancePreview(input), planRegistry);
+      const result = await registerOperationPlans(await tools.rulesetGovernancePreview(input), planStore);
       const response = compactRulesetGovernancePreview(result, input.includeClassifications === true);
       return toToolResult(await withMcpAudit("ruleset_governance_preview", input.runId, input, response));
     },
@@ -598,7 +607,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => {
-      const result = registerOperationPlans(await tools.rulesetGovernanceCampaignPreview(input), planRegistry);
+      const result = await registerOperationPlans(await tools.rulesetGovernanceCampaignPreview(input), planStore);
       const response = compactRulesetGovernanceCampaignPreview(result);
       return toToolResult(await withMcpAudit("ruleset_governance_campaign_preview", input.runId, input, response));
     },
@@ -624,19 +633,19 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     "confirm_cleanup_plan",
     {
       title: "Confirm cleanup plan",
-      description: "Use this after the user approves a preview plan. It confirms only a cleanup plan previously generated by this QFerry MCP server instance.",
+      description: "Use this after the user approves a preview plan. It confirms only a cleanup plan previously generated and stored by this QFerry MCP server.",
       inputSchema: {
         operationPlanId: z.string(),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (input) => {
-      const stored = getStoredPlan(planRegistry, consumedPlanIds, input.operationPlanId);
+      const stored = await getStoredPlan(planStore, input.operationPlanId);
       const confirmed = {
         ...confirmOperationPlan(stored.plan, input.operationPlanId),
         confirmationRequired: false,
       };
-      planRegistry.set(input.operationPlanId, {
+      await planStore.set(input.operationPlanId, {
         plan: confirmed,
         expiresAt: Date.now() + PLAN_TTL_MS,
         previewSummary: stored.previewSummary,
@@ -654,7 +663,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     "execute_cleanup",
     {
       title: "Execute cleanup",
-      description: "Use this only after confirm_cleanup_plan has confirmed a plan generated by this QFerry MCP server instance. Move and create-folder actions are currently supported.",
+      description: "Use this only after confirm_cleanup_plan has confirmed a stored QFerry plan. Move and create-folder actions are currently supported.",
       inputSchema: {
         operationPlanId: z.string(),
         maxMessages: z.number().int().min(1).max(MAX_MOVE_EXECUTION_MAX_MESSAGES).optional(),
@@ -663,7 +672,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     },
     async (input) => {
       return enqueueMutationExecution(async () => {
-        const stored = getStoredPlan(planRegistry, consumedPlanIds, input.operationPlanId);
+        const stored = await getStoredPlan(planStore, input.operationPlanId);
         if (stored.plan.status !== "confirmed") {
           throw new Error(`Operation plan is not confirmed: ${input.operationPlanId}`);
         }
@@ -671,7 +680,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         try {
           const result = await tools.executeCleanup({ plan: stored.plan, maxMessages });
           if (result.result.status === "partially_executed") {
-            planRegistry.set(input.operationPlanId, {
+            await planStore.set(input.operationPlanId, {
               plan: {
                 ...stored.plan,
                 messageRefs: stored.plan.messageRefs.slice(result.result.attemptedMessages),
@@ -680,8 +689,8 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
               previewSummary: stored.previewSummary,
             });
           } else {
-            planRegistry.delete(input.operationPlanId);
-            consumedPlanIds.add(input.operationPlanId);
+            await planStore.delete(input.operationPlanId);
+            await planStore.markConsumed(input.operationPlanId);
           }
           return toToolResult(
             await withMcpAudit("execute_cleanup", stored.plan.runId, input, result, {
@@ -708,8 +717,8 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
             preview: stored.previewSummary,
             plan: { target: stored.plan.target },
           }).catch(() => {});
-          planRegistry.delete(input.operationPlanId);
-          consumedPlanIds.add(input.operationPlanId);
+          await planStore.delete(input.operationPlanId);
+          await planStore.markConsumed(input.operationPlanId);
           throw error;
         }
       });
@@ -719,21 +728,21 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
   return server;
 }
 
-function registerPlan<T extends { plan: OperationPlan }>(
+async function registerPlan<T extends { plan: OperationPlan }>(
   result: T,
-  registry: Map<string, StoredPlan>,
-): T {
-  return registerOperationPlans(result, registry);
+  store: OperationPlanStore,
+): Promise<T> {
+  return await registerOperationPlans(result, store);
 }
 
-function registerOperationPlans<T extends { plan?: OperationPlan; plans?: OperationPlan[] }>(
+async function registerOperationPlans<T extends { plan?: OperationPlan; plans?: OperationPlan[] }>(
   result: T,
-  registry: Map<string, StoredPlan>,
-): T {
+  store: OperationPlanStore,
+): Promise<T> {
   const plans = result.plans ?? (result.plan ? [result.plan] : []);
   const previewSummary = summarizeMcpToolResult(result);
   for (const plan of plans) {
-    registry.set(plan.operationPlanId, {
+    await store.set(plan.operationPlanId, {
       plan,
       expiresAt: Date.now() + PLAN_TTL_MS,
       previewSummary,
@@ -760,23 +769,77 @@ function compactRulesetGovernanceCampaignPreview<T extends { plans?: unknown[] }
   return compactResult;
 }
 
-function getStoredPlan(
-  registry: Map<string, StoredPlan>,
-  consumedPlanIds: Set<string>,
+async function getStoredPlan(
+  store: OperationPlanStore,
   operationPlanId: string,
-): StoredPlan {
-  if (consumedPlanIds.has(operationPlanId)) {
+): Promise<StoredPlan> {
+  if (await store.isConsumed(operationPlanId)) {
     throw new Error(`Operation plan already consumed: ${operationPlanId}`);
   }
-  const stored = registry.get(operationPlanId);
+  const stored = await store.get(operationPlanId);
   if (!stored) {
-    throw new Error(`Operation plan not found in this QFerry session: ${operationPlanId}`);
+    throw new Error(`Operation plan not found in QFerry plan store: ${operationPlanId}`);
   }
   if (stored.expiresAt < Date.now()) {
-    registry.delete(operationPlanId);
+    await store.delete(operationPlanId);
     throw new Error(`Operation plan expired: ${operationPlanId}`);
   }
   return stored;
+}
+
+function createFileOperationPlanStore(rootDir = defaultOperationPlanStoreRoot()): OperationPlanStore {
+  const plansDir = join(rootDir, "plans");
+  const consumedDir = join(rootDir, "consumed");
+  return {
+    async get(operationPlanId) {
+      try {
+        const raw = await readFile(planPath(plansDir, operationPlanId), "utf8");
+        return JSON.parse(raw) as StoredPlan;
+      } catch (error) {
+        if (isMissing(error)) return undefined;
+        throw error;
+      }
+    },
+    async set(operationPlanId, storedPlan) {
+      await mkdir(plansDir, { recursive: true });
+      await writeFile(planPath(plansDir, operationPlanId), `${JSON.stringify(storedPlan, null, 2)}\n`, "utf8");
+    },
+    async delete(operationPlanId) {
+      await rm(planPath(plansDir, operationPlanId), { force: true });
+    },
+    async isConsumed(operationPlanId) {
+      try {
+        await readFile(planPath(consumedDir, operationPlanId), "utf8");
+        return true;
+      } catch (error) {
+        if (isMissing(error)) return false;
+        throw error;
+      }
+    },
+    async markConsumed(operationPlanId) {
+      await mkdir(consumedDir, { recursive: true });
+      await writeFile(planPath(consumedDir, operationPlanId), `${new Date().toISOString()}\n`, "utf8");
+    },
+  };
+}
+
+function defaultOperationPlanStoreRoot(): string {
+  const configured = process.env.QFERRY_OPERATION_PLAN_STORE_DIR?.trim();
+  if (configured) return configured;
+  const stateRoot = process.env.QFERRY_STATE_DIR?.trim() || (
+    process.platform === "win32"
+      ? join(process.env.LOCALAPPDATA || os.homedir(), "qferry")
+      : join(process.env.XDG_STATE_HOME || join(os.homedir(), ".local", "state"), "qferry")
+  );
+  return join(stateRoot, "operation-plans");
+}
+
+function planPath(rootDir: string, operationPlanId: string): string {
+  return join(rootDir, `${encodeURIComponent(operationPlanId)}.json`);
+}
+
+function isMissing(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 async function withMcpAudit<T extends object>(

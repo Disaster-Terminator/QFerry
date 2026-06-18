@@ -34,7 +34,9 @@ Use `classify_messages` when debugging rules or doing focused classification. Pr
 
 ## Safety Boundary
 
-Do not request real QQ Mail mutation through QFerry unless the user explicitly authorizes that specific operation. The default product workflow is read-only and preview-first; mutation requires a server-side plan generated in this MCP session, `confirm_cleanup_plan`, and then `execute_cleanup`. Large confirmed move plans are checkpointed: `execute_cleanup` returns `partially_executed` with `remainingMessages` when more refs remain, and the same `operationPlanId` can be executed again until it returns `executed`.
+Do not request real QQ Mail mutation through QFerry unless the user explicitly authorizes that specific operation. The default product workflow is read-only and preview-first; mutation requires a server-side persisted plan, `confirm_cleanup_plan`, and then `execute_cleanup`. Large confirmed move plans are checkpointed: `execute_cleanup` returns `partially_executed` with `remainingMessages` when more refs remain, and the same `operationPlanId` can be executed again until it returns `executed`.
+
+Provider capability flags only describe mail-provider readiness. If `confirm_cleanup_plan` or `execute_cleanup` cannot find an `operationPlanId`, treat it as an MCP operation-plan store problem, not an IMAP capability problem. QFerry persists operation plans in its state directory by default; remote MCP deployments should configure a durable shared `QFERRY_OPERATION_PLAN_STORE_DIR` or equivalent store.
 
 Allowed by default:
 

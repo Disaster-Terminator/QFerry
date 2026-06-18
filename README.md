@@ -62,6 +62,8 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 `QQMAIL_KEY` 是 QQ 邮箱 IMAP/SMTP 授权码，不是 QQ 登录密码。它只通过环境变量提供，不写入本机 JSON、仓库、trace 或 summary。真实 QQ 邮箱默认走 read-only / preview-first 工作流；任何真实移动邮件都必须先生成 preview plan，经用户明确授权后调用 `confirm_cleanup_plan`，再用同一个 `operationPlanId` 调用 `execute_cleanup`。
 
+`mutationAllowed`、`mutationOperationallyReady` 和 `supportsNativeMove` 只说明当前 provider 具备执行移动的能力；真正能否安全执行，还取决于 MCP 层能否找回先前生成的 operation plan。QFerry 默认把 operation plan 持久化到用户状态目录，避免 MCP 进程重启、GPT Web 重连或 Codex 新线程后丢失 plan。需要自定义位置时设置 `QFERRY_OPERATION_PLAN_STORE_DIR`；云端部署应把它指向持久共享存储或后续等价 KV/DB adapter，而不是依赖单进程内存。
+
 说明：Codex CLI 的 `codex plugin marketplace add` 只添加插件市场；Codex 插件安装在 Codex TUI 的 `/plugins` 里完成。GPT Web / 自定义 App 接入时使用同一套 MCP server 和工具语义，不需要把它理解成另一个产品。
 
 ## 预期结果
@@ -69,6 +71,7 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 - Codex 能看到 QFerry skill；其他 MCP 宿主能看到同名 QFerry tools。
 - QFerry MCP server 通过插件目录里的 `./mcp-bootstrap.mjs` 或等价部署入口启动，再加载 `./dist/mcp.cjs`。
 - `mcp-bootstrap.mjs` 会把运行 cwd 切到用户状态目录，避免 Windows 下 MCP 进程占住插件缓存目录，导致插件详情、升级或卸载失败。
+- Preview operation plans 会保存在 QFerry 状态目录；同一持久 store 下，`confirm_cleanup_plan` 和 `execute_cleanup` 不依赖生成 plan 的原 MCP 进程仍然存活。
 - fixture provider 可调用 `get_status`、`list_mailboxes`、`get_mailbox_summary`、`search`、`classify_messages`、`triage_inbox`、`group_spam_candidates`、`ruleset_governance_preview`、`classification_sweep`、`classification_map`、`plan_cleanup`。
 - QQ Mail provider 可调用 `get_status`、`get_capability_snapshot`、`list_mailboxes`、`get_mailbox_summary`、bounded `search`、按 UID `fetch`、`triage_inbox`、`ruleset_governance_preview`、`classification_sweep`、`classification_map` 和 `group_spam_candidates`。
 - 每次 e2e 留下 trace artifacts，方便验收回溯。

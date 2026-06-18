@@ -150,6 +150,8 @@ examples/qferry.rules.json
 
 真实 QQ read-only e2e 调用该工具时仍必须保持 `mutationsAttempted: 0`。只有用户明确授权某个 plan 后，才允许调用 `confirm_cleanup_plan({ operationPlanId })`；真实执行必须再调用 `execute_cleanup({ operationPlanId })`，不能由客户端手写或修改 `status: "confirmed"` 的 plan JSON。
 
+`confirm_cleanup_plan` 和 `execute_cleanup` 不能依赖同一个 MCP 进程的内存状态。验收时要覆盖 preview plan 生成后重建 MCP server 仍可确认该 `operationPlanId` 的场景。默认 store 使用 QFerry 用户状态目录；部署到 GPT Web / remote MCP / 云环境时，可以用 `QFERRY_OPERATION_PLAN_STORE_DIR` 指向持久共享目录。多实例云部署如果没有共享文件系统，应接入等价的 KV/DB adapter；文件 store 不声称提供分布式锁。
+
 `ensure_classification_folder` 用来把分类桶映射到 QQ 文件夹。文件夹已存在时只返回 `folder.exists: true`；文件夹缺失时返回 `status: "preview"`、`action: "create_folder"` 的 operation plan。真实创建文件夹必须和移动邮件一样走 `confirm_cleanup_plan` + `execute_cleanup`，并在 trace 里记录短名称、完整 IMAP 路径、plan 状态和 `mutationsAttempted`。
 
 ## 结构化搜索与优先级分桶
