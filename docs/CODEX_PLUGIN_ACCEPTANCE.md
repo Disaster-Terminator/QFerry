@@ -1,10 +1,10 @@
-# QFerry Codex 插件安装与验收
+# QFerry Codex 本地 MCP 安装与验收
 
-本文档面向维护者和开发者。普通用户优先阅读根目录 `README.md` 的快速开始。
+本文档面向维护者和开发者，记录 Codex 插件这种本地 MCP 承载方式的安装、reload 和验收。普通用户优先阅读根目录 `README.md` 的快速开始。GPT Web / 自定义 App 接入应复用同一套 MCP tools 和安全语义，不需要另起一套产品说明。
 
 ## 用户安装路径
 
-QFerry 当前通过 Codex 插件市场安装：
+QFerry 当前最省事的本地 Codex 路径是通过插件市场安装：
 
 ```powershell
 codex plugin marketplace add Disaster-Terminator/QFerry
@@ -32,7 +32,7 @@ plugins/qferry/dist/mcp.cjs
 plugins/qferry/skills/qferry/SKILL.md
 ```
 
-插件 MCP 配置必须使用 Codex plugin wrapper：
+Codex 插件内的 MCP 配置必须使用 plugin-local wrapper：
 
 ```json
 {
@@ -136,7 +136,7 @@ examples/qferry.rules.json
 
 `ruleset_governance_preview` 用于规则化批量整理。它默认返回 compact 输出：`preview.groupPlans`、`preview.campaignReport`、`plans[]`、`operationPlanIds[]`、`skippedGroups[]` 和 `mutationsAttempted: 0`；全量 `classifications` 只应在传入 `includeClassifications: true` 的小范围调试时返回。`campaignReport.topUnplannedDomains` 和 `campaignReport.topUnplannedSenders` 是扩展规则集的主要信号，应优先用它们决定下一批 sender/domain 规则，而不是逐封读取邮件。当一个 ruleset 中多个 group 带有目标文件夹时，验收应确认每个 group 生成独立 preview plan，summary 中保留 `groupPlans` 和 `operationPlanIds`。
 
-`preview_cleanup_batch` 是 Codex 插件侧的规则化批量整理入口。它跨页扫描 bounded metadata，应用 `rules` 或 `rulesFile`，按 `selectedGroupIds` 选出候选邮件，并生成 `status: "preview"` 的 operation plan。
+`preview_cleanup_batch` 是 MCP 侧的规则化批量整理入口。它跨页扫描 bounded metadata，应用 `rules` 或 `rulesFile`，按 `selectedGroupIds` 选出候选邮件，并生成 `status: "preview"` 的 operation plan。
 
 验收时必须关注这些字段：
 
@@ -213,7 +213,7 @@ QFerry 当前支持的是规则层 blocklist：
 
 允许：
 
-- 安装本地 Codex 插件。
+- 安装本地 Codex 承载的 QFerry MCP 插件。
 - 启动 plugin-local MCP runtime：`plugins/qferry/mcp-bootstrap.mjs` -> `plugins/qferry/dist/mcp.cjs`。
 - 使用 fixture provider 验证工具发现和调用。
 - 使用 QQ read-only provider 验证真实 QQ 邮箱的 capability、文件夹列表、小批量 metadata。
@@ -272,7 +272,7 @@ pnpm run dev:install-hooks
 
 ## 部署后验收
 
-用户把插件部署到本机 Codex 后，下一轮测试目标是：
+用户把 QFerry 部署到本机 Codex 后，下一轮测试目标是：
 
 1. Codex 能发现 QFerry 插件。
 2. Codex 能加载 `qferry` skill。

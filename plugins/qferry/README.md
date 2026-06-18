@@ -1,6 +1,6 @@
-# QFerry Codex Plugin
+# QFerry Codex MCP Bundle
 
-这是 QFerry 的 Codex 插件目录。
+这是 QFerry 面向 Codex 的本地 MCP bundle 目录。它不是另一套产品逻辑，只是把共享 QFerry MCP runtime 打包成 Codex 可安装的插件形态。
 
 用户通过 Codex 插件市场安装：
 

@@ -12,7 +12,7 @@ Primary workflow:
 scan mailbox metadata -> classify -> explain -> plan cleanup/archive -> preview -> confirm -> execute -> trace
 ```
 
-Reply drafting is not the first-class goal. Sending and deletion are outside the MVP.
+Reply drafting is not the first-class goal. Sending and deletion are outside the current safe product surface.
 
 Current governance work should optimize for framework efficiency instead of conversation-level manual triage. The primary path is:
 
@@ -22,9 +22,9 @@ load user ruleset -> scan bounded mailbox window -> produce campaign report and 
 
 `classification_map`, `classification_sweep`, and `bulk_governance_preview` remain discovery helpers. They are not the durable Gmail-like workflow. Durable governance should be expressed as user-defined rules and folder targets so one preview can cover hundreds of messages without forcing the agent to read or summarize every candidate.
 
-## Surfaces
+## MCP Surface And Hosts
 
-QFerry has one shared core and two wrappers.
+QFerry has one shared core and one durable MCP tool contract. Codex plugin packaging, GPT Web custom MCP/App wiring, and CLI automation are host adapters around the same mailbox-governance core; they should not be modeled as separate products.
 
 ```text
 packages/core
@@ -35,21 +35,24 @@ packages/core
   future QQ/Gmail providers
 
 apps/chatgpt-app
-  remote MCP server over HTTPS
-  ChatGPT App / connector metadata
+  MCP server entrypoint
+  optional ChatGPT/GPT Web connector metadata
   optional widget later
 
 plugins/qferry
-  Codex plugin metadata
+  Codex plugin packaging metadata
   QFerry skills
-  developer/operator workflows
+  local MCP bootstrap
+
+apps/cli
+  terminal entrypoint for hot iteration and scripted e2e
 ```
 
-The wrappers must not own mailbox logic. They call `packages/core`.
+Host adapters must not own mailbox logic. They call `packages/core` and expose the same preview/confirm/execute safety model.
 
 ## Codex Plugin Packaging Reference
 
-QFerry should follow the proven plugin packaging pattern from `G:\repository\supervisor` when the Codex plugin surface is added.
+QFerry should follow the proven plugin packaging pattern from `G:\repository\supervisor` for the Codex-hosted MCP bundle.
 
 Applicable practices:
 
@@ -59,7 +62,7 @@ Applicable practices:
 - Add a package verifier based on `pnpm pack --dry-run --json` that fails if required docs, plugin manifests, skill files, or `dist/` runtime files are missing.
 - Do not rely on the user's local source checkout for a marketplace-installed plugin.
 
-The Codex plugin is the primary current surface. ChatGPT App remains a future wrapper over the same MCP/core boundary.
+Codex plugin packaging is the easiest local deployment path today, but it is not a separate product boundary. GPT Web / custom App integration should reuse the same MCP server and tool contract rather than forking behavior.
 
 ## Storage Model
 
@@ -150,7 +153,7 @@ Current implementation must enforce:
 - Preview-first behavior for all real QQ operations.
 - Real QQ mutation only after explicit user approval, `confirm_cleanup_plan`, and `execute_cleanup`.
 - No full mailbox scans by default.
-- No delete/send tools in MVP.
+- No delete/send tools in the current safe product surface.
 - Move/mark/create-folder must require a saved operation plan id.
 - Operation confirmation must not accept arbitrary fresh arguments.
 - A confirmed operation plan id is single-use; retrying the same id after an execute attempt must fail.
@@ -163,7 +166,7 @@ Reasons:
 
 - OpenAI Apps SDK and MCP examples are Node-friendly.
 - The strongest reference wheel, `Mailbox`, uses Node and `imapflow`.
-- TypeScript contracts can be shared by ChatGPT App and Codex plugin wrappers.
+- TypeScript contracts can be shared by MCP host adapters and the CLI.
 
 The existing Python probe remains as a low-dependency diagnostic tool.
 
@@ -188,24 +191,24 @@ packages/
       fixture-provider.test.ts
 ```
 
-## MVP Boundary
+## Current Product Boundary
 
-Allowed now:
+Implemented now:
 
-- Architecture docs.
-- Trace writer.
-- Operation-plan model.
-- Fixture provider.
-- Unit tests.
-- Fixture e2e command and artifacts.
+- Shared TypeScript core with provider contracts, trace writer, operation-plan model, ruleset governance, campaign preview, and confirmed execution primitives.
+- Fixture and QQ Mail providers.
+- MCP server entrypoint used by Codex plugin packaging and compatible MCP hosts.
+- Codex plugin bundle with plugin-local bootstrap and skills.
+- CLI for local hot iteration and scripted e2e.
+- Fixture and QQ read-only e2e artifacts.
 
-Not allowed in this slice:
+Still outside the safe default path:
 
-- Real QQ mutation.
-- ChatGPT remote MCP server.
-- Codex plugin packaging.
-- Gmail mailbox mutation.
-- Full mailbox scan.
+- Real QQ mutation without a preview plan, explicit user approval, `confirm_cleanup_plan`, and `execute_cleanup`.
+- Server-side QQ blacklist changes until a QQ Web/API path is verified.
+- Delete/send tools for the user's primary mailbox.
+- Full mailbox scans by default.
+- Gmail mailbox mutation; Gmail remains a product reference, not the current provider target.
 
 ## Blocklist Boundary
 
@@ -214,7 +217,7 @@ QFerry has two separate blocklist layers:
 - QFerry rule-layer blocklist: deterministic metadata rules such as `fromIncludes: "known-junk.example"` that classify matching messages into cleanup/archive groups and make them eligible for preview or confirmed move workflows.
 - QQ Mail server-side blacklist: QQ Mail exposes blacklist/anti-spam settings in its Web/App settings surface, but QFerry has not found or verified a public IMAP/SMTP/API endpoint for adding senders or domains to that server-side blacklist.
 
-Current implementation supports the rule-layer blocklist and IMAP move-to-Junk cleanup. Server-side "do not enter mailbox" blocking is a separate future capability that needs QQ Web automation or a verified private endpoint before QFerry can claim support.
+Current implementation supports the rule-layer blocklist and IMAP move-to-Junk cleanup. Server-side "do not enter mailbox" blocking is a separate capability that needs QQ Web automation or a verified private endpoint before QFerry can claim support.
 
 Until that is implemented, pressure tests against known junk sources should:
 

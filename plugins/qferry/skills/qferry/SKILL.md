@@ -5,7 +5,7 @@ description: Use QFerry when Codex needs to inspect, classify, or plan safe hand
 
 # QFerry
 
-QFerry is a Gmail-like QQ Mail organization plugin for Codex. Use it for mailbox governance work: listing folders, bounded metadata search, deterministic classification, and preview-only operation planning.
+QFerry is a Gmail-like QQ Mail organization MCP toolset packaged for Codex. Use it for mailbox governance work: listing folders, bounded metadata search, deterministic classification, and preview-only operation planning. The durable product contract is the MCP tools and shared QFerry core, not a Codex-only workflow.
 
 ## Default Workflow
 

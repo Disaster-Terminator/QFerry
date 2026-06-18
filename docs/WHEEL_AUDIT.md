@@ -35,8 +35,8 @@ Do not use Auto-GPT-QQmail as a base.
 
 QFerry should keep its own core because the product needs a different contract:
 
-- ChatGPT App / remote MCP first, not local stdio-only MCP.
-- Codex plugin second, as a developer/operator wrapper.
+- One MCP tool contract that can run locally or remotely.
+- Codex plugin packaging as a local host adapter, not a separate product shape.
 - Custom classification groups.
 - Provider capability snapshots before mutation.
 - First-class trace artifacts.
@@ -77,7 +77,7 @@ Strong points:
 
 Risks and mismatches:
 
-- It is CLI-first and local agent/skill-oriented, not ChatGPT App / remote MCP-first.
+- It is CLI-first and local agent/skill-oriented, while QFerry needs a host-neutral MCP governance contract.
 - Its dry-run confirmation is a boolean `confirm=true`, while QFerry should use server-side preview operation ids for safer repeatability.
 - Its client-side fallback can fetch a lot of envelopes, with caps up to thousands. QFerry must default to much smaller supervised batches on the user's large QQ account.
 - It already includes send/delete/permanent-style operations that QFerry should keep disabled until capability and safety rules are proven.
@@ -123,14 +123,14 @@ Risks and mismatches:
 - It is broad but not trace-first.
 - Many tools perform direct mutations without QFerry-style operation ids.
 - Console logging is noisy and can interfere with MCP stdio unless carefully routed.
-- The project is not focused on ChatGPT App metadata, remote MCP, auth, privacy, or audit trails.
+- The project is not focused on host-neutral MCP product metadata, auth, privacy, or audit trails.
 - Uses older callback-style `imap`.
 
 QFerry decision:
 
 - Mine for feature inventory and QQ edge-case anecdotes.
 - Do not use as implementation base.
-- Do not inherit its broad tool surface for MVP.
+- Do not inherit its broad tool surface for QFerry's default mailbox-governance product.
 
 ## neomody77/mcp-mail-organizer
 
@@ -243,7 +243,7 @@ Risks and mismatches:
 
 QFerry decision:
 
-- Use as the closest read-only MVP reference.
+- Use as the closest read-only reference.
 - Keep QFerry's first ChatGPT/Codex tool surface similarly small before adding mutations.
 
 ## botoai/Auto-GPT-QQmail
@@ -337,51 +337,50 @@ Before enabling real operations, QFerry still needs a test mailbox or a sacrific
 
 Do not run those tests on the user's primary mailbox without an explicit target test message and approval.
 
-## Recommended Implementation Direction
+## Current Implementation Baseline
 
-Use a Node/TypeScript core for the real implementation, not Python.
+Use a Node/TypeScript core for the real implementation, not Python. This is now the current baseline, not only a recommendation.
 
 Reason:
 
 - OpenAI Apps SDK and MCP examples are Node-friendly.
 - The strongest email references are Node/TypeScript.
 - `imapflow` from `Mailbox` is a better foundation than Python stdlib `imaplib` for long-term adapter work.
-- Codex plugin packaging can wrap the same Node backend later.
+- Codex plugin packaging and remote MCP hosting can wrap the same Node backend.
 
 Keep the existing Python probe as a low-dependency diagnostic tool only.
 
-Recommended next slice:
+Implemented baseline:
 
 ```text
-1. Add docs/ARCHITECTURE.md with shared-core + ChatGPT App + Codex plugin wrappers.
-2. Create a TypeScript package skeleton for qferry-core and qferry-server.
-3. Implement a fixture provider first.
-4. Implement trace writer and operation-plan model before real mutations.
-5. Port QQ read-only adapter using imapflow with a hard default limit.
-6. Add provider capability probe command in TypeScript.
-7. Only then expose MCP tools.
+1. Shared TypeScript core under packages/core.
+2. Host-neutral MCP server under apps/chatgpt-app.
+3. Codex-local MCP bundle under plugins/qferry.
+4. CLI under apps/cli for hot iteration and scripted e2e.
+5. Fixture and QQ Mail providers.
+6. Trace writer, operation plans, ruleset governance, campaign workflow, and preview/confirm/execute flow.
 ```
 
-Initial tool surface should be:
+Current durable tool surface centers on:
 
 ```text
-test_connection
 list_mailboxes
-scan_mailbox_metadata
+get_mailbox_summary
 search
 fetch
-classify_messages_preview
-plan_cleanup
+ruleset_governance_preview
+ruleset_governance_campaign_preview
+campaign_workflow
+confirm_cleanup_plan
+execute_cleanup
 ```
 
-Mutation tools should wait:
+Still intentionally outside the default surface:
 
 ```text
-move_messages_confirm
 mark_messages_confirm
-create_mailbox_confirm
 delete_messages_confirm
 send_mail
 ```
 
-`delete_messages_confirm` and `send_mail` should not be MVP tools for the user's primary requirement.
+Delete and send tools do not serve the user's primary mailbox-governance requirement. Server-side QQ blacklist support is also not claimed until a QQ Web/API path is verified.

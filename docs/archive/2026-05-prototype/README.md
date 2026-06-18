@@ -12,4 +12,4 @@ Current maintainable references remain in:
 - `docs/RETINUE_E2E_NOTES.md`
 - `docs/WHEEL_AUDIT.md`
 
-The May 17 direction reset is documented in `docs/superpowers/plans/2026-05-17-gmail-like-governance-reset.md`.
+Implemented planning records from the reset and CLI work now live under `docs/archive/2026-06-implemented-plans/`.

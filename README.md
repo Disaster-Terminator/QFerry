@@ -12,19 +12,19 @@
 
 **QFerry 是一个面向 QQ 邮箱的 Gmail-like 邮箱整理工具。**
 
-当前目标不是“帮你写邮件”，而是让 Codex / ChatGPT 风格的 agent 安全地读取、分类、识别和规划处理已有邮件。现在优先交付 **Codex 插件**；ChatGPT App / GPT App 方向保留，但浏览器连接、HTTPS tunnel、widget 和提交审核暂时冻结。
+当前目标不是“帮你写邮件”，而是让 Codex、ChatGPT 或其他 MCP 宿主里的 agent 安全地读取、分类、识别和规划处理已有邮件。QFerry 的产品边界是 **MCP 工具集 + 共享邮箱治理核心**；Codex 插件、GPT Web 自定义 MCP/App、CLI 都只是同一套能力的不同承载方式。
 
 ```text
-Codex
-  -> QFerry Codex Plugin
-    -> plugin-local MCP runtime
+Codex / GPT Web / other MCP hosts
+  -> QFerry MCP runtime
+    -> shared @qferry/core
       -> fixture provider 或 QQ Mail provider
-    -> trace logs + e2e artifacts
+  -> trace logs + e2e artifacts
 ```
 
 ## 快速开始
 
-通过 Codex 插件市场添加 QFerry：
+当前最省事的本地安装路径是 Codex 插件市场。添加 QFerry 市场：
 
 ```powershell
 codex plugin marketplace add Disaster-Terminator/QFerry
@@ -38,7 +38,7 @@ codex plugin marketplace add Disaster-Terminator/QFerry
 Use QFerry to list QQ Mail folders safely. Do not mutate any real mailbox data.
 ```
 
-默认插件配置使用 fixture provider，不需要 QQ 邮箱授权码也能验证插件能启动和暴露工具。需要连接真实 QQ 邮箱时，在你的本机环境里配置：
+默认 MCP 配置使用 fixture provider，不需要 QQ 邮箱授权码也能验证工具能启动和暴露。需要连接真实 QQ 邮箱时，在你的本机环境里配置：
 
 ```text
 QQMAIL_EMAIL=your@qq.com
@@ -62,12 +62,12 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 `QQMAIL_KEY` 是 QQ 邮箱 IMAP/SMTP 授权码，不是 QQ 登录密码。它只通过环境变量提供，不写入本机 JSON、仓库、trace 或 summary。真实 QQ 邮箱默认走 read-only / preview-first 工作流；任何真实移动邮件都必须先生成 preview plan，经用户明确授权后调用 `confirm_cleanup_plan`，再用同一个 `operationPlanId` 调用 `execute_cleanup`。
 
-说明：Codex CLI 的 `codex plugin marketplace add` 只添加插件市场；插件安装在 Codex TUI 的 `/plugins` 里完成。
+说明：Codex CLI 的 `codex plugin marketplace add` 只添加插件市场；Codex 插件安装在 Codex TUI 的 `/plugins` 里完成。GPT Web / 自定义 App 接入时使用同一套 MCP server 和工具语义，不需要把它理解成另一个产品。
 
 ## 预期结果
 
-- Codex 能看到 QFerry skill。
-- QFerry MCP server 通过插件目录里的 `./mcp-bootstrap.mjs` 启动，再加载 plugin-local `./dist/mcp.cjs`。
+- Codex 能看到 QFerry skill；其他 MCP 宿主能看到同名 QFerry tools。
+- QFerry MCP server 通过插件目录里的 `./mcp-bootstrap.mjs` 或等价部署入口启动，再加载 `./dist/mcp.cjs`。
 - `mcp-bootstrap.mjs` 会把运行 cwd 切到用户状态目录，避免 Windows 下 MCP 进程占住插件缓存目录，导致插件详情、升级或卸载失败。
 - fixture provider 可调用 `get_status`、`list_mailboxes`、`get_mailbox_summary`、`search`、`classify_messages`、`triage_inbox`、`group_spam_candidates`、`ruleset_governance_preview`、`classification_sweep`、`classification_map`、`plan_cleanup`。
 - QQ Mail provider 可调用 `get_status`、`get_capability_snapshot`、`list_mailboxes`、`get_mailbox_summary`、bounded `search`、按 UID `fetch`、`triage_inbox`、`ruleset_governance_preview`、`classification_sweep`、`classification_map` 和 `group_spam_candidates`。
@@ -141,7 +141,7 @@ artifacts/e2e/<runId>/summary.md
 
 ## 开发者文档
 
-普通安装优先看本 README。开发、验收和插件结构细节见 [QFerry Codex 插件安装与验收](docs/CODEX_PLUGIN_ACCEPTANCE.md)。本地热迭代和终端治理入口见 [QFerry CLI](docs/CLI.md)。
+普通安装优先看本 README。Codex 本地插件安装、MCP runtime 包装和验收细节见 [QFerry Codex 本地 MCP 安装与验收](docs/CODEX_PLUGIN_ACCEPTANCE.md)。本地热迭代和终端治理入口见 [QFerry CLI](docs/CLI.md)。
 
 常用开发检查：
 

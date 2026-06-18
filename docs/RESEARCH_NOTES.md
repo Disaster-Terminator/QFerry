@@ -14,11 +14,11 @@ scan mailbox -> classify messages -> explain why -> propose cleanup/archive plan
 
 Every testable run must leave evidence that can be reviewed after the fact. The user should not have to describe what happened manually.
 
-## Product Shape: Codex Plugin And ChatGPT App
+## Product Shape: One MCP Contract, Multiple Hosts
 
-The product does not need to choose only one surface.
+The product does not need to choose only one host, and it should not treat hosts as separate product lines.
 
-QFerry can be built as a shared mail-governance core with two wrappers:
+QFerry should be built as a shared mail-governance core with one MCP tool contract:
 
 ```text
 qferry-core
@@ -28,15 +28,19 @@ qferry-core
   - operation preview/confirm
   - trace logging
 
-qferry-chatgpt-app
-  - remote MCP over HTTPS
-  - ChatGPT Apps / Connectors setup
-  - optional widget UI later
+qferry-mcp
+  - local or remote MCP server
+  - same tools for Codex, GPT Web custom MCP/App, and future hosts
+  - optional connector metadata or widget UI later
 
-qferry-codex-plugin
-  - Codex plugin metadata
+qferry-cli
+  - terminal workflow over the same core
+  - fast local iteration without host reload
+
+qferry-codex-bundle
+  - Codex packaging metadata
   - skills for inbox triage and cleanup
-  - app/connector binding when available
+  - local MCP bootstrap
 ```
 
 This mirrors the Gmail pattern observed locally:
@@ -45,13 +49,13 @@ This mirrors the Gmail pattern observed locally:
 - The plugin also declares a Gmail app connector id in `.app.json`.
 - The Gmail skill treats send, archive, trash, label, and move operations as explicit actions, not implicit side effects.
 
-For QFerry, this means the reusable contract should live below both wrappers. The ChatGPT App is the public/product-facing shape; the Codex plugin is a developer/operator shape that helps us test, inspect, and use the same mailbox-governance capabilities inside Codex.
+For QFerry, this means the reusable contract should live below every host adapter. Codex and GPT Web should expose the same mailbox-governance verbs, safety model, and trace artifacts.
 
-## Difference Between The Two Surfaces
+## Host Characteristics
 
-### ChatGPT App / GPT App
+### GPT Web / Custom MCP App
 
-Best for the end-user product.
+Good for end-user ChatGPT workflows.
 
 Characteristics:
 
@@ -63,37 +67,37 @@ Characteristics:
 
 ### Codex Plugin
 
-Best for development, local operation, and agent workflows.
+Good for local operation, repository development, and supervised agent workflows.
 
 Characteristics:
 
 - Package of skills, metadata, optional app connector bindings, and MCP/tooling.
 - Helps Codex use QFerry for repo work, local testing, and supervised mailbox operations.
-- Can share the same backend and tool names as the ChatGPT App.
-- Should not become the only product surface if the goal is ChatGPT user experience.
+- Uses the same backend and tool names as the GPT Web MCP host.
+- Should stay a packaging/runtime adapter, not a separate behavior fork.
 
 ## Recommended Strategy
 
 Build the shared backend and tool contract first, then wrap it.
 
-After code-level wheel audit, the recommended implementation language for the real core is Node/TypeScript. Keep the existing Python QQ probe as a low-dependency diagnostic tool only.
+Current baseline: the shared backend, MCP server, Codex bundle, and CLI all use Node/TypeScript with `pnpm`. Keep the existing Python QQ probe as a low-dependency diagnostic tool only.
 
 Main reasons:
 
 - OpenAI Apps SDK and MCP examples are Node-friendly.
 - The strongest reference implementation is `leeguooooo/Mailbox`, which uses Node packages and `imapflow`.
 - `Mailbox` contains provider-specific lessons for QQ/163-style IMAP search problems.
-- TypeScript gives a better path to shared contracts across remote MCP, Codex plugin packaging, and local test tools.
+- TypeScript gives a better path to shared contracts across local/remote MCP hosts, Codex plugin packaging, and local test tools.
 
-Phase 1 should be tool-only and trace-first:
+The trace-first tool baseline is now:
 
 ```text
 1. local fixture adapter
-2. Gmail reference adapter for product-shape comparison
-3. QQ Mail capability probe
-4. QQ Mail read-only adapter
-5. preview-only cleanup planning
-6. confirmed move/archive/mark operations only after probe proves support
+2. QQ Mail capability probe and provider
+3. preview-only cleanup planning
+4. persisted ruleset governance and campaign preview
+5. confirmed move/create-folder operations only through operationPlanId
+6. trace artifacts for fixture, QQ read-only, and explicitly approved mutation e2e
 ```
 
 Do not start with a widget UI. The first risk is provider capability and traceability, not layout.
@@ -122,18 +126,18 @@ Gmail archive is label-based. QQ Mail over IMAP is more likely to expose mailbox
 
 QQ Mail cannot be treated as a generic IMAP server by assumption.
 
-The current QQ Mail credential is for the user's primary mailbox and reportedly contains more than 2,000 messages. Treat it as high-risk production data.
+The current QQ Mail credential is for the user's primary mailbox and contains long-lived production mail. Treat it as high-risk production data.
 
-Hard limits for the initial probe:
+Hard limits for normal real-account work:
 
-- Read-only only.
+- Read-only by default.
 - Do not send mail.
 - Do not delete mail.
-- Do not move mail.
-- Do not mark messages read/unread.
-- Do not create or delete folders.
+- Do not move mail without a preview plan, explicit user approval, `confirm_cleanup_plan`, and `execute_cleanup`.
+- Do not mark messages read/unread unless a future plan explicitly adds that workflow.
+- Do not create folders without a preview plan, explicit user approval, `confirm_cleanup_plan`, and `execute_cleanup`.
 - Do not scan the full mailbox.
-- Default metadata sample limit: 10 messages.
+- Keep metadata windows bounded.
 - Default folder listing is allowed because it does not mutate state.
 - Never print or commit `QQMAIL_KEY`.
 
@@ -143,24 +147,20 @@ Known from prior notes and public QQ Mail documentation:
 - QQ Mail can expose POP3/IMAP/SMTP-style access to third-party clients.
 - Common documented endpoints are expected to include `imap.qq.com` and `smtp.qq.com`.
 
-What must be probed before implementing real operations:
+Capability questions that remain product-significant:
 
-- Can we list all mailboxes/folders?
-- Are custom folders visible over IMAP?
-- Can we create a folder/mailbox over IMAP?
-- Can we move messages between folders?
-- Does the server support `MOVE`, or must we use copy-plus-delete semantics?
 - Are flags such as seen/unseen and flagged/starred available?
 - Are QQ Mail web labels exposed over IMAP at all?
-- Is there any stable archive folder, or should archive mean moving to a configured folder?
+- Is there any stable server-side blacklist API, or does that require QQ Web automation?
+- Should archive always mean moving to a configured folder for QQ Mail?
 
-Until these are proven, QFerry should support:
+QFerry should keep durable product semantics at the ruleset/group layer:
 
 - QFerry-local custom classification groups.
+- Optional QQ folder targets after preview and confirmation.
 - Read-only scan/classification.
-- Preview-only cleanup plans.
-
-Real mailbox mutations should be disabled by default until the capability probe records support.
+- Preview-first cleanup plans.
+- Confirmed mutations only through server-side operation ids.
 
 ## Custom Classification Rules
 
@@ -231,9 +231,9 @@ Privacy rule:
 ## Open Questions
 
 1. Whether QQ Mail web labels exist in a way that can be managed through IMAP.
-2. Whether QQ Mail custom folders can be created and moved into reliably through IMAP.
-3. Whether Gmail-like archive can be represented naturally in QQ Mail.
-4. Whether the first public product should expose only ChatGPT App, or ship Codex plugin at the same time as a developer companion.
+2. Whether QQ Mail server-side blacklist can be managed by a verified API or only by Web automation.
+3. Whether Gmail-like archive should be represented only as user-configured QQ folders.
+4. Which MCP deployment mode should be documented first for new users: Codex local plugin, GPT Web custom MCP/App, or both with the same tool contract.
 
 ## Source Notes
 

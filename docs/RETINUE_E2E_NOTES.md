@@ -90,7 +90,7 @@ Context:
 
 Observed jobs:
 
-- `job_96595326-bc7a-4c28-b956-35ebd1c348ac` completed the vision guard audit. It confirmed the slice stays aligned with QFerry's QQ Mail Gmail-like organization, Codex-plugin-first, preview-first, traceable-test vision.
+- `job_96595326-bc7a-4c28-b956-35ebd1c348ac` completed the vision guard audit. It confirmed the slice stays aligned with QFerry's QQ Mail Gmail-like organization, MCP-tool-contract-first, preview-first, traceable-test vision.
 - `job_93916bf8-ab0b-4f86-a4bf-8d682d156b0b` completed the structured search risk audit. It recommended in-memory structured filtering after bounded scans as the safest path, and warned against provider-level IMAP filter pushdown for this slice.
 
 Findings:
