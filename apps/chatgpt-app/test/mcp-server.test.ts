@@ -47,6 +47,7 @@ describe("QFerry ChatGPT App MCP server", () => {
       "plan_sender_governance",
       "plan_high_yield_governance",
       "plan_mailbox_governance_campaign",
+      "campaign_workflow",
       "sender_breakdown",
       "classification_map",
       "classification_sweep",
@@ -71,6 +72,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "plan_sender_governance")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "plan_high_yield_governance")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_mailbox_governance_campaign")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "campaign_workflow")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "sender_breakdown")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "bulk_governance_preview")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "ruleset_governance_preview")?.annotations?.destructiveHint).toBe(false);
@@ -347,6 +349,85 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("accepts inline groups for ruleset governance preview through the MCP server", async () => {
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "Alpha One <one@alpha.example>",
+        subject: "Alpha one",
+        date: "2026-05-10T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const provider: MailProvider = {
+      async listMailboxes() {
+        return [];
+      },
+      async scanMailboxMetadata() {
+        return messages;
+      },
+      async scanMailboxMetadataWindow() {
+        return {
+          messages,
+          pagesScanned: 1,
+          mailboxSnapshot: { folder: "INBOX", exists: messages.length },
+        };
+      },
+      async fetchMessage() {
+        throw new Error("not used");
+      },
+    };
+    const server = createQFerryMcpServer({ provider });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "ruleset_governance_preview",
+      arguments: {
+        runId: "mcp-ruleset-governance-inline-groups",
+        folder: "INBOX",
+        pageSize: 50,
+        maxPages: 1,
+        maxMessageRefsPerGroup: 50,
+        action: "move",
+        defaultGroupId: "review",
+        groups: [
+          { id: "review", label: "Review" },
+          { id: "group_alpha", label: "Group Alpha", target: { folder: "Folders/Group Alpha" } },
+        ],
+        rules: [
+          { id: "alpha-domain", groupId: "group_alpha", match: { fromDomainIncludes: "alpha.example" } },
+        ],
+        selectedGroupIds: ["group_alpha"],
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      preview: {
+        campaignReport: {
+          plannedMessages: 1,
+          planCount: 1,
+        },
+        groupPlans: [
+          {
+            groupId: "group_alpha",
+            target: { folder: "Folders/Group Alpha" },
+            selectedMessageRefs: 1,
+          },
+        ],
+      },
+    });
+
+    await client.close();
+    await server.close();
+  });
+
   it("calls compact ruleset governance campaign preview through the MCP server", async () => {
     const traceRoot = await mkdtemp(join(tmpdir(), "qferry-mcp-ruleset-campaign-"));
     process.env.QFERRY_MCP_TRACE_ROOT = traceRoot;
@@ -504,6 +585,108 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(summary).toContain("- operationPlanIds: [");
     expect(summary).toContain("- folderReports: [");
     expect(summary).not.toContain("classifications");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("runs campaign workflow through the MCP server and registers preview plans", async () => {
+    const traceRoot = await mkdtemp(join(tmpdir(), "qferry-mcp-campaign-workflow-"));
+    process.env.QFERRY_MCP_TRACE_ROOT = traceRoot;
+    const rulesFile = join(traceRoot, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "workflow-mcp-test-rules",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+      ],
+      rules: [{ id: "review-placeholder", groupId: "review", match: { subjectIncludes: "__never_match__" } }],
+    }), "utf8");
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "campaign_workflow",
+      arguments: {
+        runId: "mcp-campaign-workflow-test",
+        folders: ["INBOX"],
+        pageSize: 50,
+        maxPagesPerFolder: 1,
+        minMessageCount: 1,
+        maxCandidatesPerFolder: 3,
+        maxDistinctSendersForDomainRule: 1,
+        rulesFile,
+        ruleGroup: { id: "bulk_platform", label: "Bulk platform", target: { folder: "Bulk platform" } },
+        breakdownMixedDomains: {
+          enabled: true,
+          draftSenderRules: true,
+          minSenderMessageCount: 1,
+          maxSenderCandidatesPerDomain: 10,
+        },
+        applyRulesetPatch: false,
+        preview: {
+          enabled: true,
+          selectedGroupIds: ["bulk_platform"],
+          maxMessageRefsPerGroup: 50,
+          maxUnplannedHintsPerFolder: 1,
+        },
+      },
+    });
+
+    const content = result.structuredContent as {
+      plans?: unknown[];
+      workflow?: {
+        phases?: string[];
+        rulesetPatch?: { addedRuleCount?: number; applied?: boolean };
+        mixedDomainBreakdowns?: Array<{ draftSenderRules: boolean; selectedSenderRules: number }>;
+        preview?: {
+          campaign?: {
+            plannedMessages?: number;
+            executablePlanCount?: number;
+            folderReports?: Array<{ operationPlanIds?: string[] }>;
+          };
+        };
+        mutationsAttempted?: number;
+      };
+      mutationsAttempted?: number;
+      audit?: { summaryPath: string };
+    };
+    expect(content.plans).toBeUndefined();
+    expect(content.workflow?.phases).toEqual(["discovery", "mixed_domain_breakdown", "ruleset_patch", "preview"]);
+    expect(content.workflow?.rulesetPatch).toMatchObject({ applied: false, addedRuleCount: 2 });
+    expect(content.workflow?.mixedDomainBreakdowns?.[0]).toMatchObject({
+      draftSenderRules: true,
+      selectedSenderRules: 2,
+    });
+    expect(content.workflow?.preview?.campaign?.plannedMessages).toBeGreaterThan(0);
+    expect(content.workflow?.preview?.campaign?.executablePlanCount).toBe(1);
+    expect(content.workflow?.mutationsAttempted).toBe(0);
+    expect(content.mutationsAttempted).toBe(0);
+    expect(JSON.stringify(result.structuredContent)).not.toContain("\"messageRefs\"");
+
+    const operationPlanId = content.workflow?.preview?.campaign?.folderReports?.[0]?.operationPlanIds?.[0];
+    expect(operationPlanId).toEqual(expect.any(String));
+    const summary = await readFile(String(content.audit?.summaryPath), "utf8");
+    expect(summary).toContain(String(operationPlanId));
+    expect(summary).toContain("- operationPlanIds: [");
+    expect(summary).toContain("- folderReports: [");
+    const confirmed = await client.callTool({
+      name: "confirm_cleanup_plan",
+      arguments: { operationPlanId },
+    });
+    expect(confirmed.structuredContent).toMatchObject({
+      plan: {
+        operationPlanId,
+        status: "confirmed",
+      },
+    });
 
     await client.close();
     await server.close();

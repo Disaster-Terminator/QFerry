@@ -3,7 +3,15 @@ import { classifyMessages, type ClassificationRule, type MessageClassification, 
 import { createOperationPlan, type MessageRef, type OperationAction, type OperationPlan } from "../operation-plan.js";
 import type { MailboxInfo, MailboxSummary, MailProvider, MailboxWindowSnapshot, MessageDetail, MessageSummary, MoveMessagesReconciliation, ProviderCapabilitySnapshot, ScanMailboxMetadataWindowResult } from "../providers/types.js";
 import { loadClassificationRuleset, type ClassificationGroup, type ClassificationRulesetMetadata } from "../ruleset.js";
-import { formatRulesetPatchChangelog, loadPatchableRuleset, renderRulesetPatchDraft, type RulesetPatchDraft } from "../ruleset-patch.js";
+import {
+  applyRulesetPatchDraft,
+  formatRulesetPatchChangelog,
+  loadPatchableRuleset,
+  renderRulesetPatchDraft,
+  type ApplyRulesetPatchDraftResult,
+  type ClassificationRulesetJsonDraft,
+  type RulesetPatchDraft,
+} from "../ruleset-patch.js";
 import type { QFerryRuntimeConfig } from "../runtime-config.js";
 import { parseSearchQuery, type ParsedSearchQuery } from "../search-query.js";
 
@@ -682,6 +690,77 @@ export interface MailboxGovernanceCampaignReport {
   mutationsAttempted: 0;
 }
 
+export interface CampaignWorkflowInput extends MailboxGovernanceCampaignInput {
+  runId: string;
+  applyRulesetPatch?: boolean;
+  includeRenderedDraft?: boolean;
+  breakdownMixedDomains?: {
+    enabled?: boolean;
+    draftSenderRules?: boolean;
+    maxDomains?: number;
+    maxSenderCandidatesPerDomain?: number;
+    minSenderMessageCount?: number;
+  };
+  preview?: {
+    enabled?: boolean;
+    action?: OperationAction;
+    maxMessageRefsPerGroup?: number;
+    selectedGroupIds?: string[];
+    maxUnplannedHintsPerFolder?: number;
+  };
+}
+
+export interface MixedDomainNextStep {
+  folder: string;
+  domain: string;
+  messageCount: number;
+  uniqueSenderCount: number;
+  args: string[];
+  command: string;
+}
+
+export interface MixedDomainBreakdownReport {
+  folder: string;
+  domain: string;
+  matchedMessages: number;
+  returnedSenderCandidates: number;
+  candidateSenderRules: number;
+  selectedSenderRules: number;
+  skippedSenderRules: number;
+  draftSenderRules: boolean;
+}
+
+export interface CampaignWorkflowReport {
+  phases: string[];
+  discovery: Awaited<ReturnType<MailTools["planMailboxGovernanceCampaign"]>>;
+  rulesetPatch: ApplyRulesetPatchDraftResult | {
+    applied: false;
+    rulesFile: "<none>";
+    beforeRuleCount: 0;
+    afterRuleCount: 0;
+    addedRuleCount: number;
+    replacedRuleCount: number;
+    skippedDuplicateRuleCount: number;
+    changelog: string;
+  };
+  mixedDomainBreakdowns?: MixedDomainBreakdownReport[];
+  mixedDomainRulesetPatch?: RulesetPatchDraft;
+  mixedDomainNextSteps: MixedDomainNextStep[];
+  preview?: {
+    campaign: RulesetGovernanceCampaignPreview;
+    ruleset?: ClassificationRulesetMetadata;
+    mutationsAttempted: 0;
+  };
+  recommendedNextAction: string;
+  mutationsAttempted: 0;
+}
+
+export interface CampaignWorkflowResult {
+  workflow: CampaignWorkflowReport;
+  plans?: OperationPlan[];
+  mutationsAttempted: 0;
+}
+
 export interface CleanupBatchPreview {
   provider: string;
   folder: string;
@@ -803,6 +882,7 @@ export interface MailTools {
     rulesetPatch: RulesetPatchDraft;
     mutationsAttempted: 0;
   }>;
+  campaignWorkflow(input: CampaignWorkflowInput): Promise<CampaignWorkflowResult>;
   senderBreakdown(input: SenderBreakdownInput): Promise<{
     breakdown: SenderBreakdownReport;
     mutationsAttempted: 0;
@@ -1580,6 +1660,115 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
       };
     },
 
+    async campaignWorkflow(workflowInput) {
+      const previewEnabled = workflowInput.preview?.enabled !== false;
+      if (workflowInput.applyRulesetPatch && !workflowInput.rulesFile) {
+        throw new Error("campaign-workflow applyRulesetPatch requires rulesFile");
+      }
+      if (previewEnabled && !workflowInput.rulesFile) {
+        throw new Error("campaign-workflow preview requires rulesFile");
+      }
+
+      const discovery = await tools.planMailboxGovernanceCampaign({
+        folders: workflowInput.folders,
+        pageSize: workflowInput.pageSize,
+        maxPagesPerFolder: workflowInput.maxPagesPerFolder,
+        ...(workflowInput.order ? { order: workflowInput.order } : {}),
+        ...(workflowInput.scanOffset !== undefined ? { scanOffset: workflowInput.scanOffset } : {}),
+        ...(workflowInput.minMessageCount !== undefined ? { minMessageCount: workflowInput.minMessageCount } : {}),
+        ...(workflowInput.maxCandidatesPerFolder !== undefined ? { maxCandidatesPerFolder: workflowInput.maxCandidatesPerFolder } : {}),
+        ...(workflowInput.maxDistinctSendersForDomainRule !== undefined
+          ? { maxDistinctSendersForDomainRule: workflowInput.maxDistinctSendersForDomainRule }
+          : {}),
+        ...(workflowInput.maxConcurrentFolders !== undefined ? { maxConcurrentFolders: workflowInput.maxConcurrentFolders } : {}),
+        ...(workflowInput.scopeDraftRulesToSourceFolder !== undefined
+          ? { scopeDraftRulesToSourceFolder: workflowInput.scopeDraftRulesToSourceFolder }
+          : {}),
+        ...(workflowInput.ruleGroup ? { ruleGroup: workflowInput.ruleGroup } : {}),
+        ...(workflowInput.rules ? { rules: workflowInput.rules } : {}),
+        ...(workflowInput.rulesFile ? { rulesFile: workflowInput.rulesFile } : {}),
+      });
+
+      const mixedDomainBreakdownEnabled = workflowInput.breakdownMixedDomains?.enabled === true;
+      const mixedDomainNextSteps = buildMixedDomainNextSteps(discovery, workflowInput);
+      const mixedDomainBreakdown = mixedDomainBreakdownEnabled
+        ? await runMixedDomainBreakdowns(tools, discovery, workflowInput)
+        : undefined;
+      const workflowPatchDraft = mergeWorkflowRulesetPatches(
+        discovery.rulesetPatch,
+        mixedDomainBreakdown?.rulesetPatch,
+      );
+
+      const rulesetPatch = workflowInput.rulesFile
+        ? await applyRulesetPatchDraft({
+            rulesFile: workflowInput.rulesFile,
+            patch: workflowPatchDraft,
+            apply: workflowInput.applyRulesetPatch === true,
+            includeRenderedDraft: workflowInput.includeRenderedDraft === true,
+          })
+        : {
+            applied: false as const,
+            rulesFile: "<none>" as const,
+            beforeRuleCount: 0 as const,
+            afterRuleCount: 0 as const,
+            addedRuleCount: workflowPatchDraft.rulesToAdd.length,
+            replacedRuleCount: workflowPatchDraft.rulesToReplace?.length ?? 0,
+            skippedDuplicateRuleCount: workflowPatchDraft.skippedDuplicateRules.length,
+            changelog: workflowPatchDraft.changelog ?? "",
+          };
+      const previewRuleset = previewEnabled
+        ? await buildWorkflowPreviewRuleset(workflowInput, workflowPatchDraft)
+        : undefined;
+
+      const preview = previewEnabled
+        ? await tools.rulesetGovernanceCampaignPreview({
+            runId: `${workflowInput.runId}-preview`,
+            folders: workflowInput.folders,
+            pageSize: workflowInput.pageSize,
+            maxPagesPerFolder: workflowInput.maxPagesPerFolder,
+            maxMessageRefsPerGroup: workflowInput.preview?.maxMessageRefsPerGroup ?? 100,
+            action: workflowInput.preview?.action ?? "move",
+            ...(previewRuleset
+              ? {
+                  rules: previewRuleset.rules,
+                  groups: previewRuleset.groups,
+                  defaultGroupId: previewRuleset.defaultGroupId,
+                }
+              : workflowInput.rulesFile ? { rulesFile: workflowInput.rulesFile } : {}),
+            ...(workflowInput.preview?.selectedGroupIds ? { selectedGroupIds: workflowInput.preview.selectedGroupIds } : {}),
+            ...(workflowInput.scanOffset !== undefined ? { scanOffset: workflowInput.scanOffset } : {}),
+            ...(workflowInput.order ? { order: workflowInput.order } : {}),
+            ...(workflowInput.maxConcurrentFolders !== undefined ? { maxConcurrentFolders: workflowInput.maxConcurrentFolders } : {}),
+            ...(workflowInput.preview?.maxUnplannedHintsPerFolder !== undefined
+              ? { maxUnplannedHintsPerFolder: workflowInput.preview.maxUnplannedHintsPerFolder }
+              : {}),
+          })
+        : undefined;
+
+      return {
+        workflow: {
+          phases: [
+            "discovery",
+            ...(mixedDomainBreakdownEnabled ? ["mixed_domain_breakdown"] : []),
+            "ruleset_patch",
+            ...(previewEnabled ? ["preview"] : []),
+          ],
+          discovery,
+          rulesetPatch,
+          ...(mixedDomainBreakdown ? {
+            mixedDomainBreakdowns: mixedDomainBreakdown.reports,
+            mixedDomainRulesetPatch: mixedDomainBreakdown.rulesetPatch,
+          } : {}),
+          mixedDomainNextSteps,
+          ...(preview ? { preview: compactCoreCampaignWorkflowPreview(preview) } : {}),
+          recommendedNextAction: campaignWorkflowNextAction(preview, rulesetPatch, mixedDomainNextSteps),
+          mutationsAttempted: 0,
+        },
+        ...(preview ? { plans: preview.plans } : {}),
+        mutationsAttempted: 0,
+      };
+    },
+
     async senderBreakdown(breakdownInput) {
       const pageSize = Math.max(breakdownInput.pageSize, 0);
       const maxPages = Math.max(breakdownInput.maxPages, 0);
@@ -2092,6 +2281,278 @@ export function createMailTools(input: CreateMailToolsInput): MailTools {
     },
   };
   return tools;
+}
+
+function buildMixedDomainNextSteps(
+  discovery: Awaited<ReturnType<MailTools["planMailboxGovernanceCampaign"]>>,
+  input: CampaignWorkflowInput,
+): MixedDomainNextStep[] {
+  return discovery.campaign.folderPlans.flatMap((plan) =>
+    plan.candidates
+      .filter((candidate) => candidate.recommendedAction === "break_down_sender")
+      .map((candidate) => {
+        const args = senderBreakdownArgs({
+          folder: plan.folder,
+          domain: candidate.domain,
+          pageSize: input.pageSize,
+          maxPages: input.maxPagesPerFolder,
+          scanOffset: input.scanOffset,
+          order: input.order,
+          ruleGroup: input.ruleGroup,
+        });
+        return {
+          folder: plan.folder,
+          domain: candidate.domain,
+          messageCount: candidate.messageCount,
+          uniqueSenderCount: candidate.uniqueSenderCount,
+          args,
+          command: `qferry ${args.map(quoteCommandValue).join(" ")}`,
+        };
+      })
+  );
+}
+
+async function runMixedDomainBreakdowns(
+  tools: MailTools,
+  discovery: Awaited<ReturnType<MailTools["planMailboxGovernanceCampaign"]>>,
+  input: CampaignWorkflowInput,
+): Promise<{ reports: MixedDomainBreakdownReport[]; rulesetPatch: RulesetPatchDraft }> {
+  const ruleGroup = input.ruleGroup ?? { id: "sender_governance", label: "Sender governance" };
+  const draftSenderRules = input.breakdownMixedDomains?.draftSenderRules === true;
+  const maxDomains = input.breakdownMixedDomains?.maxDomains ?? 5;
+  const maxSenderCandidatesPerDomain = input.breakdownMixedDomains?.maxSenderCandidatesPerDomain ?? DEFAULT_SENDER_GOVERNANCE_CANDIDATE_LIMIT;
+  const minSenderMessageCount = input.breakdownMixedDomains?.minSenderMessageCount ?? 1;
+  const targets = buildMixedDomainNextSteps(discovery, input).slice(0, maxDomains);
+  const existingRules = await loadWorkflowExistingRules(input);
+  let accumulatedRules: ClassificationRule[] = [
+    ...existingRules,
+    ...discovery.rulesetPatch.rulesToAdd,
+    ...(discovery.rulesetPatch.rulesToReplace ?? []),
+  ];
+  const reports: MixedDomainBreakdownReport[] = [];
+  const patches: RulesetPatchDraft[] = [];
+
+  for (const target of targets) {
+    const breakdown = await tools.senderBreakdown({
+      folder: target.folder,
+      pageSize: input.pageSize,
+      maxPages: input.maxPagesPerFolder,
+      fromDomainIncludes: target.domain,
+      maxSenderCandidates: maxSenderCandidatesPerDomain,
+      ...(input.scanOffset !== undefined ? { scanOffset: input.scanOffset } : {}),
+      ...(input.order ? { order: input.order } : {}),
+      ruleGroup,
+    });
+    const selectedCandidates = breakdown.breakdown.senderCandidates
+      .filter((candidate) => candidate.messageCount >= minSenderMessageCount);
+    const patch = draftSenderRules
+      ? buildWorkflowRulesetPatch({
+          candidateRules: selectedCandidates.map((candidate) => candidate.suggestedRule),
+          existingRules: accumulatedRules,
+          ruleGroup,
+          ruleset: discovery.rulesetPatch.ruleset,
+          ...(input.scopeDraftRulesToSourceFolder === false ? {} : { scopeFolder: target.folder }),
+        })
+      : emptyWorkflowRulesetPatch(ruleGroup, discovery.rulesetPatch.ruleset);
+    accumulatedRules = [
+      ...accumulatedRules,
+      ...patch.rulesToAdd,
+      ...(patch.rulesToReplace ?? []),
+    ];
+    patches.push(patch);
+    reports.push({
+      folder: target.folder,
+      domain: target.domain,
+      matchedMessages: breakdown.breakdown.matchedMessages,
+      returnedSenderCandidates: breakdown.breakdown.candidateSummary.returnedSenderCandidates,
+      candidateSenderRules: selectedCandidates.length,
+      selectedSenderRules: patch.rulesToAdd.length,
+      skippedSenderRules: patch.skippedDuplicateRules.length,
+      draftSenderRules,
+    });
+  }
+
+  return {
+    reports,
+    rulesetPatch: mergeWorkflowRulesetPatches(emptyWorkflowRulesetPatch(ruleGroup, discovery.rulesetPatch.ruleset), ...patches),
+  };
+}
+
+async function loadWorkflowExistingRules(input: CampaignWorkflowInput): Promise<ClassificationRule[]> {
+  if (input.rulesFile) {
+    return (await loadPatchableRuleset(input.rulesFile)).rules;
+  }
+  return input.rules ?? [];
+}
+
+async function buildWorkflowPreviewRuleset(
+  input: CampaignWorkflowInput,
+  workflowPatchDraft: RulesetPatchDraft,
+): Promise<ClassificationRulesetJsonDraft | undefined> {
+  if (!input.rulesFile || input.applyRulesetPatch === true || !hasWorkflowRulesetPatchChanges(workflowPatchDraft)) {
+    return undefined;
+  }
+  const existing = await loadPatchableRuleset(input.rulesFile);
+  return renderRulesetPatchDraft(workflowPatchDraft, existing);
+}
+
+function emptyWorkflowRulesetPatch(
+  ruleGroup: ClassificationGroup,
+  ruleset: RulesetPatchDraft["ruleset"],
+): RulesetPatchDraft {
+  return {
+    groupToEnsure: ruleGroup,
+    candidateRuleCount: 0,
+    rulesToAdd: [],
+    skippedDuplicateRules: [],
+    ruleset,
+  };
+}
+
+function hasWorkflowRulesetPatchChanges(patch: RulesetPatchDraft): boolean {
+  return patch.rulesToAdd.length > 0 || (patch.rulesToReplace?.length ?? 0) > 0;
+}
+
+function mergeWorkflowRulesetPatches(...patches: Array<RulesetPatchDraft | undefined>): RulesetPatchDraft {
+  const definedPatches = patches.filter((patch): patch is RulesetPatchDraft => patch !== undefined);
+  const [firstPatch] = definedPatches;
+  if (!firstPatch) {
+    throw new Error("QFerry cannot merge an empty ruleset patch list");
+  }
+  const merged: RulesetPatchDraft = {
+    groupToEnsure: firstPatch.groupToEnsure,
+    candidateRuleCount: definedPatches.reduce((sum, patch) => sum + patch.candidateRuleCount, 0),
+    rulesToReplace: definedPatches.flatMap((patch) => patch.rulesToReplace ?? []),
+    rulesToAdd: definedPatches.flatMap((patch) => patch.rulesToAdd),
+    skippedDuplicateRules: definedPatches.flatMap((patch) => patch.skippedDuplicateRules),
+    ruleset: definedPatches.find((patch) => patch.ruleset)?.ruleset,
+  };
+  return {
+    ...merged,
+    changelog: formatRulesetPatchChangelog(merged),
+  };
+}
+
+function buildWorkflowRulesetPatch(input: {
+  candidateRules: ClassificationRule[];
+  existingRules: ClassificationRule[];
+  ruleGroup: ClassificationGroup;
+  ruleset?: RulesetPatchDraft["ruleset"];
+  scopeFolder?: string;
+}): RulesetPatchDraft {
+  const selectedRules = input.candidateRules
+    .map((rule) => input.scopeFolder ? scopeWorkflowRuleToSourceFolder(rule, input.scopeFolder) : rule);
+  const rulesToAdd: ClassificationRule[] = [];
+  const skippedDuplicateRules: RulesetPatchDraft["skippedDuplicateRules"] = [];
+
+  for (const rule of selectedRules) {
+    const duplicate = input.existingRules.find((existingRule) => workflowRuleCoversCandidate(existingRule, rule));
+    if (duplicate) {
+      skippedDuplicateRules.push({
+        ruleId: duplicate.id,
+        reason: "match already covered by existing rule",
+        match: duplicate.match,
+      });
+    } else if (!rulesToAdd.some((existingRule) => workflowRuleCoversCandidate(existingRule, rule))) {
+      rulesToAdd.push(rule);
+    }
+  }
+
+  return {
+    groupToEnsure: input.ruleGroup,
+    candidateRuleCount: selectedRules.length,
+    rulesToAdd,
+    skippedDuplicateRules,
+    ruleset: input.ruleset,
+  };
+}
+
+function scopeWorkflowRuleToSourceFolder(rule: ClassificationRule, folder: string): ClassificationRule {
+  return {
+    ...rule,
+    id: `${rule.id}-in-${scopedRuleIdSuffix(folder)}`,
+    match: {
+      ...rule.match,
+      folderEquals: folder,
+    },
+  };
+}
+
+function workflowRuleCoversCandidate(existing: ClassificationRule, candidate: ClassificationRule): boolean {
+  return existing.groupId === candidate.groupId && workflowRuleMatchCovers(existing.match, candidate.match);
+}
+
+function workflowRuleMatchCovers(
+  existing: ClassificationRule["match"],
+  candidate: ClassificationRule["match"],
+): boolean {
+  return workflowMatchFieldCovers(existing.fromIncludes, candidate.fromIncludes)
+    && workflowMatchFieldCovers(existing.fromDomainIncludes, candidate.fromDomainIncludes)
+    && workflowMatchFieldCovers(existing.subjectIncludes, candidate.subjectIncludes)
+    && workflowMatchFieldCovers(existing.snippetIncludes, candidate.snippetIncludes)
+    && workflowMatchFieldCovers(existing.folderEquals, candidate.folderEquals)
+    && workflowMatchFieldCovers(existing.hasFlag, candidate.hasFlag);
+}
+
+function workflowMatchFieldCovers(existing: string | undefined, candidate: string | undefined): boolean {
+  return existing === undefined || normalizeOptional(existing) === normalizeOptional(candidate);
+}
+
+function senderBreakdownArgs(input: {
+  folder: string;
+  domain: string;
+  pageSize: number;
+  maxPages: number;
+  scanOffset?: number;
+  order?: "newest" | "oldest";
+  ruleGroup?: ClassificationGroup;
+}): string[] {
+  return [
+    "sender-breakdown",
+    "--folder",
+    input.folder,
+    "--from-domain-includes",
+    input.domain,
+    "--page-size",
+    String(input.pageSize),
+    "--max-pages",
+    String(input.maxPages),
+    ...(input.scanOffset !== undefined ? ["--scan-offset", String(input.scanOffset)] : []),
+    ...(input.order ? ["--order", input.order] : []),
+    ...(input.ruleGroup ? [
+      "--group-id",
+      input.ruleGroup.id,
+      "--group-label",
+      input.ruleGroup.label,
+      ...(input.ruleGroup.target ? ["--target-folder", input.ruleGroup.target.folder] : []),
+    ] : []),
+  ];
+}
+
+function quoteCommandValue(value: string): string {
+  return JSON.stringify(value);
+}
+
+function compactCoreCampaignWorkflowPreview(
+  result: Awaited<ReturnType<MailTools["rulesetGovernanceCampaignPreview"]>>,
+): CampaignWorkflowReport["preview"] {
+  return {
+    campaign: result.campaign,
+    ...(result.ruleset ? { ruleset: result.ruleset } : {}),
+    mutationsAttempted: 0,
+  };
+}
+
+function campaignWorkflowNextAction(
+  preview: Awaited<ReturnType<MailTools["rulesetGovernanceCampaignPreview"]>> | undefined,
+  rulesetPatch: { addedRuleCount?: number; replacedRuleCount?: number },
+  mixedDomainNextSteps: MixedDomainNextStep[],
+): string {
+  if (preview?.campaign.recommendedNextAction === "confirm_plans") return "review_preview_plans";
+  if (preview?.campaign.recommendedNextAction === "review_rules") return "improve_ruleset";
+  if ((rulesetPatch.addedRuleCount ?? 0) > 0 || (rulesetPatch.replacedRuleCount ?? 0) > 0) return "review_or_apply_ruleset_patch";
+  if (mixedDomainNextSteps.length > 0) return "break_down_mixed_domains";
+  return "stop_low_yield";
 }
 
 function redactRuntimeConfig(config: QFerryRuntimeConfig): QFerryRuntimeConfig {

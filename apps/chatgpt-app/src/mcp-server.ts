@@ -53,14 +53,16 @@ const classificationRuleSchema = z.object({
   }).optional(),
 });
 
+const classificationGroupSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  target: z.object({
+    folder: z.string(),
+  }).optional(),
+});
+
 const rulesetPatchSchema = z.object({
-  groupToEnsure: z.object({
-    id: z.string(),
-    label: z.string(),
-    target: z.object({
-      folder: z.string(),
-    }).optional(),
-  }),
+  groupToEnsure: classificationGroupSchema,
   candidateRuleCount: z.number().int().min(0),
   rulesToReplace: z.array(classificationRuleSchema).optional(),
   rulesToAdd: z.array(classificationRuleSchema),
@@ -352,13 +354,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         selectedSenderDomains: z.array(z.string()).optional(),
         selectedFromIncludes: z.array(z.string()).optional(),
         maxDomainCandidates: z.number().int().min(0).max(100).optional(),
-        ruleGroup: z.object({
-          id: z.string(),
-          label: z.string(),
-          target: z.object({
-            folder: z.string(),
-          }).optional(),
-        }).optional(),
+        ruleGroup: classificationGroupSchema.optional(),
         rules: z.array(classificationRuleSchema).optional(),
         rulesFile: z.string().optional(),
       },
@@ -385,13 +381,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         minMessageCount: z.number().int().min(1).max(500).optional(),
         maxCandidates: z.number().int().min(0).max(100).optional(),
         maxDistinctSendersForDomainRule: z.number().int().min(1).max(100).optional(),
-        ruleGroup: z.object({
-          id: z.string(),
-          label: z.string(),
-          target: z.object({
-            folder: z.string(),
-          }).optional(),
-        }).optional(),
+        ruleGroup: classificationGroupSchema.optional(),
         rules: z.array(classificationRuleSchema).optional(),
         rulesFile: z.string().optional(),
       },
@@ -417,19 +407,59 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         maxDistinctSendersForDomainRule: z.number().int().min(1).max(100).optional(),
         maxConcurrentFolders: z.number().int().min(1).max(10).optional(),
         scopeDraftRulesToSourceFolder: z.boolean().optional(),
-        ruleGroup: z.object({
-          id: z.string(),
-          label: z.string(),
-          target: z.object({
-            folder: z.string(),
-          }).optional(),
-        }).optional(),
+        ruleGroup: classificationGroupSchema.optional(),
         rules: z.array(classificationRuleSchema).optional(),
         rulesFile: z.string().optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => toToolResult(await withMcpAudit("plan_mailbox_governance_campaign", input.runId, input, await tools.planMailboxGovernanceCampaign(input))),
+  );
+
+  server.registerTool(
+    "campaign_workflow",
+    {
+      title: "Campaign workflow",
+      description: "Use this as the high-level GPT workflow for repeatable mailbox governance: discover high-yield candidates, optionally break down mixed domains, draft or apply a local ruleset patch, and preview user-defined group moves in one audited call. It never mutates the mailbox.",
+      inputSchema: {
+        runId: z.string(),
+        folders: z.array(z.string()).min(1).max(50),
+        pageSize: z.number().int().min(1).max(50),
+        maxPagesPerFolder: z.number().int().min(1).max(100),
+        scanOffset: z.number().int().min(0).optional(),
+        order: z.enum(["newest", "oldest"]).optional(),
+        minMessageCount: z.number().int().min(1).max(500).optional(),
+        maxCandidatesPerFolder: z.number().int().min(0).max(100).optional(),
+        maxDistinctSendersForDomainRule: z.number().int().min(1).max(100).optional(),
+        maxConcurrentFolders: z.number().int().min(1).max(10).optional(),
+        scopeDraftRulesToSourceFolder: z.boolean().optional(),
+        ruleGroup: classificationGroupSchema.optional(),
+        rules: z.array(classificationRuleSchema).optional(),
+        rulesFile: z.string().optional(),
+        applyRulesetPatch: z.boolean().default(false),
+        includeRenderedDraft: z.boolean().default(false),
+        breakdownMixedDomains: z.object({
+          enabled: z.boolean().optional(),
+          draftSenderRules: z.boolean().optional(),
+          maxDomains: z.number().int().min(0).max(100).optional(),
+          maxSenderCandidatesPerDomain: z.number().int().min(0).max(100).optional(),
+          minSenderMessageCount: z.number().int().min(1).max(100_000).optional(),
+        }).optional(),
+        preview: z.object({
+          enabled: z.boolean().optional(),
+          action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]).optional(),
+          maxMessageRefsPerGroup: z.number().int().min(0).max(1_000).optional(),
+          selectedGroupIds: z.array(z.string()).optional(),
+          maxUnplannedHintsPerFolder: z.number().int().min(0).max(50).optional(),
+        }).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => {
+      const result = registerOperationPlans(await tools.campaignWorkflow(input), planRegistry);
+      const response = compactRulesetGovernanceCampaignPreview(result);
+      return toToolResult(await withMcpAudit("campaign_workflow", input.runId, input, response));
+    },
   );
 
   server.registerTool(
@@ -446,13 +476,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         fromDomainIncludes: z.string().optional(),
         fromIncludes: z.string().optional(),
         maxSenderCandidates: z.number().int().min(0).max(100).optional(),
-        ruleGroup: z.object({
-          id: z.string(),
-          label: z.string(),
-          target: z.object({
-            folder: z.string(),
-          }).optional(),
-        }).optional(),
+        ruleGroup: classificationGroupSchema.optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
@@ -533,6 +557,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
         defaultGroupId: z.string().optional(),
         rules: z.array(classificationRuleSchema).optional(),
+        groups: z.array(classificationGroupSchema).optional(),
         rulesFile: z.string().optional(),
         selectedGroupIds: z.array(z.string()).optional(),
         scanOffset: z.number().int().min(0).optional(),
@@ -564,6 +589,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         action: z.enum(["move", "mark_read", "mark_unread", "create_folder"]),
         defaultGroupId: z.string().optional(),
         rules: z.array(classificationRuleSchema).optional(),
+        groups: z.array(classificationGroupSchema).optional(),
         rulesFile: z.string().optional(),
         selectedGroupIds: z.array(z.string()).optional(),
         scanOffset: z.number().int().min(0).optional(),
@@ -853,7 +879,9 @@ function summarizeMcpToolResult(structuredContent: object): Record<string, unkno
   const plans = content.plans as Array<Record<string, unknown>> | undefined;
   const result = content.result as Record<string, unknown> | undefined;
   const preview = content.preview as Record<string, unknown> | undefined;
-  const campaign = content.campaign as Record<string, unknown> | undefined;
+  const workflow = content.workflow as Record<string, unknown> | undefined;
+  const workflowPreview = workflow?.preview as Record<string, unknown> | undefined;
+  const campaign = (content.campaign ?? workflowPreview?.campaign) as Record<string, unknown> | undefined;
   const report = content.report as Record<string, unknown> | undefined;
   const operationPlanIds = Array.isArray(plans)
     ? plans.map((entry) => entry.operationPlanId).filter((entry) => typeof entry === "string")
