@@ -8,6 +8,7 @@ import {
   createMailProviderFromRuntimeConfig,
   JsonlTraceWriter,
   loadQFerryRuntimeConfigSync,
+  type ExecuteCleanupResult,
   type MailProvider,
   type MessageRef,
   type OperationPlan,
@@ -669,8 +670,8 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
           expiresAt: new Date(Date.now() + PLAN_TTL_MS).toISOString(),
           mutationsAttempted: 0,
         };
-        const response = compactOperationPlanResult(result);
-        return toToolResult(await withMcpAudit("confirm_cleanup_plan", confirmed.runId, input, response, result));
+        const response = compactConfirmedOperationPlanResult(result);
+        return toToolResult(await withMcpAudit("confirm_cleanup_plan", confirmed.runId, input, response));
       });
     },
   );
@@ -709,13 +710,8 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
               await planStore.delete(input.operationPlanId);
               await planStore.markConsumed(input.operationPlanId);
             }
-            return toToolResult(
-              await withMcpAudit("execute_cleanup", stored.plan.runId, input, result, {
-                ...result,
-                preview: stored.previewSummary,
-                plan: { target: stored.plan.target },
-              }),
-            );
+            const response = compactExecuteCleanupResult(result.result);
+            return toToolResult(await withMcpAudit("execute_cleanup", stored.plan.runId, input, response));
           } catch (error) {
             const attemptedMessages = maxMessages === undefined
               ? stored.plan.messageRefs.length
@@ -731,8 +727,6 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
                 remainingMessages: stored.plan.messageRefs.length,
                 errorMessage: errorToMessage(error),
               },
-              preview: stored.previewSummary,
-              plan: { target: stored.plan.target },
             }).catch(() => {});
             await planStore.delete(input.operationPlanId);
             await planStore.markConsumed(input.operationPlanId);
@@ -804,6 +798,32 @@ function compactOperationPlanResult<T extends { plan?: OperationPlan; plans?: Op
     ...(plan ? { plan: compactOperationPlan(plan) } : {}),
     ...(plans ? { plans: plans.map(compactOperationPlan) } : {}),
   };
+}
+
+function compactConfirmedOperationPlanResult<T extends { plan: OperationPlan; expiresAt: string; mutationsAttempted: number }>(
+  result: T,
+): {
+  plan: Pick<OperationPlan, "operationPlanId" | "runId" | "status" | "action" | "confirmationRequired"> & { messageRefCount: number };
+  expiresAt: string;
+  mutationsAttempted: number;
+} {
+  return {
+    plan: {
+      operationPlanId: result.plan.operationPlanId,
+      runId: result.plan.runId,
+      status: result.plan.status,
+      action: result.plan.action,
+      confirmationRequired: result.plan.confirmationRequired,
+      messageRefCount: result.plan.messageRefs.length,
+    },
+    expiresAt: result.expiresAt,
+    mutationsAttempted: result.mutationsAttempted,
+  };
+}
+
+function compactExecuteCleanupResult(result: ExecuteCleanupResult): { result: Omit<ExecuteCleanupResult, "batchAudit" | "reconciliations"> } {
+  const { batchAudit: _batchAudit, reconciliations: _reconciliations, ...compactResult } = result;
+  return { result: compactResult };
 }
 
 async function instrumentMcpTool<T>(

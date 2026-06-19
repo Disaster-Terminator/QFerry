@@ -1001,10 +1001,12 @@ describe("QFerry ChatGPT App MCP server", () => {
     const executeAudit = execute.structuredContent as { audit?: { summaryPath?: string; tracePath?: string } };
     const executeSummary = await readFile(executeAudit.audit?.summaryPath ?? "", "utf8");
     expect(executeSummary).toContain("- lastTool: execute_cleanup");
-    expect(executeSummary).toContain('- mailboxSnapshot: {"folder":"INBOX","exists":2385,"uidValidity":"uv-preview"}');
-    expect(executeSummary).toContain('"security_or_account":1');
+    expect(executeSummary).not.toContain('"uidValidity":"uv-preview"');
+    expect(executeSummary).not.toContain("security_or_account");
     const executeTrace = await readFile(executeAudit.audit?.tracePath ?? "", "utf8");
-    expect(executeTrace).toContain('"mailboxSnapshot":{"folder":"INBOX","exists":2385,"uidValidity":"uv-preview"}');
+    const executeTraceLine = executeTrace.split("\n").find((line) => line.includes('"toolName":"execute_cleanup"')) ?? "";
+    expect(executeTraceLine).not.toContain("mailboxSnapshot");
+    expect(executeTraceLine).not.toContain("security_or_account");
 
     await client.close();
     await server.close();
@@ -1961,14 +1963,10 @@ describe("QFerry ChatGPT App MCP server", () => {
         status: "executed",
         moved: 1,
         reconciliationStatus: "matched",
-        batchAudit: {
-          count: 1,
-          folders: [
-            { folder: "INBOX", count: 1, firstUid: "1", lastUid: "1" },
-          ],
-        },
       },
     });
+    expect(JSON.stringify(execute.structuredContent)).not.toContain("batchAudit");
+    expect(JSON.stringify(execute.structuredContent)).not.toContain("reconciliations");
     const audit = execute.structuredContent as { audit?: { tracePath?: string; summaryPath?: string } };
     expect(audit.audit?.tracePath).toBe(join(traceRoot, "logs", "runs", "run-mcp-trace-execute.jsonl"));
     expect(audit.audit?.summaryPath).toBe(join(traceRoot, "artifacts", "e2e", "run-mcp-trace-execute", "summary.md"));
@@ -1978,10 +1976,10 @@ describe("QFerry ChatGPT App MCP server", () => {
     const summary = await readFile(audit.audit?.summaryPath ?? "", "utf8");
     expect(summary).toContain("# QFerry MCP Audit run-mcp-trace-execute");
     expect(summary).toContain("- lastTool: execute_cleanup");
-    expect(summary).toContain('- target: {"folder":"Archive"}');
     expect(summary).toContain("- reconciliationStatus: matched");
-    expect(summary).toContain("- batchAudit:");
-    expect(summary).toContain("- reconciliations:");
+    expect(summary).not.toContain('"folder":"Archive"');
+    expect(summary).not.toContain("firstUid");
+    expect(summary).not.toContain("lastUid");
 
     await client.close();
     await server.close();
