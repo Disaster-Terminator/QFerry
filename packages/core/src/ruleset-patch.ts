@@ -1,7 +1,8 @@
 import type { ClassificationRule } from "./classification.js";
 import { loadClassificationRuleset, parseClassificationRuleset, type ClassificationGroup, type ClassificationRuleset, type ClassificationRulesetMetadata } from "./ruleset.js";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
-import { dirname, extname, resolve } from "node:path";
+import os from "node:os";
+import { basename, dirname, extname, join, resolve } from "node:path";
 
 export interface RulesetPatchDraft {
   groupToEnsure: ClassificationGroup;
@@ -116,12 +117,13 @@ export function formatRulesetPatchChangelog(patch: RulesetPatchDraft): string {
 export async function applyRulesetPatchDraft(
   input: ApplyRulesetPatchDraftInput,
 ): Promise<ApplyRulesetPatchDraftResult> {
-  const existing = await loadPatchableRuleset(input.rulesFile);
+  const rulesFile = resolveRulesFilePath(input.rulesFile);
+  const existing = await loadPatchableRuleset(rulesFile);
   const changelog = formatRulesetPatchChangelog(input.patch);
   if (!hasRulesetPatchChanges(input.patch)) {
     return {
       applied: false,
-      rulesFile: input.rulesFile,
+      rulesFile,
       beforeRuleCount: existing.rules.length,
       afterRuleCount: existing.rules.length,
       addedRuleCount: 0,
@@ -135,13 +137,13 @@ export async function applyRulesetPatchDraft(
   parseClassificationRuleset(renderedDraft, "ruleset patch draft");
 
   if (input.apply) {
-    const safeRulesFile = await resolveWritableRulesFile(input.rulesFile);
+    const safeRulesFile = await resolveWritableRulesFile(rulesFile);
     await writeFile(safeRulesFile, `${JSON.stringify(renderedDraft, null, 2)}\n`, "utf8");
   }
 
   return {
     applied: input.apply,
-    rulesFile: input.rulesFile,
+    rulesFile,
     beforeRuleCount: existing.rules.length,
     afterRuleCount: renderedDraft.rules.length,
     addedRuleCount: input.patch.rulesToAdd.length,
@@ -176,18 +178,19 @@ function assertReplacementRuleIdsAreUnambiguous(
 }
 
 export async function loadPatchableRuleset(rulesFile: string): Promise<ClassificationRuleset> {
+  const resolvedRulesFile = resolveRulesFilePath(rulesFile);
   try {
-    return await loadClassificationRuleset(rulesFile);
+    return await loadClassificationRuleset(resolvedRulesFile);
   } catch (error) {
     if (isMissing(error)) {
-      return emptyPatchableRuleset(rulesFile);
+      return emptyPatchableRuleset(resolvedRulesFile);
     }
     if (!(error instanceof Error) || error.message !== "QFerry ruleset must contain at least one rule") {
       throw error;
     }
   }
 
-  const rawText = await readFile(rulesFile, "utf8");
+  const rawText = await readFile(resolvedRulesFile, "utf8");
   const raw = JSON.parse(rawText) as unknown;
   if (raw === null || Array.isArray(raw) || typeof raw !== "object") {
     throw new Error("QFerry ruleset must be a JSON object");
@@ -204,7 +207,7 @@ export async function loadPatchableRuleset(rulesFile: string): Promise<Classific
       groupId: draft.defaultGroupId,
       match: { subjectIncludes: "__qferry_bootstrap_placeholder__" },
     }],
-  }, rulesFile);
+  }, resolvedRulesFile);
 
   return {
     ...validated,
@@ -217,7 +220,7 @@ export async function loadPatchableRuleset(rulesFile: string): Promise<Classific
 }
 
 async function resolveWritableRulesFile(rulesFile: string): Promise<string> {
-  const resolved = resolve(rulesFile);
+  const resolved = resolveRulesFilePath(rulesFile);
   if (extname(resolved) !== ".json") {
     throw new Error("QFerry can only apply ruleset patches to a JSON rules file");
   }
@@ -233,6 +236,31 @@ async function resolveWritableRulesFile(rulesFile: string): Promise<string> {
   }
 
   return file;
+}
+
+export function resolveRulesFilePath(rulesFile: string): string {
+  const resolved = resolve(rulesFile);
+  const stateRoot = process.env.QFERRY_STATE_DIR?.trim();
+  if (!stateRoot) return resolved;
+
+  for (const defaultStateRoot of defaultQFerryStateRoots()) {
+    if (resolved === defaultStateRoot || resolved.startsWith(`${defaultStateRoot}/`)) {
+      const relative = resolved === defaultStateRoot ? basename(resolved) : resolved.slice(defaultStateRoot.length + 1);
+      return resolve(join(stateRoot, relative));
+    }
+  }
+
+  return resolved;
+}
+
+function defaultQFerryStateRoots(): string[] {
+  if (process.platform === "win32") {
+    return [resolve(join(process.env.LOCALAPPDATA || os.homedir(), "qferry"))];
+  }
+  return [
+    resolve(join(process.env.XDG_STATE_HOME || join(os.homedir(), ".local", "state"), "qferry")),
+    "/root/.local/state/qferry",
+  ];
 }
 
 function emptyPatchableRuleset(rulesFile: string): ClassificationRuleset {

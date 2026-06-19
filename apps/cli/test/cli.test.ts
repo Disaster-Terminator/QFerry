@@ -198,6 +198,106 @@ describe("qferry cli", () => {
     expect(verbose.json.result.renderedDraft.rules).toHaveLength(1);
   });
 
+  it("previews local rules without exposing message refs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cli-apply-rules-preview-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "apply-rules-preview",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "archive", label: "Archive", target: { folder: "Archive" } },
+      ],
+      rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+    }), "utf8");
+
+    const result = await invoke([
+      "apply-rules",
+      "--run-id",
+      "cli-apply-rules-preview",
+      "--folder",
+      "INBOX",
+      "--rules-file",
+      rulesFile,
+      "--selected-group-id",
+      "archive",
+      "--page-size",
+      "10",
+      "--max-pages-per-folder",
+      "1",
+      "--max-message-refs-per-group",
+      "5",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.json).toMatchObject({
+      ok: true,
+      command: "apply-rules",
+      runId: "cli-apply-rules-preview",
+      result: {
+        mode: "preview",
+        mutationsAttempted: 0,
+      },
+    });
+    expect(JSON.stringify(result.json)).not.toContain("messageRefs");
+    expect(JSON.stringify(result.json)).not.toContain("\"uid\"");
+  });
+
+  it("executes local rules only when explicitly requested", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cli-apply-rules-execute-"));
+    const rulesFile = join(dir, "qferry.rules.json");
+    await writeFile(rulesFile, JSON.stringify({
+      version: "apply-rules-execute",
+      defaultGroupId: "review",
+      groups: [
+        { id: "review", label: "Review" },
+        { id: "archive", label: "Archive", target: { folder: "Archive" } },
+      ],
+      rules: [{ id: "newsletter", groupId: "archive", match: { fromIncludes: "newsletter@" } }],
+    }), "utf8");
+
+    const result = await invoke([
+      "apply-rules",
+      "--run-id",
+      "cli-apply-rules-execute",
+      "--folder",
+      "INBOX",
+      "--rules-file",
+      rulesFile,
+      "--selected-group-id",
+      "archive",
+      "--page-size",
+      "10",
+      "--max-pages-per-folder",
+      "1",
+      "--max-message-refs-per-group",
+      "5",
+      "--max-messages-per-plan",
+      "1",
+      "--execute",
+    ], { env: { QFERRY_FIXTURE_MUTATION: "1" } });
+
+    expect(result.code).toBe(0);
+    expect(result.json.result).toMatchObject({
+      mode: "execute",
+      planCount: 1,
+      attemptedMessages: 1,
+      moved: 1,
+      mutationsAttempted: 1,
+      executions: [
+        {
+          status: "executed",
+          action: "move",
+          attemptedMessages: 1,
+          moved: 1,
+          mutationsAttempted: 1,
+        },
+      ],
+    });
+    expect(JSON.stringify(result.json)).not.toContain("messageRefs");
+    expect(JSON.stringify(result.json)).not.toContain("\"uid\"");
+  });
+
   it("runs a campaign workflow with dry-run ruleset patch and preview audit", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-cli-workflow-"));
     const traceRoot = await mkdtemp(join(tmpdir(), "qferry-cli-workflow-trace-"));

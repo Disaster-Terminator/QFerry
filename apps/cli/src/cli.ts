@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   applyRulesetPatchDraft,
+  confirmOperationPlan,
   createMailProviderFromRuntimeConfig,
   createMailTools,
   createRunId,
@@ -109,6 +110,26 @@ export async function runCli(args: string[] = process.argv.slice(2), options: Cl
         const resolvedInput = { ...input, runId };
         cliInput = resolvedInput;
         result = compactRulesetGovernanceCampaignPreview(await tools.rulesetGovernanceCampaignPreview(resolvedInput));
+        break;
+      }
+      case "apply-rules": {
+        runId = validateRunId(optionalString(parsed.flags, "run-id") ?? createRunId("qferry-cli-apply-rules"));
+        const input = applyRulesInput(parsed.flags, runId);
+        const execute = hasFlag(parsed.flags, "execute");
+        const maxMessagesPerPlan = optionalInteger(parsed.flags, "max-messages-per-plan");
+        cliInput = {
+          ...input,
+          execute,
+          ...(maxMessagesPerPlan !== undefined ? { maxMessagesPerPlan } : {}),
+        };
+        const preview = await tools.rulesetGovernanceCampaignPreview(input);
+        result = execute
+          ? await executeRulesetPreview(tools, preview, maxMessagesPerPlan)
+          : {
+              mode: "preview",
+              preview: compactRulesetGovernanceCampaignPreview(preview),
+              mutationsAttempted: 0,
+            };
         break;
       }
       case "campaign-workflow": {
@@ -420,6 +441,71 @@ function senderBreakdownInput(flags: ParsedArgs["flags"]): SenderBreakdownInput 
   };
 }
 
+function applyRulesInput(flags: ParsedArgs["flags"], runId: string): RulesetGovernanceCampaignPreviewInput {
+  const folders = requiredStringList(flags, "folder");
+  const selectedGroupIds = optionalStringList(flags, "selected-group-id");
+  const maxConcurrentFolders = optionalInteger(flags, "max-concurrent-folders");
+  const scanOffset = optionalInteger(flags, "scan-offset");
+  const order = optionalString(flags, "order");
+  if (order !== undefined && order !== "newest" && order !== "oldest") {
+    throw new Error("--order must be newest or oldest");
+  }
+  return {
+    runId,
+    folders,
+    pageSize: optionalInteger(flags, "page-size") ?? DEFAULT_PAGE_SIZE,
+    maxPagesPerFolder: optionalInteger(flags, "max-pages-per-folder") ?? DEFAULT_MAX_PAGES,
+    maxMessageRefsPerGroup: optionalInteger(flags, "max-message-refs-per-group") ?? 50,
+    action: "move",
+    rulesFile: requiredString(flags, "rules-file"),
+    ...(selectedGroupIds.length > 0 ? { selectedGroupIds } : {}),
+    ...(maxConcurrentFolders !== undefined ? { maxConcurrentFolders } : {}),
+    ...(scanOffset !== undefined ? { scanOffset } : {}),
+    ...(order ? { order } : {}),
+  };
+}
+
+async function executeRulesetPreview(
+  tools: MailTools,
+  preview: Awaited<ReturnType<MailTools["rulesetGovernanceCampaignPreview"]>>,
+  maxMessagesPerPlan?: number,
+): Promise<CliResult> {
+  const executions = [];
+  for (const plan of preview.plans) {
+    const confirmed = confirmOperationPlan(plan, plan.operationPlanId);
+    const execution = await tools.executeCleanup({
+      plan: confirmed,
+      ...(maxMessagesPerPlan !== undefined ? { maxMessages: maxMessagesPerPlan } : {}),
+    });
+    executions.push(compactExecutionResult(execution.result));
+  }
+
+  const moved = executions.reduce((sum, execution) => sum + execution.moved, 0);
+  const attemptedMessages = executions.reduce((sum, execution) => sum + execution.attemptedMessages, 0);
+  const mutationsAttempted = executions.reduce((sum, execution) => sum + execution.mutationsAttempted, 0);
+  return {
+    mode: "execute",
+    planCount: preview.plans.length,
+    attemptedMessages,
+    moved,
+    mutationsAttempted,
+    executions,
+  };
+}
+
+function compactExecutionResult(result: Awaited<ReturnType<MailTools["executeCleanup"]>>["result"]) {
+  return {
+    operationPlanId: result.operationPlanId,
+    status: result.status,
+    action: result.action,
+    attemptedMessages: result.attemptedMessages,
+    moved: result.moved ?? 0,
+    remainingMessages: result.remainingMessages,
+    mutationsAttempted: result.mutationsAttempted,
+    reconciliationStatus: result.reconciliationStatus,
+  };
+}
+
 function optionalRuleGroup(flags: ParsedArgs["flags"]): ClassificationGroup | undefined {
   const id = optionalString(flags, "group-id");
   const label = optionalString(flags, "group-label");
@@ -473,6 +559,22 @@ function requiredString(flags: ParsedArgs["flags"], name: string): string {
   return value;
 }
 
+function requiredStringList(flags: ParsedArgs["flags"], name: string): string[] {
+  const values = optionalStringList(flags, name);
+  if (values.length === 0) {
+    throw new Error(`Missing required flag --${name}`);
+  }
+  return values;
+}
+
+function optionalStringList(flags: ParsedArgs["flags"], name: string): string[] {
+  const value = flags[name];
+  if (value === undefined || value === false) return [];
+  if (Array.isArray(value)) return value.filter((entry) => entry.trim().length > 0);
+  if (value === true) return ["true"];
+  return value.trim().length > 0 ? [value] : [];
+}
+
 function optionalString(flags: ParsedArgs["flags"], name: string): string | undefined {
   const value = flags[name];
   if (value === undefined || value === false) return undefined;
@@ -520,6 +622,7 @@ function usage(): string {
     "  qferry mailbox-campaign --input campaign.json",
     "  qferry ruleset-preview --input preview.json",
     "  qferry ruleset-campaign-preview --input campaign-preview.json",
+    "  qferry apply-rules --folder INBOX --rules-file qferry.rules.json [--selected-group-id group] [--execute]",
     "  qferry campaign-workflow --input workflow.json",
     "  qferry apply-ruleset-patch --rules-file qferry.rules.json --patch-file patch.json [--apply]",
   ].join("\n");

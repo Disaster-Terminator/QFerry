@@ -3049,6 +3049,63 @@ describe("QFerry ChatGPT App MCP server", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it("remaps default root state rules paths through the MCP server", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "qferry-mcp-state-root-"));
+    process.env.QFERRY_STATE_DIR = stateRoot;
+    const rulesFile = "/root/.local/state/qferry/governance-rules.json";
+    const resolvedRulesFile = join(stateRoot, "governance-rules.json");
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "apply_ruleset_patch",
+      arguments: {
+        rulesFile,
+        apply: true,
+        patch: {
+          groupToEnsure: { id: "github_account_security", label: "GitHub account security", target: { folder: "其他文件夹/GitHub账号安全" } },
+          candidateRuleCount: 1,
+          rulesToAdd: [
+            {
+              id: "github-security-oauth",
+              groupId: "github_account_security",
+              match: { fromDomainIncludes: "github.com", subjectIncludes: "OAuth" },
+            },
+          ],
+          skippedDuplicateRules: [],
+        },
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      applied: true,
+      rulesFile: resolvedRulesFile,
+      beforeRuleCount: 0,
+      afterRuleCount: 1,
+      addedRuleCount: 1,
+    });
+    expect((await stat(resolvedRulesFile)).isFile()).toBe(true);
+    expect(JSON.parse(await readFile(resolvedRulesFile, "utf8"))).toMatchObject({
+      rules: [
+        {
+          id: "github-security-oauth",
+          groupId: "github_account_security",
+          match: { fromDomainIncludes: "github.com", subjectIncludes: "OAuth" },
+        },
+      ],
+    });
+
+    await client.close();
+    await server.close();
+    await rm(stateRoot, { recursive: true, force: true });
+  });
+
   it("dry-runs ruleset rule replacement through the MCP server", async () => {
     const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
     const { join } = await import("node:path");

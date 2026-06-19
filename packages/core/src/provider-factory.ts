@@ -22,6 +22,9 @@ export function createMailProviderFromRuntimeConfig(
   options: CreateMailProviderFromRuntimeConfigOptions = {},
 ): MailProvider {
   if (runtimeConfig.provider !== "qqmail") {
+    if (options.env?.QFERRY_FIXTURE_MUTATION === "1") {
+      return FixtureMailProvider.mutableDemo();
+    }
     return FixtureMailProvider.demo();
   }
 

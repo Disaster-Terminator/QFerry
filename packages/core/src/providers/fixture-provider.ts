@@ -14,6 +14,7 @@ export class FixtureMailProvider implements MailProvider {
   private constructor(
     private readonly mailboxes: MailboxInfo[],
     private readonly messages: FixtureMessage[],
+    private readonly mutable = false,
   ) {}
 
   static demo(): FixtureMailProvider {
@@ -54,6 +55,11 @@ export class FixtureMailProvider implements MailProvider {
     );
   }
 
+  static mutableDemo(): FixtureMailProvider {
+    const provider = FixtureMailProvider.demo();
+    return new FixtureMailProvider(provider.mailboxes, provider.messages, true);
+  }
+
   async listMailboxes(): Promise<MailboxInfo[]> {
     return this.mailboxes;
   }
@@ -65,8 +71,8 @@ export class FixtureMailProvider implements MailProvider {
       supportsListMailboxes: true,
       supportsMetadataScan: true,
       supportsFetchMessage: true,
-      supportsMutation: false,
-      mutationActions: [],
+      supportsMutation: this.mutable,
+      mutationActions: this.mutable ? ["move"] : [],
       maxRecommendedScanLimit: 10,
     };
   }
@@ -100,5 +106,24 @@ export class FixtureMailProvider implements MailProvider {
     }
 
     return message;
+  }
+
+  async moveMessages(refs: MessageRef[], targetFolder: string): Promise<{ moved: number }> {
+    if (!this.mutable) {
+      throw new Error("Fixture provider mutation is disabled");
+    }
+    if (!this.mailboxes.some((mailbox) => mailbox.path === targetFolder)) {
+      this.mailboxes.push({ path: targetFolder, delimiter: "/", flags: [] });
+    }
+    const refKeys = new Set(refs.map((ref) => `${ref.provider}:${ref.accountAlias}:${ref.folder}:${ref.uid}`));
+    let moved = 0;
+    for (const message of this.messages) {
+      const key = `${message.ref.provider}:${message.ref.accountAlias}:${message.ref.folder}:${message.ref.uid}`;
+      if (refKeys.has(key)) {
+        message.ref = { ...message.ref, folder: targetFolder };
+        moved += 1;
+      }
+    }
+    return { moved };
   }
 }

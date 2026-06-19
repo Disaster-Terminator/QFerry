@@ -8,6 +8,7 @@ import {
   applyRulesetPatchDraft,
   formatRulesetPatchChangelog,
   renderRulesetPatchDraft,
+  resolveRulesFilePath,
 } from "../src/ruleset-patch.js";
 
 describe("ruleset patch rendering", () => {
@@ -236,6 +237,46 @@ describe("ruleset patch rendering", () => {
         },
       ],
     });
+  });
+
+  it("remaps default root state rules paths into QFERRY_STATE_DIR", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-state-remap-"));
+    const previousStateDir = process.env.QFERRY_STATE_DIR;
+    const stateDir = join(dir, "state", "qferry");
+    process.env.QFERRY_STATE_DIR = stateDir;
+    const rulesFile = "/root/.local/state/qferry/governance-rules.json";
+    const patch = {
+      groupToEnsure: { id: "github_account_security", label: "GitHub account security", target: { folder: "其他文件夹/GitHub账号安全" } } as const,
+      candidateRuleCount: 1,
+      rulesToAdd: [
+        {
+          id: "github-account-security",
+          groupId: "github_account_security",
+          match: { fromDomainIncludes: "github.com", subjectIncludes: "OAuth" },
+        },
+      ],
+      skippedDuplicateRules: [],
+    };
+
+    try {
+      expect(resolveRulesFilePath(rulesFile)).toBe(join(stateDir, "governance-rules.json"));
+
+      const applied = await applyRulesetPatchDraft({ rulesFile, patch, apply: true });
+
+      expect(applied).toMatchObject({
+        applied: true,
+        rulesFile: join(stateDir, "governance-rules.json"),
+        beforeRuleCount: 0,
+        afterRuleCount: 1,
+      });
+      expect(JSON.parse(await readFile(join(stateDir, "governance-rules.json"), "utf8")).rules).toHaveLength(1);
+    } finally {
+      if (previousStateDir === undefined) {
+        delete process.env.QFERRY_STATE_DIR;
+      } else {
+        process.env.QFERRY_STATE_DIR = previousStateDir;
+      }
+    }
   });
 
   it("bootstraps a local rules file that has groups but no rules", async () => {
