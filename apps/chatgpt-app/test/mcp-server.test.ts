@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -1065,6 +1065,53 @@ describe("QFerry ChatGPT App MCP server", () => {
     await secondClient.close();
     await secondServer.close();
     await rm(planStoreDir, { recursive: true, force: true });
+  });
+
+  it("logs sanitized MCP tool lifecycle entries for preview plans", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "plan_cleanup",
+      arguments: {
+        runId: "mcp-sanitized-lifecycle",
+        folder: "INBOX",
+        limit: 10,
+        action: "move",
+        target: { folder: "Archive" },
+        selectedGroupIds: [],
+        messageRefs: [{ provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "secret-uid-1" }],
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      plan: {
+        status: "preview",
+        messageRefCount: 1,
+      },
+    });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("secret-uid-1");
+
+    const logText = errorSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(logText).toContain('"event":"qferry_mcp_tool_entered"');
+    expect(logText).toContain('"event":"qferry_mcp_tool_completed"');
+    expect(logText).toContain('"toolName":"plan_cleanup"');
+    expect(logText).toContain('"messageRefCount":1');
+    expect(logText).toContain('"operationPlanId":"op_');
+    expect(logText).toContain('"totalPlanMessages":1');
+    expect(logText).not.toContain("secret-uid-1");
+    expect(logText).not.toContain("\"messageRefs\"");
+
+    await client.close();
+    await server.close();
+    errorSpy.mockRestore();
   });
 
   it("initializes the runtime state root when a cloud wrapper starts the MCP server directly", async () => {
@@ -2336,12 +2383,11 @@ describe("QFerry ChatGPT App MCP server", () => {
       plan: {
         status: "preview",
         confirmationRequired: true,
-        messageRefs: [
-          { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
-        ],
+        messageRefCount: 1,
       },
       mutationsAttempted: 0,
     });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("\"messageRefs\"");
 
     await client.close();
     await server.close();
@@ -2509,12 +2555,11 @@ describe("QFerry ChatGPT App MCP server", () => {
       plan: {
         status: "preview",
         confirmationRequired: true,
-        messageRefs: [
-          { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "2" },
-        ],
+        messageRefCount: 1,
       },
       mutationsAttempted: 0,
     });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("\"messageRefs\"");
 
     await client.close();
     await server.close();
@@ -2891,14 +2936,11 @@ describe("QFerry ChatGPT App MCP server", () => {
       },
       plan: {
         status: "preview",
-        messageRefs: expect.arrayContaining([
-          { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "steam-1" },
-          { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "steam-210" },
-        ]),
+        messageRefCount: 210,
       },
       mutationsAttempted: 0,
     });
-    expect((result.structuredContent as { plan: { messageRefs: unknown[] } }).plan.messageRefs).toHaveLength(210);
+    expect(JSON.stringify(result.structuredContent)).not.toContain("\"messageRefs\"");
 
     await client.close();
     await server.close();
