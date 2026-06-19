@@ -91,7 +91,7 @@ const bulkGovernanceCategorySchema = z.enum([
 ]);
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
-const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v2.html";
+const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v3.html";
 const SENSITIVE_CATEGORY_IDS = new Set([
   "security_or_account",
   "github_account_security",
@@ -1163,25 +1163,30 @@ function sensitiveCleanupWidgetHtml(): string {
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 14px;
+      padding: 24px 28px;
       min-width: 280px;
+      overflow: hidden;
     }
     .panel {
       display: grid;
-      gap: 12px;
-      max-width: 560px;
+      gap: 16px;
+      width: 100%;
+      max-width: 620px;
+      min-height: 180px;
     }
     .head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      gap: 16px;
     }
     h1 {
       margin: 0;
-      font-size: 15px;
+      font-size: 18px;
+      line-height: 1.2;
       font-weight: 650;
       letter-spacing: 0;
+      overflow-wrap: anywhere;
     }
     .count {
       font-size: 13px;
@@ -1200,10 +1205,10 @@ function sensitiveCleanupWidgetHtml(): string {
       align-items: center;
       justify-content: space-between;
       gap: 10px;
-      min-height: 32px;
+      min-height: 40px;
       border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
       border-radius: 6px;
-      padding: 6px 8px;
+      padding: 8px 12px;
       font-size: 13px;
     }
     .category span:first-child {
@@ -1216,14 +1221,15 @@ function sensitiveCleanupWidgetHtml(): string {
     .actions {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
       flex-wrap: wrap;
     }
     button {
       appearance: none;
       border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
       border-radius: 6px;
-      padding: 8px 11px;
+      min-height: 40px;
+      padding: 8px 14px;
       font: inherit;
       font-size: 13px;
       cursor: pointer;
@@ -1264,6 +1270,8 @@ function sensitiveCleanupWidgetHtml(): string {
       confirmToken: undefined,
       categories: {},
       totalPlanMessages: 0,
+      completed: false,
+      lastResult: undefined,
     };
     const total = document.getElementById("total");
     const categories = document.getElementById("categories");
@@ -1307,16 +1315,27 @@ function sensitiveCleanupWidgetHtml(): string {
     function hydrate(payload = {}) {
       const meta = metadataFrom(payload);
       const structured = structuredFrom(payload);
-      state.operationPlanId = meta.operationPlanId || structured.operationPlanId || state.operationPlanId;
+      const nextOperationPlanId = meta.operationPlanId || structured.operationPlanId;
+      const samePlan = !nextOperationPlanId || !state.operationPlanId || nextOperationPlanId === state.operationPlanId;
+      if (nextOperationPlanId && state.operationPlanId && nextOperationPlanId !== state.operationPlanId) {
+        state.completed = false;
+        state.lastResult = undefined;
+      }
+      state.operationPlanId = nextOperationPlanId || state.operationPlanId;
       state.confirmToken = meta.confirmToken || structured.confirmToken || state.confirmToken;
       state.categories = meta.categories || structured.categories || state.categories || {};
-      state.totalPlanMessages = structured.totalPlanMessages || meta.totalPlanMessages || Object.values(state.categories).reduce((sum, value) => sum + Number(value || 0), 0);
+      const hydratedTotal = structured.totalPlanMessages ?? meta.totalPlanMessages;
+      state.completed = samePlan ? Boolean(structured.completed ?? meta.completed ?? state.completed) : false;
+      state.lastResult = samePlan ? (structured.lastResult || meta.lastResult || state.lastResult) : undefined;
+      state.totalPlanMessages = state.completed
+        ? 0
+        : hydratedTotal ?? Object.values(state.categories).reduce((sum, value) => sum + Number(value || 0), 0);
       render();
     }
 
     function render() {
       const entries = Object.entries(state.categories || {});
-      total.textContent = state.totalPlanMessages ? state.totalPlanMessages + " planned" : "No plan";
+      total.textContent = state.completed ? "Done" : state.totalPlanMessages ? state.totalPlanMessages + " planned" : "No plan";
       categories.innerHTML = "";
       for (const [category, count] of entries) {
         const item = document.createElement("li");
@@ -1328,10 +1347,14 @@ function sensitiveCleanupWidgetHtml(): string {
         item.append(label, value);
         categories.append(item);
       }
-      const hasPlan = Boolean(state.operationPlanId) && state.totalPlanMessages > 0;
+      const hasPlan = Boolean(state.operationPlanId) && state.totalPlanMessages > 0 && !state.completed;
       execute.disabled = !hasPlan || !state.confirmToken;
+      execute.textContent = state.completed ? "Moved" : "Move planned mail";
       if (!hasPlan) {
-        status.textContent = "Open a sensitive cleanup plan from chat.";
+        const moved = state.lastResult?.moved ?? state.lastResult?.result?.moved;
+        status.textContent = state.completed
+          ? (moved === undefined ? "No remaining sensitive mail in this plan." : "Moved " + String(moved) + " messages.")
+          : "Open a sensitive cleanup plan from chat.";
       } else if (!state.confirmToken) {
         status.textContent = "Sensitive cleanup plan loaded; waiting for secure app metadata.";
       } else {
@@ -1356,13 +1379,21 @@ function sensitiveCleanupWidgetHtml(): string {
           maxMessages: state.totalPlanMessages,
         });
         const content = result?.structuredContent || result || {};
-        status.textContent = "Moved " + String(content.moved ?? content.result?.moved ?? 0) + " messages.";
+        const moved = Number(content.moved ?? content.result?.moved ?? 0);
+        const remaining = Number.isFinite(Number(content.result?.remainingMessages))
+          ? Number(content.result.remainingMessages)
+          : Math.max(0, state.totalPlanMessages - moved);
+        state.totalPlanMessages = remaining;
+        state.completed = remaining === 0;
+        state.lastResult = content;
         window.openai?.setWidgetState?.({
           operationPlanId: state.operationPlanId,
           categories: state.categories,
-          totalPlanMessages: state.totalPlanMessages,
+          totalPlanMessages: remaining,
+          completed: state.completed,
           lastResult: content,
         });
+        render();
       } catch (error) {
         status.textContent = error instanceof Error ? error.message : String(error);
         execute.disabled = false;

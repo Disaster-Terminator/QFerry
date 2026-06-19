@@ -83,7 +83,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "confirm_cleanup_plan")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "render_sensitive_cleanup_panel")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "render_sensitive_cleanup_panel")?._meta).toMatchObject({
-      "openai/outputTemplate": "ui://qferry/sensitive-cleanup.v2.html",
+      "openai/outputTemplate": "ui://qferry/sensitive-cleanup.v3.html",
     });
     expect(tools.tools.find((tool) => tool.name === "execute_sensitive_cleanup_from_ui")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_sensitive_cleanup_from_ui")?._meta).toMatchObject({
@@ -109,20 +109,24 @@ describe("QFerry ChatGPT App MCP server", () => {
 
     const resources = await client.listResources();
     expect(resources.resources).toContainEqual(expect.objectContaining({
-      uri: "ui://qferry/sensitive-cleanup.v2.html",
+      uri: "ui://qferry/sensitive-cleanup.v3.html",
       mimeType: "text/html",
     }));
 
-    const resource = await client.readResource({ uri: "ui://qferry/sensitive-cleanup.v2.html" });
+    const resource = await client.readResource({ uri: "ui://qferry/sensitive-cleanup.v3.html" });
     expect(resource.contents[0]).toMatchObject({
-      uri: "ui://qferry/sensitive-cleanup.v2.html",
+      uri: "ui://qferry/sensitive-cleanup.v3.html",
       mimeType: "text/html;profile=mcp-app",
     });
     const html = (resource.contents[0] as { text?: string }).text ?? "";
     expect(html).toContain("execute_sensitive_cleanup_from_ui");
     expect(html).toContain("Move planned mail");
+    expect(html).toContain("Done");
+    expect(html).toContain("No remaining sensitive mail in this plan.");
+    expect(html).toContain("completed");
     expect(html).toContain("toolResponseMetadata");
     expect(html).not.toContain("Move selected mail");
+    expect(html).not.toContain("No sensitive cleanup plan is loaded");
 
     await client.close();
     await server.close();
