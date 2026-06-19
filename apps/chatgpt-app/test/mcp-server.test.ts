@@ -83,7 +83,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "confirm_cleanup_plan")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "render_sensitive_cleanup_panel")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "render_sensitive_cleanup_panel")?._meta).toMatchObject({
-      "openai/outputTemplate": "ui://qferry/sensitive-cleanup.html",
+      "openai/outputTemplate": "ui://qferry/sensitive-cleanup.v2.html",
     });
     expect(tools.tools.find((tool) => tool.name === "execute_sensitive_cleanup_from_ui")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_sensitive_cleanup_from_ui")?._meta).toMatchObject({
@@ -109,13 +109,13 @@ describe("QFerry ChatGPT App MCP server", () => {
 
     const resources = await client.listResources();
     expect(resources.resources).toContainEqual(expect.objectContaining({
-      uri: "ui://qferry/sensitive-cleanup.html",
+      uri: "ui://qferry/sensitive-cleanup.v2.html",
       mimeType: "text/html",
     }));
 
-    const resource = await client.readResource({ uri: "ui://qferry/sensitive-cleanup.html" });
+    const resource = await client.readResource({ uri: "ui://qferry/sensitive-cleanup.v2.html" });
     expect(resource.contents[0]).toMatchObject({
-      uri: "ui://qferry/sensitive-cleanup.html",
+      uri: "ui://qferry/sensitive-cleanup.v2.html",
       mimeType: "text/html;profile=mcp-app",
     });
     const html = (resource.contents[0] as { text?: string }).text ?? "";
