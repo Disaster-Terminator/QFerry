@@ -777,6 +777,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       _meta: {
         ui: { visibility: ["app"] },
+        "openai/widgetAccessible": true,
         "openai/visibility": "private",
         "openai/toolInvocation/invoking": "Moving sensitive mail",
         "openai/toolInvocation/invoked": "Sensitive cleanup complete",
@@ -1252,7 +1253,7 @@ function sensitiveCleanupWidgetHtml(): string {
     </div>
     <ul id="categories" class="categories"></ul>
     <div class="actions">
-      <button id="execute" type="button" disabled>Move selected mail</button>
+      <button id="execute" type="button" disabled>Move planned mail</button>
       <button id="refresh" type="button" class="secondary">Refresh</button>
     </div>
     <div id="status" class="status">Open a sensitive cleanup plan from chat.</div>
@@ -1270,13 +1271,46 @@ function sensitiveCleanupWidgetHtml(): string {
     const refresh = document.getElementById("refresh");
     const status = document.getElementById("status");
 
+    function firstObject(...values) {
+      for (const value of values) {
+        if (value && typeof value === "object") return value;
+      }
+      return {};
+    }
+
+    function metadataFrom(payload = {}) {
+      return firstObject(
+        payload._meta,
+        payload.meta,
+        payload.mcp_tool_result?._meta,
+        payload.call_tool_result?._meta,
+        payload.result?._meta,
+        payload.params?._meta,
+        payload.params?.mcp_tool_result?._meta,
+        payload.params?.call_tool_result?._meta
+      );
+    }
+
+    function structuredFrom(payload = {}) {
+      return firstObject(
+        payload.structuredContent,
+        payload.mcp_tool_result?.structuredContent,
+        payload.call_tool_result?.structuredContent,
+        payload.result?.structuredContent,
+        payload.params?.structuredContent,
+        payload.params?.mcp_tool_result?.structuredContent,
+        payload.params?.call_tool_result?.structuredContent,
+        payload
+      );
+    }
+
     function hydrate(payload = {}) {
-      const meta = payload._meta || payload.meta || {};
-      const structured = payload.structuredContent || payload;
+      const meta = metadataFrom(payload);
+      const structured = structuredFrom(payload);
       state.operationPlanId = meta.operationPlanId || structured.operationPlanId || state.operationPlanId;
-      state.confirmToken = meta.confirmToken || state.confirmToken;
+      state.confirmToken = meta.confirmToken || structured.confirmToken || state.confirmToken;
       state.categories = meta.categories || structured.categories || state.categories || {};
-      state.totalPlanMessages = structured.totalPlanMessages || Object.values(state.categories).reduce((sum, value) => sum + Number(value || 0), 0);
+      state.totalPlanMessages = structured.totalPlanMessages || meta.totalPlanMessages || Object.values(state.categories).reduce((sum, value) => sum + Number(value || 0), 0);
       render();
     }
 
@@ -1294,8 +1328,15 @@ function sensitiveCleanupWidgetHtml(): string {
         item.append(label, value);
         categories.append(item);
       }
-      execute.disabled = !state.operationPlanId || !state.confirmToken || entries.length === 0;
-      if (execute.disabled && entries.length === 0) status.textContent = "No sensitive cleanup plan is loaded.";
+      const hasPlan = Boolean(state.operationPlanId) && state.totalPlanMessages > 0;
+      execute.disabled = !hasPlan || !state.confirmToken;
+      if (!hasPlan) {
+        status.textContent = "Open a sensitive cleanup plan from chat.";
+      } else if (!state.confirmToken) {
+        status.textContent = "Sensitive cleanup plan loaded; waiting for secure app metadata.";
+      } else {
+        status.textContent = "Sensitive cleanup plan loaded from chat.";
+      }
     }
 
     async function callTool(name, args) {
@@ -1312,9 +1353,16 @@ function sensitiveCleanupWidgetHtml(): string {
         const result = await callTool("execute_sensitive_cleanup_from_ui", {
           operationPlanId: state.operationPlanId,
           confirmToken: state.confirmToken,
+          maxMessages: state.totalPlanMessages,
         });
         const content = result?.structuredContent || result || {};
         status.textContent = "Moved " + String(content.moved ?? content.result?.moved ?? 0) + " messages.";
+        window.openai?.setWidgetState?.({
+          operationPlanId: state.operationPlanId,
+          categories: state.categories,
+          totalPlanMessages: state.totalPlanMessages,
+          lastResult: content,
+        });
       } catch (error) {
         status.textContent = error instanceof Error ? error.message : String(error);
         execute.disabled = false;
@@ -1323,7 +1371,10 @@ function sensitiveCleanupWidgetHtml(): string {
 
     refresh.addEventListener("click", () => render());
     window.addEventListener("message", (event) => hydrate(event.data || {}));
-    hydrate(window.openai?.toolOutput || window.openai?.context || {});
+    hydrate(window.openai?.toolOutput || {});
+    hydrate(window.openai?.toolResponseMetadata || {});
+    hydrate(window.openai?.context || {});
+    hydrate(window.openai?.widgetState || {});
   </script>
 </body>
 </html>`;

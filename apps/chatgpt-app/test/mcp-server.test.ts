@@ -88,6 +88,8 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "execute_sensitive_cleanup_from_ui")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_sensitive_cleanup_from_ui")?._meta).toMatchObject({
       ui: { visibility: ["app"] },
+      "openai/widgetAccessible": true,
+      "openai/visibility": "private",
     });
     expect(tools.tools.find((tool) => tool.name === "execute_cleanup")?.annotations?.destructiveHint).toBe(true);
 
@@ -116,7 +118,11 @@ describe("QFerry ChatGPT App MCP server", () => {
       uri: "ui://qferry/sensitive-cleanup.html",
       mimeType: "text/html;profile=mcp-app",
     });
-    expect((resource.contents[0] as { text?: string }).text).toContain("execute_sensitive_cleanup_from_ui");
+    const html = (resource.contents[0] as { text?: string }).text ?? "";
+    expect(html).toContain("execute_sensitive_cleanup_from_ui");
+    expect(html).toContain("Move planned mail");
+    expect(html).toContain("toolResponseMetadata");
+    expect(html).not.toContain("Move selected mail");
 
     await client.close();
     await server.close();
