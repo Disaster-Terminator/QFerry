@@ -91,7 +91,8 @@ const bulkGovernanceCategorySchema = z.enum([
 ]);
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
-const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v3.html";
+const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v4.html";
+const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-20-0005";
 const SENSITIVE_CATEGORY_IDS = new Set([
   "security_or_account",
   "github_account_security",
@@ -1163,7 +1164,7 @@ function sensitiveCleanupWidgetHtml(): string {
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 24px 28px;
+      padding: 20px 28px 22px 36px;
       min-width: 280px;
       overflow: hidden;
     }
@@ -1249,6 +1250,11 @@ function sensitiveCleanupWidgetHtml(): string {
       font-size: 13px;
       color: color-mix(in srgb, CanvasText 72%, transparent);
     }
+    .debug-version {
+      font-size: 11px;
+      color: color-mix(in srgb, CanvasText 45%, transparent);
+      user-select: none;
+    }
   </style>
 </head>
 <body>
@@ -1263,6 +1269,7 @@ function sensitiveCleanupWidgetHtml(): string {
       <button id="refresh" type="button" class="secondary">Refresh</button>
     </div>
     <div id="status" class="status">Open a sensitive cleanup plan from chat.</div>
+    <div class="debug-version">${SENSITIVE_CLEANUP_WIDGET_VERSION}</div>
   </main>
   <script>
     const state = {
@@ -1272,6 +1279,8 @@ function sensitiveCleanupWidgetHtml(): string {
       totalPlanMessages: 0,
       completed: false,
       lastResult: undefined,
+      busy: false,
+      error: undefined,
     };
     const total = document.getElementById("total");
     const categories = document.getElementById("categories");
@@ -1348,18 +1357,28 @@ function sensitiveCleanupWidgetHtml(): string {
         categories.append(item);
       }
       const hasPlan = Boolean(state.operationPlanId) && state.totalPlanMessages > 0 && !state.completed;
-      execute.disabled = !hasPlan || !state.confirmToken;
-      execute.textContent = state.completed ? "Moved" : "Move planned mail";
+      execute.disabled = state.busy || !hasPlan || !state.confirmToken;
+      execute.textContent = state.completed ? "Moved" : state.busy ? "Moving..." : "Move planned mail";
       if (!hasPlan) {
         const moved = state.lastResult?.moved ?? state.lastResult?.result?.moved;
         status.textContent = state.completed
           ? (moved === undefined ? "No remaining sensitive mail in this plan." : "Moved " + String(moved) + " messages.")
           : "Open a sensitive cleanup plan from chat.";
+      } else if (state.error) {
+        status.textContent = state.error;
       } else if (!state.confirmToken) {
         status.textContent = "Sensitive cleanup plan loaded; waiting for secure app metadata.";
       } else {
         status.textContent = "Sensitive cleanup plan loaded from chat.";
       }
+      window.openai?.notifyIntrinsicHeight?.();
+    }
+
+    function syncOpenAiState() {
+      hydrate(window.openai?.toolOutput || {});
+      hydrate(window.openai?.toolResponseMetadata || {});
+      hydrate(window.openai?.context || {});
+      hydrate(window.openai?.widgetState || {});
     }
 
     async function callTool(name, args) {
@@ -1370,7 +1389,10 @@ function sensitiveCleanupWidgetHtml(): string {
     }
 
     execute.addEventListener("click", async () => {
-      execute.disabled = true;
+      if (state.busy || state.completed || !state.operationPlanId) return;
+      state.busy = true;
+      state.error = undefined;
+      render();
       status.textContent = "Moving sensitive mail...";
       try {
         const result = await callTool("execute_sensitive_cleanup_from_ui", {
@@ -1386,26 +1408,36 @@ function sensitiveCleanupWidgetHtml(): string {
         state.totalPlanMessages = remaining;
         state.completed = remaining === 0;
         state.lastResult = content;
-        window.openai?.setWidgetState?.({
+        state.error = undefined;
+        const nextWidgetState = {
           operationPlanId: state.operationPlanId,
           categories: state.categories,
           totalPlanMessages: remaining,
           completed: state.completed,
           lastResult: content,
-        });
-        render();
+        };
+        await window.openai?.setWidgetState?.(nextWidgetState);
+        hydrate(nextWidgetState);
+        syncOpenAiState();
       } catch (error) {
-        status.textContent = error instanceof Error ? error.message : String(error);
-        execute.disabled = false;
+        state.error = error instanceof Error ? error.message : String(error);
+      } finally {
+        state.busy = false;
+        render();
       }
     });
 
-    refresh.addEventListener("click", () => render());
+    refresh.addEventListener("click", () => syncOpenAiState());
     window.addEventListener("message", (event) => hydrate(event.data || {}));
-    hydrate(window.openai?.toolOutput || {});
-    hydrate(window.openai?.toolResponseMetadata || {});
-    hydrate(window.openai?.context || {});
-    hydrate(window.openai?.widgetState || {});
+    window.addEventListener("focus", () => syncOpenAiState());
+    document.addEventListener("visibilitychange", () => syncOpenAiState());
+    syncOpenAiState();
+    let syncCount = 0;
+    const syncTimer = window.setInterval(() => {
+      syncOpenAiState();
+      syncCount += 1;
+      if (syncCount >= 20 || state.completed) window.clearInterval(syncTimer);
+    }, 500);
   </script>
 </body>
 </html>`;
