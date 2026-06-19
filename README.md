@@ -64,6 +64,8 @@ QQMAIL_METADATA_SAMPLE_LIMIT=1
 
 `mutationAllowed`、`mutationOperationallyReady` 和 `supportsNativeMove` 只说明当前 provider 具备执行移动的能力；真正能否安全执行，还取决于 MCP 层能否找回先前生成的 operation plan。QFerry 默认把 operation plan 持久化到用户状态目录，避免 MCP 进程重启、GPT Web 重连或 Codex 新线程后丢失 plan。需要自定义位置时设置 `QFERRY_OPERATION_PLAN_STORE_DIR`；云端部署应把它指向持久共享存储或后续等价 KV/DB adapter，而不是依赖单进程内存。
 
+远端 MCP / GPT Web 部署不应要求人工预先创建运行目录。QFerry 会在启动或首次写入时创建缺失的 state / operation-plan 目录；`apply_ruleset_patch` 写入缺失的 `.json` 规则文件时，会把它视为一个空的可复用 ruleset 并自动创建父目录。非 JSON 文件仍会被拒绝。
+
 说明：Codex CLI 的 `codex plugin marketplace add` 只添加插件市场；Codex 插件安装在 Codex TUI 的 `/plugins` 里完成。GPT Web / 自定义 App 接入时使用同一套 MCP server 和工具语义，不需要把它理解成另一个产品。
 
 ## 预期结果

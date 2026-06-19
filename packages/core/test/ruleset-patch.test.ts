@@ -198,6 +198,46 @@ describe("ruleset patch rendering", () => {
     expect(JSON.parse(await readFile(rulesFile, "utf8")).rules).toHaveLength(2);
   });
 
+  it("initializes a missing JSON rules file before applying a patch", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-missing-"));
+    const rulesFile = join(dir, "nested", "qferry-governance-rules.json");
+    const patch = {
+      groupToEnsure: { id: "github_account_security", label: "GitHub account security", target: { folder: "其他文件夹/GitHub账号安全" } } as const,
+      candidateRuleCount: 1,
+      rulesToAdd: [
+        {
+          id: "github-security-oauth",
+          groupId: "github_account_security",
+          match: { fromDomainIncludes: "github.com", subjectIncludes: "OAuth" },
+        },
+      ],
+      skippedDuplicateRules: [],
+    };
+
+    const applied = await applyRulesetPatchDraft({ rulesFile, patch, apply: true });
+
+    expect(applied).toMatchObject({
+      applied: true,
+      rulesFile,
+      beforeRuleCount: 0,
+      afterRuleCount: 1,
+      addedRuleCount: 1,
+    });
+    expect(JSON.parse(await readFile(rulesFile, "utf8"))).toMatchObject({
+      groups: [
+        { id: "review", label: "Needs review" },
+        { id: "github_account_security", label: "GitHub account security", target: { folder: "其他文件夹/GitHub账号安全" } },
+      ],
+      rules: [
+        {
+          id: "github-security-oauth",
+          groupId: "github_account_security",
+          match: { fromDomainIncludes: "github.com", subjectIncludes: "OAuth" },
+        },
+      ],
+    });
+  });
+
   it("bootstraps a local rules file that has groups but no rules", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-bootstrap-"));
     const rulesFile = join(dir, "qferry.rules.json");
@@ -342,7 +382,7 @@ describe("ruleset patch rendering", () => {
     expect(await readFile(rulesFile, "utf8")).toBe(original);
   });
 
-  it("rejects applying a ruleset patch to a non-standard file name", async () => {
+  it("rejects applying a ruleset patch to a non-json file name", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qferry-ruleset-apply-"));
     const rulesFile = join(dir, "not-rules.txt");
     const original = `${JSON.stringify({
@@ -362,7 +402,7 @@ describe("ruleset patch rendering", () => {
     };
 
     await expect(applyRulesetPatchDraft({ rulesFile, patch, apply: true }))
-      .rejects.toThrow("qferry.rules.json");
+      .rejects.toThrow("JSON rules file");
     expect(await readFile(rulesFile, "utf8")).toBe(original);
   });
 });

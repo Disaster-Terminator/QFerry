@@ -1,7 +1,7 @@
 import type { ClassificationRule } from "./classification.js";
 import { loadClassificationRuleset, parseClassificationRuleset, type ClassificationGroup, type ClassificationRuleset, type ClassificationRulesetMetadata } from "./ruleset.js";
-import { readFile, realpath, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, resolve } from "node:path";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { dirname, extname, resolve } from "node:path";
 
 export interface RulesetPatchDraft {
   groupToEnsure: ClassificationGroup;
@@ -179,12 +179,16 @@ export async function loadPatchableRuleset(rulesFile: string): Promise<Classific
   try {
     return await loadClassificationRuleset(rulesFile);
   } catch (error) {
+    if (isMissing(error)) {
+      return emptyPatchableRuleset(rulesFile);
+    }
     if (!(error instanceof Error) || error.message !== "QFerry ruleset must contain at least one rule") {
       throw error;
     }
   }
 
-  const raw = JSON.parse(await readFile(rulesFile, "utf8")) as unknown;
+  const rawText = await readFile(rulesFile, "utf8");
+  const raw = JSON.parse(rawText) as unknown;
   if (raw === null || Array.isArray(raw) || typeof raw !== "object") {
     throw new Error("QFerry ruleset must be a JSON object");
   }
@@ -214,17 +218,45 @@ export async function loadPatchableRuleset(rulesFile: string): Promise<Classific
 
 async function resolveWritableRulesFile(rulesFile: string): Promise<string> {
   const resolved = resolve(rulesFile);
-  if (basename(resolved) !== "qferry.rules.json" || extname(resolved) !== ".json") {
-    throw new Error("QFerry can only apply ruleset patches to qferry.rules.json");
+  if (extname(resolved) !== ".json") {
+    throw new Error("QFerry can only apply ruleset patches to a JSON rules file");
   }
 
+  await mkdir(dirname(resolved), { recursive: true });
   const parent = await realpath(dirname(resolved));
-  const file = await realpath(resolved);
-  if (dirname(file) !== parent) {
+  const file = await realpath(resolved).catch((error: unknown) => {
+    if (isMissing(error)) return resolved;
+    throw error;
+  });
+  if (dirname(file) !== parent && file !== resolved) {
     throw new Error("QFerry rulesFile must resolve inside its containing directory");
   }
 
   return file;
+}
+
+function emptyPatchableRuleset(rulesFile: string): ClassificationRuleset {
+  const validated = parseClassificationRuleset({
+    ...DEFAULT_RULESET_DRAFT,
+    rules: [{
+      id: "qferry-bootstrap-placeholder",
+      groupId: DEFAULT_RULESET_DRAFT.defaultGroupId,
+      match: { subjectIncludes: "__qferry_bootstrap_placeholder__" },
+    }],
+  }, rulesFile);
+
+  return {
+    ...validated,
+    rules: [],
+    metadata: {
+      ...validated.metadata,
+      ruleCount: 0,
+    },
+  };
+}
+
+function isMissing(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 function formatMatch(match: ClassificationRule["match"]): string {

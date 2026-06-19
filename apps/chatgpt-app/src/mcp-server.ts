@@ -13,6 +13,7 @@ import {
   type OperationPlan,
   type QFerryRuntimeConfig,
 } from "@qferry/core";
+import { mkdirSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { join } from "node:path";
@@ -788,6 +789,7 @@ async function getStoredPlan(
 }
 
 function createFileOperationPlanStore(rootDir = defaultOperationPlanStoreRoot()): OperationPlanStore {
+  mkdirSync(rootDir, { recursive: true });
   const plansDir = join(rootDir, "plans");
   const consumedDir = join(rootDir, "consumed");
   return {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -1065,6 +1065,18 @@ describe("QFerry ChatGPT App MCP server", () => {
     await secondClient.close();
     await secondServer.close();
     await rm(planStoreDir, { recursive: true, force: true });
+  });
+
+  it("initializes the runtime state root when a cloud wrapper starts the MCP server directly", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-cloud-state-parent-"));
+    const stateRoot = join(dir, "missing", "state", "qferry");
+    process.env.QFERRY_STATE_DIR = stateRoot;
+
+    const server = createQFerryMcpServer();
+
+    expect((await stat(stateRoot)).isDirectory()).toBe(true);
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
   });
 
   it("calls runtime status through the MCP server", async () => {
@@ -2942,6 +2954,59 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
+  it("initializes a missing JSON rules file through the MCP server", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qferry-mcp-cloud-rules-"));
+    const rulesFile = join(dir, "missing", "qferry-governance-rules.json");
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const result = await client.callTool({
+      name: "apply_ruleset_patch",
+      arguments: {
+        rulesFile,
+        apply: true,
+        patch: {
+          groupToEnsure: { id: "github_account_security", label: "GitHub account security", target: { folder: "其他文件夹/GitHub账号安全" } },
+          candidateRuleCount: 1,
+          rulesToAdd: [
+            {
+              id: "github-security-oauth",
+              groupId: "github_account_security",
+              match: { fromDomainIncludes: "github.com", subjectIncludes: "OAuth" },
+            },
+          ],
+          skippedDuplicateRules: [],
+        },
+      },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      applied: true,
+      beforeRuleCount: 0,
+      afterRuleCount: 1,
+      addedRuleCount: 1,
+    });
+    expect(JSON.parse(await readFile(rulesFile, "utf8"))).toMatchObject({
+      rules: [
+        {
+          id: "github-security-oauth",
+          groupId: "github_account_security",
+          match: { fromDomainIncludes: "github.com", subjectIncludes: "OAuth" },
+        },
+      ],
+    });
+
+    await client.close();
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
   it("dry-runs ruleset rule replacement through the MCP server", async () => {
     const { mkdtemp, writeFile, readFile } = await import("node:fs/promises");
     const { join } = await import("node:path");
@@ -3051,7 +3116,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain("qferry.rules.json");
+    expect(JSON.stringify(result.content)).toContain("JSON rules file");
     expect(await readFile(rulesFile, "utf8")).toBe(original);
 
     await client.close();
