@@ -14,6 +14,7 @@ import {
   type OperationPlan,
   type QFerryRuntimeConfig,
 } from "@qferry/core";
+import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -90,11 +91,32 @@ const bulkGovernanceCategorySchema = z.enum([
 ]);
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
+const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.html";
+const SENSITIVE_CATEGORY_IDS = new Set([
+  "security_or_account",
+  "github_account_security",
+  "google_account_security",
+  "account_security",
+  "account_recovery",
+  "verification_code",
+  "account_deletion",
+  "email_added",
+  "oauth",
+  "oauth_authorization",
+  "password_reset",
+]);
+
+interface PlanExecutionPolicy {
+  sensitivity: "normal" | "sensitive";
+  categories: Record<string, number>;
+  confirmToken?: string;
+}
 
 interface StoredPlan {
   plan: OperationPlan;
   expiresAt: number;
   previewSummary?: Record<string, unknown>;
+  executionPolicy?: PlanExecutionPolicy;
 }
 
 interface OperationPlanStore {
@@ -151,6 +173,38 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       release();
     }
   };
+
+  server.registerResource(
+    "qferry_sensitive_cleanup_widget",
+    SENSITIVE_CLEANUP_WIDGET_URI,
+    {
+      title: "QFerry Sensitive Cleanup",
+      description: "Confirm and execute account-security mail cleanup from a user-clicked ChatGPT app UI.",
+      mimeType: "text/html",
+    },
+    async (uri) => ({
+      contents: [{
+        uri: uri.href,
+        mimeType: "text/html;profile=mcp-app",
+        text: sensitiveCleanupWidgetHtml(),
+        _meta: {
+          ui: {
+            prefersBorder: true,
+            csp: {
+              connectDomains: [],
+              resourceDomains: [],
+            },
+          },
+          "openai/widgetDescription": "QFerry confirmation card for sensitive account-security mail cleanup.",
+          "openai/widgetPrefersBorder": true,
+          "openai/widgetCSP": {
+            connect_domains: [],
+            resource_domains: [],
+          },
+        },
+      }],
+    }),
+  );
 
   server.registerTool(
     "get_status",
@@ -664,6 +718,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
           plan: confirmed,
           expiresAt: Date.now() + PLAN_TTL_MS,
           previewSummary: stored.previewSummary,
+          executionPolicy: stored.executionPolicy,
         });
         const result = {
           plan: confirmed,
@@ -672,6 +727,97 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         };
         const response = compactConfirmedOperationPlanResult(result);
         return toToolResult(await withMcpAudit("confirm_cleanup_plan", confirmed.runId, input, response));
+      });
+    },
+  );
+
+  server.registerTool(
+    "render_sensitive_cleanup_panel",
+    {
+      title: "Render sensitive cleanup panel",
+      description: "Render a QFerry UI card for sensitive account-security cleanup. Use this when execute_cleanup returns SENSITIVE_UI_ONLY or when a plan is marked sensitive.",
+      inputSchema: {
+        operationPlanId: z.string(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      _meta: {
+        ui: { resourceUri: SENSITIVE_CLEANUP_WIDGET_URI },
+        "openai/outputTemplate": SENSITIVE_CLEANUP_WIDGET_URI,
+        "openai/toolInvocation/invoking": "Opening QFerry panel",
+        "openai/toolInvocation/invoked": "QFerry panel ready",
+      },
+    },
+    async (input) => {
+      return instrumentMcpTool("render_sensitive_cleanup_panel", input, async () => {
+        const stored = await getStoredPlan(planStore, input.operationPlanId);
+        const policy = stored.executionPolicy ?? normalExecutionPolicy();
+        const response = sensitiveCleanupPanelContent(stored, policy);
+        return toToolResult(
+          await withMcpAudit("render_sensitive_cleanup_panel", stored.plan.runId, input, response),
+          {
+            operationPlanId: stored.plan.operationPlanId,
+            confirmToken: policy.confirmToken,
+            categories: policy.categories,
+          },
+        );
+      });
+    },
+  );
+
+  server.registerTool(
+    "execute_sensitive_cleanup_from_ui",
+    {
+      title: "Execute sensitive cleanup from UI",
+      description: "Execute a sensitive account-security cleanup plan after an explicit user click in the QFerry ChatGPT app UI.",
+      inputSchema: {
+        operationPlanId: z.string(),
+        confirmToken: z.string(),
+        maxMessages: z.number().int().min(1).max(MAX_MOVE_EXECUTION_MAX_MESSAGES).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      _meta: {
+        ui: { visibility: ["app"] },
+        "openai/visibility": "private",
+        "openai/toolInvocation/invoking": "Moving sensitive mail",
+        "openai/toolInvocation/invoked": "Sensitive cleanup complete",
+      },
+    },
+    async (input) => {
+      return instrumentMcpTool("execute_sensitive_cleanup_from_ui", sanitizeSensitiveUiInput(input), async () => {
+        return enqueueMutationExecution(async () => {
+          const stored = await getStoredPlan(planStore, input.operationPlanId);
+          const policy = stored.executionPolicy;
+          if (!policy || policy.sensitivity !== "sensitive") {
+            throw new Error("SENSITIVE_PLAN_REQUIRED");
+          }
+          if (!policy.confirmToken || policy.confirmToken !== input.confirmToken) {
+            throw new Error("USER_CONFIRMATION_REQUIRED");
+          }
+          const plan = stored.plan.status === "confirmed"
+            ? stored.plan
+            : {
+                ...confirmOperationPlan(stored.plan, input.operationPlanId),
+                confirmationRequired: false,
+              };
+          const maxMessages = input.maxMessages ?? (plan.action === "move" ? DEFAULT_MOVE_EXECUTION_MAX_MESSAGES : undefined);
+          const result = await tools.executeCleanup({ plan, maxMessages });
+          if (result.result.status === "partially_executed") {
+            await planStore.set(input.operationPlanId, {
+              plan: {
+                ...plan,
+                messageRefs: plan.messageRefs.slice(result.result.attemptedMessages),
+              },
+              expiresAt: Date.now() + PLAN_TTL_MS,
+              previewSummary: stored.previewSummary,
+              executionPolicy: policy,
+            });
+          } else {
+            await planStore.delete(input.operationPlanId);
+            await planStore.markConsumed(input.operationPlanId);
+          }
+          const response = compactSensitiveUiExecutionResult(result.result, policy);
+          return toToolResult(await withMcpAudit("execute_sensitive_cleanup_from_ui", plan.runId, sanitizeSensitiveUiInput(input), response));
+        });
       });
     },
   );
@@ -693,6 +839,9 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
           const stored = await getStoredPlan(planStore, input.operationPlanId);
           if (stored.plan.status !== "confirmed") {
             throw new Error(`Operation plan is not confirmed: ${input.operationPlanId}`);
+          }
+          if (stored.executionPolicy?.sensitivity === "sensitive") {
+            throw new Error("SENSITIVE_UI_ONLY: render_sensitive_cleanup_panel must be used for this account-security cleanup plan");
           }
           const maxMessages = input.maxMessages ?? (stored.plan.action === "move" ? DEFAULT_MOVE_EXECUTION_MAX_MESSAGES : undefined);
           try {
@@ -754,10 +903,12 @@ async function registerOperationPlans<T extends { plan?: OperationPlan; plans?: 
   const plans = result.plans ?? (result.plan ? [result.plan] : []);
   const previewSummary = summarizeMcpToolResult(result);
   for (const plan of plans) {
+    const executionPolicy = classifyPlanExecutionPolicy(plan, result);
     await store.set(plan.operationPlanId, {
       plan,
       expiresAt: Date.now() + PLAN_TTL_MS,
       previewSummary,
+      executionPolicy,
     });
   }
   return result;
@@ -824,6 +975,358 @@ function compactConfirmedOperationPlanResult<T extends { plan: OperationPlan; ex
 function compactExecuteCleanupResult(result: ExecuteCleanupResult): { result: Omit<ExecuteCleanupResult, "batchAudit" | "reconciliations"> } {
   const { batchAudit: _batchAudit, reconciliations: _reconciliations, ...compactResult } = result;
   return { result: compactResult };
+}
+
+function compactSensitiveUiExecutionResult(result: ExecuteCleanupResult, policy: PlanExecutionPolicy) {
+  return {
+    ok: result.status === "executed" || result.status === "partially_executed",
+    result: compactExecuteCleanupResult(result).result,
+    moved: result.moved ?? 0,
+    categories: policy.categories,
+    mutationsAttempted: result.mutationsAttempted,
+  };
+}
+
+function sensitiveCleanupPanelContent(stored: StoredPlan, policy: PlanExecutionPolicy) {
+  return {
+    kind: "qferry_sensitive_cleanup_panel",
+    operationPlanId: stored.plan.operationPlanId,
+    runId: stored.plan.runId,
+    sensitivity: policy.sensitivity,
+    categories: policy.categories,
+    action: stored.plan.action,
+    totalPlanMessages: stored.plan.messageRefs.length,
+    expiresAt: new Date(stored.expiresAt).toISOString(),
+    mutationsAttempted: 0,
+  };
+}
+
+function classifyPlanExecutionPolicy(plan: OperationPlan, result: object): PlanExecutionPolicy {
+  const categories = extractPlanCategoryCounts(plan, result);
+  const sensitive = Object.keys(categories).some((category) => isSensitiveCategoryId(category))
+    || isSensitiveTarget(plan.target)
+    || isSensitiveText(plan.runId);
+  return {
+    sensitivity: sensitive ? "sensitive" : "normal",
+    categories,
+    ...(sensitive ? { confirmToken: createConfirmToken() } : {}),
+  };
+}
+
+function normalExecutionPolicy(): PlanExecutionPolicy {
+  return { sensitivity: "normal", categories: {} };
+}
+
+function createConfirmToken(): string {
+  return randomBytes(18).toString("base64url");
+}
+
+function extractPlanCategoryCounts(plan: OperationPlan, result: object): Record<string, number> {
+  const categories: Record<string, number> = {};
+  const resultRecord = result as Record<string, unknown>;
+  const preview = resultRecord.preview as Record<string, unknown> | undefined;
+  const workflow = resultRecord.workflow as Record<string, unknown> | undefined;
+  const workflowPreview = workflow?.preview as Record<string, unknown> | undefined;
+  const campaign = (resultRecord.campaign ?? workflowPreview?.campaign) as Record<string, unknown> | undefined;
+  const classifications = resultRecord.classifications as Array<Record<string, unknown>> | undefined;
+
+  const planRefCount = Math.max(plan.messageRefs.length, 0);
+  for (const category of stringArray(preview?.selectedCategoryIds)) {
+    categories[category] = Math.max(categories[category] ?? 0, planRefCount);
+  }
+
+  for (const groupPlan of groupPlansForPlan(plan.operationPlanId, preview)) {
+    addCategoryCount(categories, groupPlan.groupId, numericValue(groupPlan.selectedMessageRefs) ?? planRefCount);
+    addCategoryCount(categories, groupPlan.label, numericValue(groupPlan.selectedMessageRefs) ?? planRefCount);
+  }
+  for (const groupPlan of campaignGroupPlansForPlan(plan.operationPlanId, campaign)) {
+    addCategoryCount(categories, groupPlan.groupId, numericValue(groupPlan.selectedMessageRefs) ?? planRefCount);
+    addCategoryCount(categories, groupPlan.label, numericValue(groupPlan.selectedMessageRefs) ?? planRefCount);
+  }
+
+  if (classifications) {
+    const plannedRefs = new Set(plan.messageRefs.map(messageRefKeyForPolicy));
+    for (const classification of classifications) {
+      const messageRef = classification.messageRef as MessageRef | undefined;
+      const groupId = typeof classification.groupId === "string" ? classification.groupId : undefined;
+      if (messageRef && groupId && plannedRefs.has(messageRefKeyForPolicy(messageRef))) {
+        addCategoryCount(categories, groupId, 1);
+      }
+    }
+  }
+
+  const targetCategory = categoryFromTarget(plan.target);
+  if (targetCategory) {
+    addCategoryCount(categories, targetCategory, planRefCount);
+  }
+  return Object.fromEntries(Object.entries(categories).filter(([category]) => category.trim().length > 0));
+}
+
+function groupPlansForPlan(operationPlanId: string, preview?: Record<string, unknown>): Array<Record<string, unknown>> {
+  const groupPlans = preview?.groupPlans;
+  if (!Array.isArray(groupPlans)) return [];
+  return groupPlans
+    .filter((groupPlan) => typeof groupPlan === "object" && groupPlan !== null)
+    .map((groupPlan) => groupPlan as Record<string, unknown>)
+    .filter((groupPlan) => groupPlan.operationPlanId === operationPlanId);
+}
+
+function campaignGroupPlansForPlan(operationPlanId: string, campaign?: Record<string, unknown>): Array<Record<string, unknown>> {
+  const folderReports = campaign?.folderReports;
+  if (!Array.isArray(folderReports)) return [];
+  return folderReports
+    .filter((folderReport) => typeof folderReport === "object" && folderReport !== null)
+    .flatMap((folderReport) => {
+      const groupPlans = (folderReport as Record<string, unknown>).groupPlans;
+      return Array.isArray(groupPlans) ? groupPlans : [];
+    })
+    .filter((groupPlan) => typeof groupPlan === "object" && groupPlan !== null)
+    .map((groupPlan) => groupPlan as Record<string, unknown>)
+    .filter((groupPlan) => groupPlan.operationPlanId === operationPlanId);
+}
+
+function addCategoryCount(categories: Record<string, number>, rawCategory: unknown, count: number): void {
+  if (typeof rawCategory !== "string" || rawCategory.trim().length === 0) return;
+  const category = rawCategory.trim();
+  categories[category] = Math.max(categories[category] ?? 0, Math.max(count, 0));
+}
+
+function categoryFromTarget(target?: Record<string, string>): string | undefined {
+  const folder = target?.folder;
+  if (!folder) return undefined;
+  const normalized = normalizeSensitivityText(folder);
+  if (normalized.includes("github") && normalized.includes("account")) return "github_account_security";
+  if (normalized.includes("google") && normalized.includes("account")) return "google_account_security";
+  if (normalized.includes("账号安全") || normalized.includes("account_security") || normalized.includes("account security")) return "account_security";
+  return undefined;
+}
+
+function isSensitiveCategoryId(category: string): boolean {
+  const normalized = normalizeSensitivityText(category);
+  return SENSITIVE_CATEGORY_IDS.has(normalized)
+    || normalized.includes("account_security")
+    || normalized.includes("verification_code")
+    || normalized.includes("password_reset")
+    || normalized.includes("account_deletion")
+    || normalized.includes("email_added")
+    || normalized.includes("oauth")
+    || normalized.includes("账号安全")
+    || normalized.includes("验证码");
+}
+
+function isSensitiveTarget(target?: Record<string, string>): boolean {
+  return isSensitiveText(target?.folder ?? "");
+}
+
+function isSensitiveText(value: string): boolean {
+  return isSensitiveCategoryId(value);
+}
+
+function normalizeSensitivityText(value: string): string {
+  return value.trim().toLocaleLowerCase().replace(/[\s/.-]+/g, "_");
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function numericValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function messageRefKeyForPolicy(ref: MessageRef): string {
+  return `${ref.provider}:${ref.accountAlias}:${ref.folder}:${ref.uidValidity ?? ""}:${ref.uid}`;
+}
+
+function sanitizeSensitiveUiInput(input: { operationPlanId: string; maxMessages?: number }) {
+  return {
+    operationPlanId: input.operationPlanId,
+    ...(input.maxMessages !== undefined ? { maxMessages: input.maxMessages } : {}),
+    userGesture: true,
+  };
+}
+
+function sensitiveCleanupWidgetHtml(): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: transparent;
+      color: CanvasText;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 14px;
+      min-width: 280px;
+    }
+    .panel {
+      display: grid;
+      gap: 12px;
+      max-width: 560px;
+    }
+    .head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    .count {
+      font-size: 13px;
+      color: color-mix(in srgb, CanvasText 70%, transparent);
+      white-space: nowrap;
+    }
+    .categories {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .category {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 32px;
+      border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 13px;
+    }
+    .category span:first-child {
+      overflow-wrap: anywhere;
+    }
+    .category span:last-child {
+      color: color-mix(in srgb, CanvasText 65%, transparent);
+      white-space: nowrap;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button {
+      appearance: none;
+      border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+      border-radius: 6px;
+      padding: 8px 11px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      color: white;
+      background: #0f766e;
+    }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .secondary {
+      color: CanvasText;
+      background: transparent;
+    }
+    .status {
+      min-height: 18px;
+      font-size: 13px;
+      color: color-mix(in srgb, CanvasText 72%, transparent);
+    }
+  </style>
+</head>
+<body>
+  <main class="panel" aria-live="polite">
+    <div class="head">
+      <h1>QFerry sensitive cleanup</h1>
+      <div id="total" class="count">Waiting for plan</div>
+    </div>
+    <ul id="categories" class="categories"></ul>
+    <div class="actions">
+      <button id="execute" type="button" disabled>Move selected mail</button>
+      <button id="refresh" type="button" class="secondary">Refresh</button>
+    </div>
+    <div id="status" class="status">Open a sensitive cleanup plan from chat.</div>
+  </main>
+  <script>
+    const state = {
+      operationPlanId: undefined,
+      confirmToken: undefined,
+      categories: {},
+      totalPlanMessages: 0,
+    };
+    const total = document.getElementById("total");
+    const categories = document.getElementById("categories");
+    const execute = document.getElementById("execute");
+    const refresh = document.getElementById("refresh");
+    const status = document.getElementById("status");
+
+    function hydrate(payload = {}) {
+      const meta = payload._meta || payload.meta || {};
+      const structured = payload.structuredContent || payload;
+      state.operationPlanId = meta.operationPlanId || structured.operationPlanId || state.operationPlanId;
+      state.confirmToken = meta.confirmToken || state.confirmToken;
+      state.categories = meta.categories || structured.categories || state.categories || {};
+      state.totalPlanMessages = structured.totalPlanMessages || Object.values(state.categories).reduce((sum, value) => sum + Number(value || 0), 0);
+      render();
+    }
+
+    function render() {
+      const entries = Object.entries(state.categories || {});
+      total.textContent = state.totalPlanMessages ? state.totalPlanMessages + " planned" : "No plan";
+      categories.innerHTML = "";
+      for (const [category, count] of entries) {
+        const item = document.createElement("li");
+        item.className = "category";
+        const label = document.createElement("span");
+        label.textContent = category;
+        const value = document.createElement("span");
+        value.textContent = String(count);
+        item.append(label, value);
+        categories.append(item);
+      }
+      execute.disabled = !state.operationPlanId || !state.confirmToken || entries.length === 0;
+      if (execute.disabled && entries.length === 0) status.textContent = "No sensitive cleanup plan is loaded.";
+    }
+
+    async function callTool(name, args) {
+      const openai = window.openai;
+      if (openai?.callTool) return await openai.callTool(name, args);
+      if (openai?.tools?.call) return await openai.tools.call(name, args);
+      throw new Error("ChatGPT app tool bridge is unavailable");
+    }
+
+    execute.addEventListener("click", async () => {
+      execute.disabled = true;
+      status.textContent = "Moving sensitive mail...";
+      try {
+        const result = await callTool("execute_sensitive_cleanup_from_ui", {
+          operationPlanId: state.operationPlanId,
+          confirmToken: state.confirmToken,
+        });
+        const content = result?.structuredContent || result || {};
+        status.textContent = "Moved " + String(content.moved ?? content.result?.moved ?? 0) + " messages.";
+      } catch (error) {
+        status.textContent = error instanceof Error ? error.message : String(error);
+        execute.disabled = false;
+      }
+    });
+
+    refresh.addEventListener("click", () => render());
+    window.addEventListener("message", (event) => hydrate(event.data || {}));
+    hydrate(window.openai?.toolOutput || window.openai?.context || {});
+  </script>
+</body>
+</html>`;
 }
 
 async function instrumentMcpTool<T>(
@@ -1109,9 +1612,10 @@ function errorToMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function toToolResult<T extends object>(structuredContent: T) {
+function toToolResult<T extends object>(structuredContent: T, meta?: Record<string, unknown>) {
   const content = structuredContent as Record<string, unknown>;
   return {
+    ...(meta ? { _meta: meta } : {}),
     structuredContent: content,
     content: [
       {
