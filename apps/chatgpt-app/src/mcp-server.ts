@@ -91,8 +91,8 @@ const bulkGovernanceCategorySchema = z.enum([
 ]);
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
-const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v7.html";
-const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-20-1620";
+const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v8.html";
+const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-20-1705";
 const SENSITIVE_CATEGORY_IDS = new Set([
   "security_or_account",
   "github_account_security",
@@ -1338,12 +1338,28 @@ function sensitiveCleanupWidgetHtml(): string {
       return { ...structuredFrom(payload), ...metadataFrom(payload) };
     }
 
-    function mergedPlanData(...payloads) {
+    function currentPlanData(toolOutput = {}, context = {}, toolResponseMetadata = {}, widgetState = {}) {
+      const output = mergedSamePlanData(toolOutput, context, toolResponseMetadata);
+      const outputId = output.operationPlanId;
+      const stored = planDataFrom(widgetState || {});
+      const storedId = stored.operationPlanId;
+      if (!outputId) return stored;
+      if (storedId && storedId === outputId) return { ...output, ...stored };
+      return {
+        ...output,
+        completed: false,
+        totalPlanMessages: output.totalPlanMessages ?? Object.values(output.categories || {}).reduce((sum, value) => sum + Number(value || 0), 0),
+        categories: output.categories || {},
+        lastResult: undefined,
+      };
+    }
+
+    function mergedSamePlanData(...payloads) {
       return payloads.reduce((merged, payload) => {
         const next = planDataFrom(payload || {});
         const mergedId = merged.operationPlanId;
         const nextId = next.operationPlanId;
-        if (mergedId && nextId && mergedId !== nextId) return next;
+        if (mergedId && nextId && mergedId !== nextId) return merged;
         return { ...merged, ...next };
       }, {});
     }
@@ -1369,6 +1385,20 @@ function sensitiveCleanupWidgetHtml(): string {
 
     function shortPlanId(value) {
       return typeof value === "string" && value.length > 8 ? value.slice(-8) : value || "none";
+    }
+
+    async function resetStoredStateForPlan(plan) {
+      const openai = window.openai;
+      if (!plan.operationPlanId || openai?.widgetState?.operationPlanId === plan.operationPlanId) return;
+      const nextWidgetState = {
+        operationPlanId: plan.operationPlanId,
+        runId: plan.runId,
+        categories: plan.categories || {},
+        totalPlanMessages: plan.totalPlanMessages ?? Object.values(plan.categories || {}).reduce((sum, value) => sum + Number(value || 0), 0),
+        completed: false,
+        lastResult: null,
+      };
+      await openai?.setWidgetState?.(nextWidgetState);
     }
 
     function hydrate(payload = {}) {
@@ -1433,21 +1463,25 @@ function sensitiveCleanupWidgetHtml(): string {
     }
 
     function syncOpenAiState() {
-      hydrate(mergedPlanData(
+      const plan = currentPlanData(
         window.openai?.toolOutput || {},
         window.openai?.context || {},
         window.openai?.toolResponseMetadata || {},
         window.openai?.widgetState || {}
-      ));
+      );
+      hydrate(plan);
+      void resetStoredStateForPlan(plan);
     }
 
     function hydrateOpenAiGlobals(globals = {}) {
-      hydrate(mergedPlanData(
+      const plan = currentPlanData(
         globals.toolOutput || {},
         globals.context || {},
         globals.toolResponseMetadata || {},
         globals.widgetState || {}
-      ));
+      );
+      hydrate(plan);
+      void resetStoredStateForPlan(plan);
     }
 
     function hydrateBridgePayload(payload = {}) {
