@@ -91,8 +91,8 @@ const bulkGovernanceCategorySchema = z.enum([
 ]);
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
-const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v4.html";
-const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-20-0005";
+const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v5.html";
+const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-20-0035";
 const SENSITIVE_CATEGORY_IDS = new Set([
   "security_or_account",
   "github_account_security",
@@ -1321,24 +1321,59 @@ function sensitiveCleanupWidgetHtml(): string {
       );
     }
 
+    function planDataFrom(payload = {}) {
+      return { ...structuredFrom(payload), ...metadataFrom(payload) };
+    }
+
+    function mergedPlanData(...payloads) {
+      return payloads.reduce((merged, payload) => {
+        const next = planDataFrom(payload || {});
+        const mergedId = merged.operationPlanId;
+        const nextId = next.operationPlanId;
+        if (mergedId && nextId && mergedId !== nextId) return next;
+        return { ...merged, ...next };
+      }, {});
+    }
+
+    function remainingMessagesFrom(plan) {
+      const resultRemaining = plan.lastResult?.result?.remainingMessages;
+      if (Number.isFinite(Number(resultRemaining))) return Number(resultRemaining);
+      const directRemaining = plan.result?.remainingMessages;
+      if (Number.isFinite(Number(directRemaining))) return Number(directRemaining);
+      const total = plan.totalPlanMessages;
+      return Number.isFinite(Number(total)) ? Number(total) : undefined;
+    }
+
+    function isCompletedPlan(plan) {
+      if (plan.completed === true) return true;
+      const remaining = remainingMessagesFrom(plan);
+      return remaining === 0;
+    }
+
+    function zeroCategories(categoriesValue) {
+      return Object.fromEntries(Object.keys(categoriesValue || {}).map((category) => [category, 0]));
+    }
+
     function hydrate(payload = {}) {
-      const meta = metadataFrom(payload);
-      const structured = structuredFrom(payload);
-      const nextOperationPlanId = meta.operationPlanId || structured.operationPlanId;
+      const plan = planDataFrom(payload);
+      const nextOperationPlanId = plan.operationPlanId;
       const samePlan = !nextOperationPlanId || !state.operationPlanId || nextOperationPlanId === state.operationPlanId;
       if (nextOperationPlanId && state.operationPlanId && nextOperationPlanId !== state.operationPlanId) {
         state.completed = false;
         state.lastResult = undefined;
+        state.error = undefined;
       }
       state.operationPlanId = nextOperationPlanId || state.operationPlanId;
-      state.confirmToken = meta.confirmToken || structured.confirmToken || state.confirmToken;
-      state.categories = meta.categories || structured.categories || state.categories || {};
-      const hydratedTotal = structured.totalPlanMessages ?? meta.totalPlanMessages;
-      state.completed = samePlan ? Boolean(structured.completed ?? meta.completed ?? state.completed) : false;
-      state.lastResult = samePlan ? (structured.lastResult || meta.lastResult || state.lastResult) : undefined;
-      state.totalPlanMessages = state.completed
+      state.confirmToken = plan.confirmToken || state.confirmToken;
+      state.lastResult = samePlan ? (plan.lastResult || state.lastResult) : plan.lastResult;
+      const completed = samePlan ? (isCompletedPlan({ ...state, ...plan }) || state.completed) : isCompletedPlan(plan);
+      state.completed = completed;
+      const sourceCategories = plan.categories || state.categories || {};
+      state.categories = completed ? zeroCategories(sourceCategories) : sourceCategories;
+      const remaining = remainingMessagesFrom({ ...state, ...plan });
+      state.totalPlanMessages = completed
         ? 0
-        : hydratedTotal ?? Object.values(state.categories).reduce((sum, value) => sum + Number(value || 0), 0);
+        : remaining ?? Object.values(state.categories).reduce((sum, value) => sum + Number(value || 0), 0);
       render();
     }
 
@@ -1375,10 +1410,12 @@ function sensitiveCleanupWidgetHtml(): string {
     }
 
     function syncOpenAiState() {
-      hydrate(window.openai?.toolOutput || {});
-      hydrate(window.openai?.toolResponseMetadata || {});
-      hydrate(window.openai?.context || {});
-      hydrate(window.openai?.widgetState || {});
+      hydrate(mergedPlanData(
+        window.openai?.toolOutput || {},
+        window.openai?.context || {},
+        window.openai?.toolResponseMetadata || {},
+        window.openai?.widgetState || {}
+      ));
     }
 
     async function callTool(name, args) {
@@ -1407,6 +1444,7 @@ function sensitiveCleanupWidgetHtml(): string {
           : Math.max(0, state.totalPlanMessages - moved);
         state.totalPlanMessages = remaining;
         state.completed = remaining === 0;
+        if (state.completed) state.categories = zeroCategories(state.categories);
         state.lastResult = content;
         state.error = undefined;
         const nextWidgetState = {
