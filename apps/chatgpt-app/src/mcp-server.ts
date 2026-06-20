@@ -91,8 +91,8 @@ const bulkGovernanceCategorySchema = z.enum([
 ]);
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
-const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v6.html";
-const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-20-1545";
+const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v7.html";
+const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-20-1620";
 const SENSITIVE_CATEGORY_IDS = new Set([
   "security_or_account",
   "github_account_security",
@@ -1170,7 +1170,7 @@ function sensitiveCleanupWidgetHtml(): string {
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 24px 36px 28px 72px;
+      padding: 24px 48px 28px 128px;
       min-width: 280px;
       overflow: hidden;
     }
@@ -1178,7 +1178,7 @@ function sensitiveCleanupWidgetHtml(): string {
       display: grid;
       gap: 16px;
       width: 100%;
-      max-width: 620px;
+      max-width: 100%;
       min-height: 180px;
     }
     .head {
@@ -1261,6 +1261,11 @@ function sensitiveCleanupWidgetHtml(): string {
       color: color-mix(in srgb, CanvasText 45%, transparent);
       user-select: none;
     }
+    .meta {
+      font-size: 11px;
+      color: color-mix(in srgb, CanvasText 52%, transparent);
+      user-select: none;
+    }
   </style>
 </head>
 <body>
@@ -1275,6 +1280,7 @@ function sensitiveCleanupWidgetHtml(): string {
       <button id="refresh" type="button" class="secondary">Refresh</button>
     </div>
     <div id="status" class="status">Open a sensitive cleanup plan from chat.</div>
+    <div id="meta" class="meta">plan none</div>
     <div class="debug-version">${SENSITIVE_CLEANUP_WIDGET_VERSION}</div>
   </main>
   <script>
@@ -1293,6 +1299,7 @@ function sensitiveCleanupWidgetHtml(): string {
     const execute = document.getElementById("execute");
     const refresh = document.getElementById("refresh");
     const status = document.getElementById("status");
+    const meta = document.getElementById("meta");
 
     function firstObject(...values) {
       for (const value of values) {
@@ -1360,6 +1367,10 @@ function sensitiveCleanupWidgetHtml(): string {
       return Object.fromEntries(Object.keys(categoriesValue || {}).map((category) => [category, 0]));
     }
 
+    function shortPlanId(value) {
+      return typeof value === "string" && value.length > 8 ? value.slice(-8) : value || "none";
+    }
+
     function hydrate(payload = {}) {
       const plan = planDataFrom(payload);
       const nextOperationPlanId = plan.operationPlanId;
@@ -1415,6 +1426,9 @@ function sensitiveCleanupWidgetHtml(): string {
       } else {
         status.textContent = "Sensitive cleanup plan loaded from chat.";
       }
+      meta.textContent = "plan " + shortPlanId(state.operationPlanId)
+        + " | remaining " + String(state.totalPlanMessages)
+        + " | " + (state.completed ? "completed" : state.busy ? "moving" : "ready");
       window.openai?.notifyIntrinsicHeight?.();
     }
 
