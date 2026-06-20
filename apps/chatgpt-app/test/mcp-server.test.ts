@@ -83,7 +83,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "confirm_cleanup_plan")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "render_sensitive_cleanup_panel")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "render_sensitive_cleanup_panel")?._meta).toMatchObject({
-      "openai/outputTemplate": "ui://qferry/sensitive-cleanup.v5.html",
+      "openai/outputTemplate": "ui://qferry/sensitive-cleanup.v6.html",
     });
     expect(tools.tools.find((tool) => tool.name === "execute_sensitive_cleanup_from_ui")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "execute_sensitive_cleanup_from_ui")?._meta).toMatchObject({
@@ -109,13 +109,13 @@ describe("QFerry ChatGPT App MCP server", () => {
 
     const resources = await client.listResources();
     expect(resources.resources).toContainEqual(expect.objectContaining({
-      uri: "ui://qferry/sensitive-cleanup.v5.html",
+      uri: "ui://qferry/sensitive-cleanup.v6.html",
       mimeType: "text/html",
     }));
 
-    const resource = await client.readResource({ uri: "ui://qferry/sensitive-cleanup.v5.html" });
+    const resource = await client.readResource({ uri: "ui://qferry/sensitive-cleanup.v6.html" });
     expect(resource.contents[0]).toMatchObject({
-      uri: "ui://qferry/sensitive-cleanup.v5.html",
+      uri: "ui://qferry/sensitive-cleanup.v6.html",
       mimeType: "text/html;profile=mcp-app",
     });
     const html = (resource.contents[0] as { text?: string }).text ?? "";
@@ -124,9 +124,12 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(html).toContain("Done");
     expect(html).toContain("No remaining sensitive mail in this plan.");
     expect(html).toContain("completed");
-    expect(html).toContain("qferry-ui v2026-06-20-0035");
+    expect(html).toContain("qferry-ui v2026-06-20-1545");
     expect(html).toContain("notifyIntrinsicHeight");
     expect(html).toContain("syncOpenAiState");
+    expect(html).toContain("openai:set_globals");
+    expect(html).toContain("ui/notifications/tool-result");
+    expect(html).toContain("hydrateBridgePayload");
     expect(html).toContain("mergedPlanData");
     expect(html).toContain("zeroCategories");
     expect(html).toContain("toolResponseMetadata");

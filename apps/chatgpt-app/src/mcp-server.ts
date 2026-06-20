@@ -91,8 +91,8 @@ const bulkGovernanceCategorySchema = z.enum([
 ]);
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
-const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v5.html";
-const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-20-0035";
+const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v6.html";
+const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-20-1545";
 const SENSITIVE_CATEGORY_IDS = new Set([
   "security_or_account",
   "github_account_security",
@@ -1161,10 +1161,16 @@ function sensitiveCleanupWidgetHtml(): string {
       background: transparent;
       color: CanvasText;
     }
+    html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      overflow: hidden;
+    }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 20px 28px 22px 36px;
+      padding: 24px 36px 28px 72px;
       min-width: 280px;
       overflow: hidden;
     }
@@ -1368,6 +1374,7 @@ function sensitiveCleanupWidgetHtml(): string {
       state.lastResult = samePlan ? (plan.lastResult || state.lastResult) : plan.lastResult;
       const completed = samePlan ? (isCompletedPlan({ ...state, ...plan }) || state.completed) : isCompletedPlan(plan);
       state.completed = completed;
+      if (state.completed) state.busy = false;
       const sourceCategories = plan.categories || state.categories || {};
       state.categories = completed ? zeroCategories(sourceCategories) : sourceCategories;
       const remaining = remainingMessagesFrom({ ...state, ...plan });
@@ -1394,7 +1401,9 @@ function sensitiveCleanupWidgetHtml(): string {
       const hasPlan = Boolean(state.operationPlanId) && state.totalPlanMessages > 0 && !state.completed;
       execute.disabled = state.busy || !hasPlan || !state.confirmToken;
       execute.textContent = state.completed ? "Moved" : state.busy ? "Moving..." : "Move planned mail";
-      if (!hasPlan) {
+      if (state.busy) {
+        status.textContent = "Moving sensitive mail...";
+      } else if (!hasPlan) {
         const moved = state.lastResult?.moved ?? state.lastResult?.result?.moved;
         status.textContent = state.completed
           ? (moved === undefined ? "No remaining sensitive mail in this plan." : "Moved " + String(moved) + " messages.")
@@ -1418,6 +1427,32 @@ function sensitiveCleanupWidgetHtml(): string {
       ));
     }
 
+    function hydrateOpenAiGlobals(globals = {}) {
+      hydrate(mergedPlanData(
+        globals.toolOutput || {},
+        globals.context || {},
+        globals.toolResponseMetadata || {},
+        globals.widgetState || {}
+      ));
+    }
+
+    function hydrateBridgePayload(payload = {}) {
+      if (payload?.method === "openai:set_globals") {
+        hydrateOpenAiGlobals(payload.params?.globals || payload.params || {});
+        return;
+      }
+      if (payload?.method === "ui/notifications/tool-result") {
+        hydrate(payload.params || {});
+        syncOpenAiState();
+        return;
+      }
+      if (payload?.globals) {
+        hydrateOpenAiGlobals(payload.globals);
+        return;
+      }
+      hydrate(payload);
+    }
+
     async function callTool(name, args) {
       const openai = window.openai;
       if (openai?.callTool) return await openai.callTool(name, args);
@@ -1430,7 +1465,6 @@ function sensitiveCleanupWidgetHtml(): string {
       state.busy = true;
       state.error = undefined;
       render();
-      status.textContent = "Moving sensitive mail...";
       try {
         const result = await callTool("execute_sensitive_cleanup_from_ui", {
           operationPlanId: state.operationPlanId,
@@ -1466,7 +1500,8 @@ function sensitiveCleanupWidgetHtml(): string {
     });
 
     refresh.addEventListener("click", () => syncOpenAiState());
-    window.addEventListener("message", (event) => hydrate(event.data || {}));
+    window.addEventListener("message", (event) => hydrateBridgePayload(event.data || {}));
+    window.addEventListener("openai:set_globals", (event) => hydrateOpenAiGlobals(event.detail?.globals || event.detail || {}));
     window.addEventListener("focus", () => syncOpenAiState());
     document.addEventListener("visibilitychange", () => syncOpenAiState());
     syncOpenAiState();
