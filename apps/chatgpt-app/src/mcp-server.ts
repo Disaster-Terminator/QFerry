@@ -91,8 +91,8 @@ const bulkGovernanceCategorySchema = z.enum([
 ]);
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
-const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v9.html";
-const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-20-1840";
+const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v10.html";
+const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-21-1810";
 const SENSITIVE_CATEGORY_IDS = new Set([
   "security_or_account",
   "github_account_security",
@@ -1170,9 +1170,9 @@ function sensitiveCleanupWidgetHtml(): string {
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 24px 28px 28px;
+      padding: 0;
       min-width: 280px;
-      overflow: hidden;
+      overflow: clip;
     }
     .panel {
       display: grid;
@@ -1180,6 +1180,7 @@ function sensitiveCleanupWidgetHtml(): string {
       width: 100%;
       max-width: 100%;
       min-height: 180px;
+      padding: 24px 72px 28px;
     }
     .head {
       display: flex;
@@ -1188,6 +1189,7 @@ function sensitiveCleanupWidgetHtml(): string {
       gap: 16px;
     }
     h1 {
+      min-width: 0;
       margin: 0;
       font-size: 18px;
       line-height: 1.2;
@@ -1199,6 +1201,7 @@ function sensitiveCleanupWidgetHtml(): string {
       font-size: 13px;
       color: color-mix(in srgb, CanvasText 70%, transparent);
       white-space: nowrap;
+      padding-left: 12px;
     }
     .categories {
       display: grid;

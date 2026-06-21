@@ -240,7 +240,7 @@ describe("QFerry sensitive cleanup widget harness", () => {
     }));
   });
 
-  it("uses iframe-safe layout rules instead of compensating with oversized offsets", async () => {
+  it("uses a host-safe inner content area instead of placing content on the iframe edge", async () => {
     const style = extractStyle(await readWidgetHtml());
 
     expect(style).not.toMatch(/position\s*:\s*absolute/i);
@@ -248,6 +248,8 @@ describe("QFerry sensitive cleanup widget harness", () => {
     expect(style).not.toMatch(/margin-left\s*:\s*-/i);
     expect(style).not.toMatch(/left\s*:\s*-/i);
     expect(style).not.toMatch(/translateX\s*\(/i);
-    expect(style).not.toMatch(/padding\s*:\s*[^;]*\b(?:[6-9]\d|1\d{2,})px/i);
+    expect(style).toMatch(/body\s*\{[\s\S]*?padding:\s*0;/i);
+    expect(style).toMatch(/\.panel\s*\{[\s\S]*?padding:\s*24px\s+72px\s+28px;/i);
+    expect(style).toMatch(/\.head\s*\{[\s\S]*?justify-content:\s*space-between;/i);
   });
 });
