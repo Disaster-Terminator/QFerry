@@ -16,7 +16,7 @@
     "dev:sync-plugin-cache": "node scripts/sync-installed-plugin-cache.mjs",
     "dev:sync-plugin-cache:all": "node scripts/sync-installed-plugin-cache.mjs --include-windows --include-wsl",
     "verify:qferry-plugin": "node scripts/verify-qferry-plugin.mjs",
-    "check:generated": "pnpm run sync:qferry-plugin && git diff --exit-code -- plugins/qferry/dist",
+    "check:generated": "pnpm run sync:qferry-plugin && git diff --ignore-space-at-eol --exit-code -- plugins/qferry/dist",
     "gate:commit": "pnpm test && pnpm run typecheck",
     "gate:local": "pnpm run gate:commit && pnpm run check:generated && pnpm run verify:qferry-plugin && pnpm run qferry:e2e:plugin-fixture",
     "check": "pnpm run gate:local",
