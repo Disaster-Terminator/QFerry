@@ -16,7 +16,9 @@ await build({
   target: "node20",
   format: "cjs",
   banner: { js: "#!/usr/bin/env node" },
-  minify: true,
+  minifySyntax: true,
+  minifyWhitespace: true,
+  minifyIdentifiers: false,
   logLevel: "silent",
 });
 
