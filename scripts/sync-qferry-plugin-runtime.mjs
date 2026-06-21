@@ -23,7 +23,7 @@ await build({
 });
 
 const generatedText = await readFile(target, "utf8");
-const targetText = generatedText.replace(/[ \t]+$/gm, "");
+const targetText = generatedText.replace(/[ \t\r]+$/gm, "");
 if (targetText !== generatedText) {
   await writeFile(target, targetText, "utf8");
 }
