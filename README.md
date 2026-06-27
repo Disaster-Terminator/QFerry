@@ -2,6 +2,7 @@
 
 <p align="left">
   <img alt="runtime Node.js 20+" src="https://img.shields.io/badge/runtime-Node.js%2020%2B-339933">
+  <img alt="ci Node.js 24" src="https://img.shields.io/badge/CI-Node.js%2024-339933">
   <img alt="language TypeScript" src="https://img.shields.io/badge/language-TypeScript-3178C6">
   <img alt="package manager pnpm" src="https://img.shields.io/badge/package%20manager-pnpm-F69220">
   <img alt="interface MCP + CLI" src="https://img.shields.io/badge/interface-MCP%20%2B%20CLI-4B5563">
@@ -146,7 +147,18 @@ artifacts/e2e/<runId>/summary.md
 
 ## 开发者文档
 
-普通安装优先看本 README。Codex 本地插件安装、MCP runtime 包装和验收细节见 [QFerry Codex 本地 MCP 安装与验收](docs/CODEX_PLUGIN_ACCEPTANCE.md)。本地热迭代和终端治理入口见 [QFerry CLI](docs/CLI.md)。
+普通安装优先看本 README。维护者文档入口见 [docs/README.md](docs/README.md)。Codex 本地插件安装、MCP runtime 包装和验收细节见 [QFerry Codex 本地 MCP 安装与验收](docs/CODEX_PLUGIN_ACCEPTANCE.md)。本地热迭代和终端治理入口见 [QFerry CLI](docs/CLI.md)。
+
+仓库结构：
+
+```text
+packages/core         # 共享邮箱治理核心、provider、规则、operation plan、trace
+apps/chatgpt-app     # MCP server 和 ChatGPT App widget host adapter
+apps/cli             # 本地热迭代 CLI，复用 core
+plugins/qferry       # Codex 插件包装、skills、plugin-local MCP bundle
+scripts              # 生成、验收、插件缓存同步和 e2e 脚本
+docs                 # 架构、CLI、插件验收、云端 GPT Web 测试和维护审查
+```
 
 常用开发检查：
 
@@ -158,8 +170,8 @@ rtk uv run python -m unittest tests.test_probe_qqmail
 插件 e2e：
 
 ```powershell
-rtk pnpm qferry:e2e:plugin-fixture
-rtk pnpm qferry:e2e:plugin-qq-readonly
+rtk pnpm run qferry:e2e:plugin-fixture
+rtk pnpm run qferry:e2e:plugin-qq-readonly
 ```
 
 ## License

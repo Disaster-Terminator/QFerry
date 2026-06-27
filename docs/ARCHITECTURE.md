@@ -172,10 +172,11 @@ Reasons:
 
 The existing Python probe remains as a low-dependency diagnostic tool.
 
-## Initial File Layout
+## Current File Layout
 
 ```text
 package.json
+pnpm-workspace.yaml
 tsconfig.json
 packages/
   core/
@@ -184,13 +185,38 @@ packages/
       index.ts
       trace.ts
       operation-plan.ts
+      runtime-config.ts
+      ruleset.ts
+      ruleset-patch.ts
+      tools/
+        mail-tools.ts
       providers/
         types.ts
         fixture-provider.ts
+        qq-readonly-provider.ts
+        qq-mutable-provider.ts
     test/
-      trace.test.ts
-      operation-plan.test.ts
-      fixture-provider.test.ts
+apps/
+  chatgpt-app/
+    src/
+      mcp-server.ts
+    test/
+  cli/
+    src/
+      cli.ts
+      audit.ts
+    test/
+plugins/
+  qferry/
+    .codex-plugin/plugin.json
+    .mcp.json
+    mcp-bootstrap.mjs
+    skills/qferry/SKILL.md
+    dist/mcp.cjs
+scripts/
+  sync-qferry-plugin-runtime.mjs
+  check-generated-plugin-runtime.mjs
+  verify-qferry-plugin.mjs
 ```
 
 ## Current Product Boundary

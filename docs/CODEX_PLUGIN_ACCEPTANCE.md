@@ -260,10 +260,10 @@ Gmail-like 大批量治理验收优先走 `ruleset_governance_preview`，先确�
 QFerry 采用和 Retinue 相同的分层门控思想：
 
 - `pnpm run gate:commit`：源码层门控，跑单元测试和类型检查，不生成或改写插件 dist。
-- `pnpm run check:generated`：构建产物门控，先运行 `sync:qferry-plugin`，再用 `git diff --exit-code -- plugins/qferry/dist` 确认源码和提交中的插件 bundle 一致。
+- `pnpm run check:generated`：构建产物门控，运行 `scripts/check-generated-plugin-runtime.mjs`。本地会重新生成 `plugins/qferry/dist/mcp.cjs` 并与 `HEAD` 中提交的 bundle 做规范化比较；GitHub Actions 上若第三方依赖 bundle 出现平台特定差异，会继续进入后续 plugin verify 和 fixture e2e，以运行时验收为准。
 - `pnpm run gate:local` / `pnpm run check`：本地完整确定性门控，组合源码门控、构建产物门控、插件结构校验和 fixture 插件 e2e。
 - `.githooks/pre-commit`：运行 `gate:commit`。
-- `.githooks/post-commit`：运行 `check:generated`，发现 dist 漏提交时提示 amend。
+- `.githooks/post-commit`：运行 `check:generated`，发现本地 dist 漏提交时提示 amend。
 - `.githooks/pre-push` 和 GitHub Actions CI：运行本地/CI 可重复的完整门控；真实 QQ readonly e2e 因依赖本机授权码，不放入公开 CI。
 
 首次启用本仓库 hooks：

@@ -7,7 +7,7 @@ This e2e path verifies QFerry's trace-first flow without touching QQ Mail, Gmail
 Run:
 
 ```bash
-pnpm qferry:e2e:fixture
+pnpm run qferry:e2e:fixture
 ```
 
 Expected behavior:
