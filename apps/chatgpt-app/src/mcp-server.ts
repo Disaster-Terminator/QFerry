@@ -91,8 +91,8 @@ const bulkGovernanceCategorySchema = z.enum([
 ]);
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
-const SENSITIVE_CLEANUP_WIDGET_URI = "ui://qferry/sensitive-cleanup.v10.html";
-const SENSITIVE_CLEANUP_WIDGET_VERSION = "qferry-ui v2026-06-21-1810";
+const CLEANUP_EXECUTION_WIDGET_URI = "ui://qferry/cleanup-execution.v11.html";
+const CLEANUP_EXECUTION_WIDGET_VERSION = "qferry-ui v2026-06-28-1125";
 const SENSITIVE_CATEGORY_IDS = new Set([
   "security_or_account",
   "github_account_security",
@@ -176,18 +176,18 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
   };
 
   server.registerResource(
-    "qferry_sensitive_cleanup_widget",
-    SENSITIVE_CLEANUP_WIDGET_URI,
+    "qferry_cleanup_execution_widget",
+    CLEANUP_EXECUTION_WIDGET_URI,
     {
-      title: "QFerry Sensitive Cleanup",
-      description: "Confirm and execute account-security mail cleanup from a user-clicked ChatGPT app UI.",
+      title: "QFerry Cleanup Execution",
+      description: "Confirm and execute planned mail cleanup from a user-clicked ChatGPT app UI.",
       mimeType: "text/html",
     },
     async (uri) => ({
       contents: [{
         uri: uri.href,
         mimeType: "text/html;profile=mcp-app",
-        text: sensitiveCleanupWidgetHtml(),
+        text: cleanupExecutionWidgetHtml(),
         _meta: {
           ui: {
             prefersBorder: true,
@@ -196,7 +196,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
               resourceDomains: [],
             },
           },
-          "openai/widgetDescription": "QFerry confirmation card for sensitive account-security mail cleanup.",
+          "openai/widgetDescription": "QFerry confirmation card for planned mail cleanup.",
           "openai/widgetPrefersBorder": true,
           "openai/widgetCSP": {
             connect_domains: [],
@@ -732,47 +732,87 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
     },
   );
 
+  const renderCleanupExecutionPanelTool = async (input: { operationPlanId: string }) => {
+    return instrumentMcpTool("render_cleanup_execution_panel", input, async () => {
+      const stored = await getStoredPlan(planStore, input.operationPlanId);
+      const policy = stored.executionPolicy ?? normalExecutionPolicy();
+      const response = cleanupExecutionPanelContent(stored, policy);
+      return toToolResult(
+        await withMcpAudit("render_cleanup_execution_panel", stored.plan.runId, input, response),
+        {
+          operationPlanId: stored.plan.operationPlanId,
+          confirmToken: policy.confirmToken,
+          categories: policy.categories,
+        },
+      );
+    });
+  };
+
+  const executeCleanupFromUiTool = async (input: { operationPlanId: string; confirmToken?: string; maxMessages?: number }) => {
+    return instrumentMcpTool("execute_cleanup_from_ui", sanitizeUiExecutionInput(input), async () => {
+      return enqueueMutationExecution(async () => {
+        const stored = await getStoredPlan(planStore, input.operationPlanId);
+        const policy = stored.executionPolicy ?? normalExecutionPolicy();
+        if (policy.sensitivity === "sensitive" && (!policy.confirmToken || policy.confirmToken !== input.confirmToken)) {
+          throw new Error("USER_CONFIRMATION_REQUIRED");
+        }
+        const plan = stored.plan.status === "confirmed"
+          ? stored.plan
+          : {
+              ...confirmOperationPlan(stored.plan, input.operationPlanId),
+              confirmationRequired: false,
+            };
+        const maxMessages = input.maxMessages ?? (plan.action === "move" ? DEFAULT_MOVE_EXECUTION_MAX_MESSAGES : undefined);
+        const result = await tools.executeCleanup({ plan, maxMessages });
+        if (result.result.status === "partially_executed") {
+          await planStore.set(input.operationPlanId, {
+            plan: {
+              ...plan,
+              messageRefs: plan.messageRefs.slice(result.result.attemptedMessages),
+            },
+            expiresAt: Date.now() + PLAN_TTL_MS,
+            previewSummary: stored.previewSummary,
+            executionPolicy: policy,
+          });
+        } else {
+          await planStore.delete(input.operationPlanId);
+          await planStore.markConsumed(input.operationPlanId);
+        }
+        const response = compactUiExecutionResult(result.result, policy);
+        return toToolResult(await withMcpAudit("execute_cleanup_from_ui", plan.runId, sanitizeUiExecutionInput(input), response));
+      });
+    });
+  };
+
   server.registerTool(
-    "render_sensitive_cleanup_panel",
+    "render_cleanup_execution_panel",
     {
-      title: "Render sensitive cleanup panel",
-      description: "Render a QFerry UI card for sensitive account-security cleanup. Use this when execute_cleanup returns SENSITIVE_UI_ONLY or when a plan is marked sensitive.",
+      title: "Render cleanup execution panel",
+      description: "Render a QFerry UI card for executing a stored cleanup plan after an explicit user click. Sensitive plans keep their confirmation token app-only.",
       inputSchema: {
         operationPlanId: z.string(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       _meta: {
-        ui: { resourceUri: SENSITIVE_CLEANUP_WIDGET_URI },
-        "openai/outputTemplate": SENSITIVE_CLEANUP_WIDGET_URI,
+        ui: { resourceUri: CLEANUP_EXECUTION_WIDGET_URI },
+        "openai/outputTemplate": CLEANUP_EXECUTION_WIDGET_URI,
         "openai/toolInvocation/invoking": "Opening QFerry panel",
         "openai/toolInvocation/invoked": "QFerry panel ready",
       },
     },
     async (input) => {
-      return instrumentMcpTool("render_sensitive_cleanup_panel", input, async () => {
-        const stored = await getStoredPlan(planStore, input.operationPlanId);
-        const policy = stored.executionPolicy ?? normalExecutionPolicy();
-        const response = sensitiveCleanupPanelContent(stored, policy);
-        return toToolResult(
-          await withMcpAudit("render_sensitive_cleanup_panel", stored.plan.runId, input, response),
-          {
-            operationPlanId: stored.plan.operationPlanId,
-            confirmToken: policy.confirmToken,
-            categories: policy.categories,
-          },
-        );
-      });
+      return renderCleanupExecutionPanelTool(input);
     },
   );
 
   server.registerTool(
-    "execute_sensitive_cleanup_from_ui",
+    "execute_cleanup_from_ui",
     {
-      title: "Execute sensitive cleanup from UI",
-      description: "Execute a sensitive account-security cleanup plan after an explicit user click in the QFerry ChatGPT app UI.",
+      title: "Execute cleanup from UI",
+      description: "Execute a cleanup plan after an explicit user click in the QFerry ChatGPT app UI. Sensitive plans require the app-only confirmation token.",
       inputSchema: {
         operationPlanId: z.string(),
-        confirmToken: z.string(),
+        confirmToken: z.string().optional(),
         maxMessages: z.number().int().min(1).max(MAX_MOVE_EXECUTION_MAX_MESSAGES).optional(),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -780,47 +820,12 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
         ui: { visibility: ["app"] },
         "openai/widgetAccessible": true,
         "openai/visibility": "private",
-        "openai/toolInvocation/invoking": "Moving sensitive mail",
-        "openai/toolInvocation/invoked": "Sensitive cleanup complete",
+        "openai/toolInvocation/invoking": "Moving planned mail",
+        "openai/toolInvocation/invoked": "Cleanup complete",
       },
     },
     async (input) => {
-      return instrumentMcpTool("execute_sensitive_cleanup_from_ui", sanitizeSensitiveUiInput(input), async () => {
-        return enqueueMutationExecution(async () => {
-          const stored = await getStoredPlan(planStore, input.operationPlanId);
-          const policy = stored.executionPolicy;
-          if (!policy || policy.sensitivity !== "sensitive") {
-            throw new Error("SENSITIVE_PLAN_REQUIRED");
-          }
-          if (!policy.confirmToken || policy.confirmToken !== input.confirmToken) {
-            throw new Error("USER_CONFIRMATION_REQUIRED");
-          }
-          const plan = stored.plan.status === "confirmed"
-            ? stored.plan
-            : {
-                ...confirmOperationPlan(stored.plan, input.operationPlanId),
-                confirmationRequired: false,
-              };
-          const maxMessages = input.maxMessages ?? (plan.action === "move" ? DEFAULT_MOVE_EXECUTION_MAX_MESSAGES : undefined);
-          const result = await tools.executeCleanup({ plan, maxMessages });
-          if (result.result.status === "partially_executed") {
-            await planStore.set(input.operationPlanId, {
-              plan: {
-                ...plan,
-                messageRefs: plan.messageRefs.slice(result.result.attemptedMessages),
-              },
-              expiresAt: Date.now() + PLAN_TTL_MS,
-              previewSummary: stored.previewSummary,
-              executionPolicy: policy,
-            });
-          } else {
-            await planStore.delete(input.operationPlanId);
-            await planStore.markConsumed(input.operationPlanId);
-          }
-          const response = compactSensitiveUiExecutionResult(result.result, policy);
-          return toToolResult(await withMcpAudit("execute_sensitive_cleanup_from_ui", plan.runId, sanitizeSensitiveUiInput(input), response));
-        });
-      });
+      return executeCleanupFromUiTool(input);
     },
   );
 
@@ -843,7 +848,7 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
             throw new Error(`Operation plan is not confirmed: ${input.operationPlanId}`);
           }
           if (stored.executionPolicy?.sensitivity === "sensitive") {
-            throw new Error("SENSITIVE_UI_ONLY: render_sensitive_cleanup_panel must be used for this account-security cleanup plan");
+            throw new Error("SENSITIVE_UI_ONLY: render_cleanup_execution_panel must be used for this cleanup plan");
           }
           const maxMessages = input.maxMessages ?? (stored.plan.action === "move" ? DEFAULT_MOVE_EXECUTION_MAX_MESSAGES : undefined);
           try {
@@ -979,7 +984,7 @@ function compactExecuteCleanupResult(result: ExecuteCleanupResult): { result: Om
   return { result: compactResult };
 }
 
-function compactSensitiveUiExecutionResult(result: ExecuteCleanupResult, policy: PlanExecutionPolicy) {
+function compactUiExecutionResult(result: ExecuteCleanupResult, policy: PlanExecutionPolicy) {
   return {
     ok: result.status === "executed" || result.status === "partially_executed",
     result: compactExecuteCleanupResult(result).result,
@@ -989,9 +994,9 @@ function compactSensitiveUiExecutionResult(result: ExecuteCleanupResult, policy:
   };
 }
 
-function sensitiveCleanupPanelContent(stored: StoredPlan, policy: PlanExecutionPolicy) {
+function cleanupExecutionPanelContent(stored: StoredPlan, policy: PlanExecutionPolicy) {
   return {
-    kind: "qferry_sensitive_cleanup_panel",
+    kind: "qferry_cleanup_execution_panel",
     operationPlanId: stored.plan.operationPlanId,
     runId: stored.plan.runId,
     sensitivity: policy.sensitivity,
@@ -1140,7 +1145,7 @@ function messageRefKeyForPolicy(ref: MessageRef): string {
   return `${ref.provider}:${ref.accountAlias}:${ref.folder}:${ref.uidValidity ?? ""}:${ref.uid}`;
 }
 
-function sanitizeSensitiveUiInput(input: { operationPlanId: string; maxMessages?: number }) {
+function sanitizeUiExecutionInput(input: { operationPlanId: string; maxMessages?: number }) {
   return {
     operationPlanId: input.operationPlanId,
     ...(input.maxMessages !== undefined ? { maxMessages: input.maxMessages } : {}),
@@ -1148,7 +1153,7 @@ function sanitizeSensitiveUiInput(input: { operationPlanId: string; maxMessages?
   };
 }
 
-function sensitiveCleanupWidgetHtml(): string {
+function cleanupExecutionWidgetHtml(): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -1274,7 +1279,7 @@ function sensitiveCleanupWidgetHtml(): string {
 <body>
   <main class="panel" aria-live="polite">
     <div class="head">
-      <h1>QFerry sensitive cleanup</h1>
+      <h1>QFerry cleanup execution</h1>
       <div id="total" class="count">Waiting for plan</div>
     </div>
     <ul id="categories" class="categories"></ul>
@@ -1282,14 +1287,15 @@ function sensitiveCleanupWidgetHtml(): string {
       <button id="execute" type="button" disabled>Move planned mail</button>
       <button id="refresh" type="button" class="secondary">Refresh</button>
     </div>
-    <div id="status" class="status">Open a sensitive cleanup plan from chat.</div>
+    <div id="status" class="status">Open a cleanup plan from chat.</div>
     <div id="meta" class="meta">plan none</div>
-    <div class="debug-version">${SENSITIVE_CLEANUP_WIDGET_VERSION}</div>
+    <div class="debug-version">${CLEANUP_EXECUTION_WIDGET_VERSION}</div>
   </main>
   <script>
     const state = {
       operationPlanId: undefined,
       confirmToken: undefined,
+      sensitivity: "normal",
       categories: {},
       totalPlanMessages: 0,
       completed: false,
@@ -1396,6 +1402,7 @@ function sensitiveCleanupWidgetHtml(): string {
       const nextWidgetState = {
         operationPlanId: plan.operationPlanId,
         runId: plan.runId,
+        sensitivity: plan.sensitivity || "normal",
         categories: plan.categories || {},
         totalPlanMessages: plan.totalPlanMessages ?? Object.values(plan.categories || {}).reduce((sum, value) => sum + Number(value || 0), 0),
         completed: false,
@@ -1414,7 +1421,8 @@ function sensitiveCleanupWidgetHtml(): string {
         state.error = undefined;
       }
       state.operationPlanId = nextOperationPlanId || state.operationPlanId;
-      state.confirmToken = plan.confirmToken || state.confirmToken;
+      state.confirmToken = samePlan ? (plan.confirmToken || state.confirmToken) : plan.confirmToken;
+      state.sensitivity = plan.sensitivity || (samePlan ? state.sensitivity : "normal") || "normal";
       state.lastResult = samePlan ? (plan.lastResult || state.lastResult) : plan.lastResult;
       const completed = samePlan ? (isCompletedPlan({ ...state, ...plan }) || state.completed) : isCompletedPlan(plan);
       state.completed = completed;
@@ -1443,24 +1451,28 @@ function sensitiveCleanupWidgetHtml(): string {
         categories.append(item);
       }
       const hasPlan = Boolean(state.operationPlanId) && state.totalPlanMessages > 0 && !state.completed;
-      execute.disabled = state.busy || !hasPlan || !state.confirmToken;
+      const tokenRequired = state.sensitivity === "sensitive";
+      execute.disabled = state.busy || !hasPlan || (tokenRequired && !state.confirmToken);
       execute.textContent = state.completed ? "Moved" : state.busy ? "Moving..." : "Move planned mail";
       if (state.busy) {
-        status.textContent = "Moving sensitive mail...";
+        status.textContent = "Moving planned mail...";
       } else if (!hasPlan) {
         const moved = state.lastResult?.moved ?? state.lastResult?.result?.moved;
         status.textContent = state.completed
-          ? (moved === undefined ? "No remaining sensitive mail in this plan." : "Moved " + String(moved) + " messages.")
-          : "Open a sensitive cleanup plan from chat.";
+          ? (moved === undefined ? "No remaining mail in this plan." : "Moved " + String(moved) + " messages.")
+          : "Open a cleanup plan from chat.";
       } else if (state.error) {
         status.textContent = state.error;
-      } else if (!state.confirmToken) {
-        status.textContent = "Sensitive cleanup plan loaded; waiting for secure app metadata.";
+      } else if (tokenRequired && !state.confirmToken) {
+        status.textContent = "Sensitive plan loaded; waiting for app-only authorization metadata.";
       } else {
-        status.textContent = "Sensitive cleanup plan loaded from chat.";
+        status.textContent = tokenRequired
+          ? "Sensitive plan loaded from chat."
+          : "Cleanup plan ready for user confirmation.";
       }
       meta.textContent = "plan " + shortPlanId(state.operationPlanId)
         + " | remaining " + String(state.totalPlanMessages)
+        + " | " + String(state.sensitivity)
         + " | " + (state.completed ? "completed" : state.busy ? "moving" : "ready");
       window.openai?.notifyIntrinsicHeight?.();
     }
@@ -1517,11 +1529,12 @@ function sensitiveCleanupWidgetHtml(): string {
       state.error = undefined;
       render();
       try {
-        const result = await callTool("execute_sensitive_cleanup_from_ui", {
+        const args = {
           operationPlanId: state.operationPlanId,
-          confirmToken: state.confirmToken,
           maxMessages: state.totalPlanMessages,
-        });
+        };
+        if (state.confirmToken) args.confirmToken = state.confirmToken;
+        const result = await callTool("execute_cleanup_from_ui", args);
         const content = result?.structuredContent || result || {};
         const moved = Number(content.moved ?? content.result?.moved ?? 0);
         const remaining = Number.isFinite(Number(content.result?.remainingMessages))
@@ -1534,6 +1547,7 @@ function sensitiveCleanupWidgetHtml(): string {
         state.error = undefined;
         const nextWidgetState = {
           operationPlanId: state.operationPlanId,
+          sensitivity: state.sensitivity,
           categories: state.categories,
           totalPlanMessages: remaining,
           completed: state.completed,

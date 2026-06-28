@@ -72,8 +72,8 @@ async function readWidgetHtml(): Promise<string> {
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   try {
     const resources = await client.listResources();
-    const resourceUri = resources.resources.find((resource) => resource.uri.includes("sensitive-cleanup"))?.uri;
-    if (!resourceUri) throw new Error("Sensitive cleanup widget resource not found");
+    const resourceUri = resources.resources.find((resource) => resource.uri.includes("cleanup-execution"))?.uri;
+    if (!resourceUri) throw new Error("Cleanup execution widget resource not found");
     const resource = await client.readResource({ uri: resourceUri });
     return (resource.contents[0] as { text?: string }).text ?? "";
   } finally {
@@ -151,11 +151,46 @@ async function mountWidget(options: {
   };
 }
 
-describe("QFerry sensitive cleanup widget harness", () => {
+describe("QFerry cleanup execution widget harness", () => {
+  it("lets normal cleanup plans execute from the UI without sensitive metadata", async () => {
+    const mounted = await mountWidget({
+      toolOutput: {
+        operationPlanId: "op_normal_plan",
+        runId: "run-normal-infra",
+        sensitivity: "normal",
+        categories: { infra: 95 },
+        totalPlanMessages: 95,
+      },
+      toolResponseMetadata: {},
+      widgetState: {},
+      callToolResult: {
+        structuredContent: {
+          moved: 95,
+          result: { remainingMessages: 0, status: "executed" },
+        },
+      },
+    });
+
+    expect(mounted.total.textContent).toBe("95 planned");
+    expect(mounted.execute.textContent).toBe("Move planned mail");
+    expect(mounted.execute.disabled).toBe(false);
+    expect(mounted.status.textContent).toBe("Cleanup plan ready for user confirmation.");
+
+    await mounted.execute.click();
+
+    expect(mounted.callTool).toHaveBeenCalledWith("execute_cleanup_from_ui", {
+      operationPlanId: "op_normal_plan",
+      maxMessages: 95,
+    });
+    expect(mounted.total.textContent).toBe("Done");
+    expect(mounted.status.textContent).toBe("Moved 95 messages.");
+  });
+
   it("does not apply a completed widgetState from a different operation plan", async () => {
     const mounted = await mountWidget({
       toolOutput: {
         operationPlanId: "op_new_plan",
+        sensitivity: "sensitive",
         categories: { account_security: 1 },
         totalPlanMessages: 1,
       },
@@ -172,7 +207,7 @@ describe("QFerry sensitive cleanup widget harness", () => {
     expect(mounted.total.textContent).toBe("1 planned");
     expect(mounted.execute.textContent).toBe("Move planned mail");
     expect(mounted.execute.disabled).toBe(false);
-    expect(mounted.status.textContent).toBe("Sensitive cleanup plan loaded from chat.");
+    expect(mounted.status.textContent).toBe("Sensitive plan loaded from chat.");
     expect(mounted.meta.textContent).toContain("ready");
     expect(mounted.setWidgetState).toHaveBeenCalledWith(expect.objectContaining({
       operationPlanId: "op_new_plan",
@@ -224,7 +259,7 @@ describe("QFerry sensitive cleanup widget harness", () => {
 
     await mounted.execute.click();
 
-    expect(mounted.callTool).toHaveBeenCalledWith("execute_sensitive_cleanup_from_ui", {
+    expect(mounted.callTool).toHaveBeenCalledWith("execute_cleanup_from_ui", {
       operationPlanId: "op_click_plan",
       confirmToken: "confirm-click",
       maxMessages: 1,

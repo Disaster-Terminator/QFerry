@@ -56,8 +56,8 @@ describe("QFerry ChatGPT App MCP server", () => {
       "ruleset_governance_campaign_preview",
       "apply_ruleset_patch",
       "confirm_cleanup_plan",
-      "render_sensitive_cleanup_panel",
-      "execute_sensitive_cleanup_from_ui",
+      "render_cleanup_execution_panel",
+      "execute_cleanup_from_ui",
       "execute_cleanup",
     ]);
     expect(tools.tools.find((tool) => tool.name === "get_status")?.annotations?.readOnlyHint).toBe(true);
@@ -81,12 +81,12 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "ruleset_governance_campaign_preview")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "apply_ruleset_patch")?.annotations?.destructiveHint).toBe(false);
     expect(tools.tools.find((tool) => tool.name === "confirm_cleanup_plan")?.annotations?.destructiveHint).toBe(false);
-    expect(tools.tools.find((tool) => tool.name === "render_sensitive_cleanup_panel")?.annotations?.readOnlyHint).toBe(true);
-    expect(tools.tools.find((tool) => tool.name === "render_sensitive_cleanup_panel")?._meta).toMatchObject({
-      "openai/outputTemplate": "ui://qferry/sensitive-cleanup.v10.html",
+    expect(tools.tools.find((tool) => tool.name === "render_cleanup_execution_panel")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "render_cleanup_execution_panel")?._meta).toMatchObject({
+      "openai/outputTemplate": "ui://qferry/cleanup-execution.v11.html",
     });
-    expect(tools.tools.find((tool) => tool.name === "execute_sensitive_cleanup_from_ui")?.annotations?.destructiveHint).toBe(false);
-    expect(tools.tools.find((tool) => tool.name === "execute_sensitive_cleanup_from_ui")?._meta).toMatchObject({
+    expect(tools.tools.find((tool) => tool.name === "execute_cleanup_from_ui")?.annotations?.destructiveHint).toBe(false);
+    expect(tools.tools.find((tool) => tool.name === "execute_cleanup_from_ui")?._meta).toMatchObject({
       ui: { visibility: ["app"] },
       "openai/widgetAccessible": true,
       "openai/visibility": "private",
@@ -97,7 +97,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
-  it("exposes a ChatGPT app UI resource for sensitive cleanup", async () => {
+  it("exposes a ChatGPT app UI resource for cleanup execution", async () => {
     const server = createQFerryMcpServer();
     const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -109,22 +109,22 @@ describe("QFerry ChatGPT App MCP server", () => {
 
     const resources = await client.listResources();
     expect(resources.resources).toContainEqual(expect.objectContaining({
-      uri: "ui://qferry/sensitive-cleanup.v10.html",
+      uri: "ui://qferry/cleanup-execution.v11.html",
       mimeType: "text/html",
     }));
 
-    const resource = await client.readResource({ uri: "ui://qferry/sensitive-cleanup.v10.html" });
+    const resource = await client.readResource({ uri: "ui://qferry/cleanup-execution.v11.html" });
     expect(resource.contents[0]).toMatchObject({
-      uri: "ui://qferry/sensitive-cleanup.v10.html",
+      uri: "ui://qferry/cleanup-execution.v11.html",
       mimeType: "text/html;profile=mcp-app",
     });
     const html = (resource.contents[0] as { text?: string }).text ?? "";
-    expect(html).toContain("execute_sensitive_cleanup_from_ui");
+    expect(html).toContain("execute_cleanup_from_ui");
     expect(html).toContain("Move planned mail");
     expect(html).toContain("Done");
-    expect(html).toContain("No remaining sensitive mail in this plan.");
+    expect(html).toContain("No remaining mail in this plan.");
     expect(html).toContain("completed");
-    expect(html).toContain("qferry-ui v2026-06-21-1810");
+    expect(html).toContain("qferry-ui v2026-06-28-1125");
     expect(html).toContain("plan none");
     expect(html).toContain("shortPlanId");
     expect(html).toContain("remaining ");
@@ -139,7 +139,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(html).toContain("zeroCategories");
     expect(html).toContain("toolResponseMetadata");
     expect(html).not.toContain("Move selected mail");
-    expect(html).not.toContain("No sensitive cleanup plan is loaded");
+    expect(html).not.toContain("No cleanup plan is loaded");
 
     await client.close();
     await server.close();
@@ -1622,7 +1622,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     await server.close();
   });
 
-  it("routes sensitive cleanup through the app-only UI tool", async () => {
+  it("routes sensitive plans through the cleanup execution UI tool", async () => {
     const messages: MessageSummary[] = [
       {
         ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
@@ -1686,13 +1686,13 @@ describe("QFerry ChatGPT App MCP server", () => {
     const operationPlanId = String((preview.structuredContent as { plan?: { operationPlanId?: string } }).plan?.operationPlanId);
 
     const panel = await client.callTool({
-      name: "render_sensitive_cleanup_panel",
+      name: "render_cleanup_execution_panel",
       arguments: { operationPlanId },
     });
     const panelText = JSON.stringify(panel.structuredContent);
     const panelMeta = panel._meta as { confirmToken?: string; categories?: Record<string, number> } | undefined;
     expect(panel.structuredContent).toMatchObject({
-      kind: "qferry_sensitive_cleanup_panel",
+      kind: "qferry_cleanup_execution_panel",
       operationPlanId,
       sensitivity: "sensitive",
       categories: { github_account_security: 1 },
@@ -1711,14 +1711,14 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(movedRefs).toHaveLength(0);
 
     const wrongTokenExecute = await client.callTool({
-      name: "execute_sensitive_cleanup_from_ui",
+      name: "execute_cleanup_from_ui",
       arguments: { operationPlanId, confirmToken: "wrong-token" },
     });
     expect(wrongTokenExecute.isError).toBe(true);
     expect(JSON.stringify(wrongTokenExecute.content)).toContain("USER_CONFIRMATION_REQUIRED");
 
     const uiExecute = await client.callTool({
-      name: "execute_sensitive_cleanup_from_ui",
+      name: "execute_cleanup_from_ui",
       arguments: { operationPlanId, confirmToken: String(panelMeta?.confirmToken), maxMessages: 1 },
     });
     expect(uiExecute.structuredContent).toMatchObject({
@@ -1733,6 +1733,104 @@ describe("QFerry ChatGPT App MCP server", () => {
       },
     });
     expect(JSON.stringify(uiExecute.structuredContent)).not.toContain("uid");
+    expect(movedRefs).toHaveLength(1);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("routes normal cleanup through the app-only UI tool without sensitive metadata", async () => {
+    const messages: MessageSummary[] = [
+      {
+        ref: { provider: "fixture", accountAlias: "demo", folder: "INBOX", uid: "1" },
+        from: "alert@datadoghq.com",
+        subject: "Monitor recovered",
+        date: "2020-01-01T00:00:00.000Z",
+        snippet: "",
+        flags: [],
+      },
+    ];
+    const movedRefs: unknown[] = [];
+    const provider: MailProvider = {
+      async listMailboxes() {
+        return [{ path: "INBOX" }, { path: "其他文件夹/04_基础设施运维" }];
+      },
+      async scanMailboxMetadata() {
+        return messages;
+      },
+      async fetchMessage(ref) {
+        const message = messages.find((candidate) => candidate.ref.uid === ref.uid) ?? messages[0]!;
+        return { ...message, bodyText: "" };
+      },
+      async getCapabilitySnapshot() {
+        return {
+          provider: "fixture",
+          accountAlias: "demo",
+          supportsListMailboxes: true,
+          supportsMetadataScan: true,
+          supportsFetchMessage: true,
+          supportsMutation: true,
+          mutationActions: ["move"],
+          maxRecommendedScanLimit: 50,
+        };
+      },
+      async moveMessages(refs) {
+        movedRefs.push(...refs);
+        return { moved: refs.length };
+      },
+    };
+    const server = createQFerryMcpServer({ provider });
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    const preview = await client.callTool({
+      name: "plan_cleanup",
+      arguments: {
+        runId: "run-normal-ui-infra",
+        folder: "INBOX",
+        limit: 10,
+        action: "move",
+        target: { folder: "其他文件夹/04_基础设施运维" },
+        selectedGroupIds: ["infra"],
+        rules: [{ id: "infra-alerts", groupId: "infra", match: { fromIncludes: "@" } }],
+      },
+    });
+    const operationPlanId = String((preview.structuredContent as { plan?: { operationPlanId?: string } }).plan?.operationPlanId);
+
+    const panel = await client.callTool({
+      name: "render_cleanup_execution_panel",
+      arguments: { operationPlanId },
+    });
+    const panelMeta = panel._meta as { confirmToken?: string; categories?: Record<string, number> } | undefined;
+    expect(panel.structuredContent).toMatchObject({
+      kind: "qferry_cleanup_execution_panel",
+      operationPlanId,
+      sensitivity: "normal",
+      categories: { infra: 1 },
+      totalPlanMessages: 1,
+    });
+    expect(panelMeta?.confirmToken).toBeUndefined();
+
+    const uiExecute = await client.callTool({
+      name: "execute_cleanup_from_ui",
+      arguments: { operationPlanId, maxMessages: 1 },
+    });
+    expect(uiExecute.structuredContent).toMatchObject({
+      ok: true,
+      moved: 1,
+      categories: { infra: 1 },
+      result: {
+        operationPlanId,
+        status: "executed",
+        attemptedMessages: 1,
+        mutationsAttempted: 1,
+      },
+    });
     expect(movedRefs).toHaveLength(1);
 
     await client.close();
