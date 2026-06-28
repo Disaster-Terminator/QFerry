@@ -805,13 +805,19 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       const stored = await getStoredPlan(planStore, input.operationPlanId);
       const policy = stored.executionPolicy ?? normalExecutionPolicy();
       const response = cleanupExecutionPanelContent(stored, policy);
+      const componentMeta = {
+        operationPlanId: response.operationPlanId,
+        runId: response.runId,
+        sensitivity: response.sensitivity,
+        categories: response.categories,
+        action: response.action,
+        totalPlanMessages: response.totalPlanMessages,
+        expiresAt: response.expiresAt,
+        ...(policy.confirmToken ? { confirmToken: policy.confirmToken } : {}),
+      };
       return toToolResult(
         await withMcpAudit("render_cleanup_execution_panel", stored.plan.runId, input, response),
-        {
-          operationPlanId: stored.plan.operationPlanId,
-          confirmToken: policy.confirmToken,
-          categories: policy.categories,
-        },
+        componentMeta,
       );
     });
   };
@@ -2037,13 +2043,14 @@ function summarizeMcpToolResult(structuredContent: object): Record<string, unkno
 
   return {
     provider: result?.provider ?? plan?.provider ?? preview?.provider ?? campaign?.provider ?? report?.provider,
-    operationPlanId: result?.operationPlanId ?? plan?.operationPlanId,
+    operationPlanId: result?.operationPlanId ?? plan?.operationPlanId ?? content.operationPlanId,
     operationPlanIds,
     status: result?.status ?? plan?.status,
-    action: result?.action ?? plan?.action,
+    action: result?.action ?? plan?.action ?? content.action,
     target: plan?.target,
     selectedMessageRefs: preview?.selectedMessageRefs ?? report?.selectedMessageRefs,
     totalPlanMessages: result?.totalPlanMessages
+      ?? content.totalPlanMessages
       ?? (Array.isArray(plan?.messageRefs) ? plan.messageRefs.length : undefined)
       ?? (typeof plan?.messageRefCount === "number" ? plan.messageRefCount : undefined),
     attemptedMessages: result?.attemptedMessages,

@@ -244,6 +244,50 @@ describe("QFerry cleanup execution widget harness", () => {
     }));
   });
 
+  it("can hydrate a plan from app-only tool response metadata", async () => {
+    const mounted = await mountWidget({
+      toolOutput: {},
+      toolResponseMetadata: {
+        operationPlanId: "op_meta_only_plan",
+        runId: "run-meta-only",
+        sensitivity: "normal",
+        categories: { system: 6 },
+        totalPlanMessages: 6,
+      },
+      widgetState: {},
+    });
+
+    expect(mounted.total.textContent).toBe("6 planned");
+    expect(mounted.execute.textContent).toBe("Move planned mail");
+    expect(mounted.execute.disabled).toBe(false);
+    expect(mounted.status.textContent).toBe("Cleanup plan ready for user confirmation.");
+    expect(mounted.meta.textContent).toContain("ready");
+    expect(mounted.callTool).toHaveBeenCalledWith("record_widget_diagnostic", expect.objectContaining({
+      event: "widget_hydrated",
+      operationPlanId: "op_meta_only_plan",
+      runId: "run-meta-only",
+      totalPlanMessages: 6,
+    }));
+  });
+
+  it("keeps sensitive metadata-only plans disabled until the app-only confirm token arrives", async () => {
+    const mounted = await mountWidget({
+      toolOutput: {},
+      toolResponseMetadata: {
+        operationPlanId: "op_sensitive_meta_only",
+        runId: "run-sensitive-meta-only",
+        sensitivity: "sensitive",
+        categories: { identity_security: 3 },
+        totalPlanMessages: 3,
+      },
+      widgetState: {},
+    });
+
+    expect(mounted.total.textContent).toBe("3 planned");
+    expect(mounted.execute.disabled).toBe(true);
+    expect(mounted.status.textContent).toBe("Sensitive plan loaded; waiting for app-only authorization metadata.");
+  });
+
   it("renders completed state for the current operation plan", async () => {
     const mounted = await mountWidget({
       toolOutput: {

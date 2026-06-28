@@ -1787,7 +1787,14 @@ describe("QFerry ChatGPT App MCP server", () => {
       arguments: { operationPlanId },
     });
     const panelText = JSON.stringify(panel.structuredContent);
-    const panelMeta = panel._meta as { confirmToken?: string; categories?: Record<string, number> } | undefined;
+    const panelMeta = panel._meta as {
+      operationPlanId?: string;
+      runId?: string;
+      sensitivity?: string;
+      categories?: Record<string, number>;
+      totalPlanMessages?: number;
+      confirmToken?: string;
+    } | undefined;
     expect(panel.structuredContent).toMatchObject({
       kind: "qferry_cleanup_execution_panel",
       operationPlanId,
@@ -1796,7 +1803,14 @@ describe("QFerry ChatGPT App MCP server", () => {
       totalPlanMessages: 1,
     });
     expect(panelText).not.toContain("confirmToken");
-    expect(panelMeta?.confirmToken).toEqual(expect.any(String));
+    expect(panelMeta).toMatchObject({
+      operationPlanId,
+      sensitivity: "sensitive",
+      categories: { github_account_security: 1 },
+      totalPlanMessages: 1,
+      confirmToken: expect.any(String),
+    });
+    expect(panelMeta?.runId).toEqual(expect.any(String));
 
     await client.callTool({ name: "confirm_cleanup_plan", arguments: { operationPlanId } });
     const modelExecute = await client.callTool({
@@ -1903,10 +1917,24 @@ describe("QFerry ChatGPT App MCP server", () => {
       name: "render_cleanup_execution_panel",
       arguments: { operationPlanId },
     });
-    const panelMeta = panel._meta as { confirmToken?: string; categories?: Record<string, number> } | undefined;
+    const panelMeta = panel._meta as {
+      operationPlanId?: string;
+      runId?: string;
+      sensitivity?: string;
+      categories?: Record<string, number>;
+      totalPlanMessages?: number;
+      confirmToken?: string;
+    } | undefined;
     expect(panel.structuredContent).toMatchObject({
       kind: "qferry_cleanup_execution_panel",
       operationPlanId,
+      sensitivity: "normal",
+      categories: { infra: 1 },
+      totalPlanMessages: 1,
+    });
+    expect(panelMeta).toMatchObject({
+      operationPlanId,
+      runId: "run-normal-ui-infra",
       sensitivity: "normal",
       categories: { infra: 1 },
       totalPlanMessages: 1,
