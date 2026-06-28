@@ -106,7 +106,10 @@ async function mountWidget(options: {
   const setWidgetState = vi.fn(async (nextState: Record<string, unknown>) => {
     windowStub.openai.widgetState = nextState;
   });
-  const callTool = vi.fn(async () => options.callToolResult ?? {});
+  const callTool = vi.fn(async (name: string) => {
+    if (name === "record_widget_diagnostic") return { structuredContent: { ok: true } };
+    return options.callToolResult ?? {};
+  });
   const notifyIntrinsicHeight = vi.fn();
   const windowStub: any = {
     openai: {
@@ -116,6 +119,7 @@ async function mountWidget(options: {
       setWidgetState,
       callTool,
       notifyIntrinsicHeight,
+      widgetSessionId: "widget-session-test",
     },
     addEventListener(type: string, listener: Listener) {
       if (type === "message") messageListeners.push(listener);
@@ -175,6 +179,20 @@ describe("QFerry cleanup execution widget harness", () => {
     expect(mounted.execute.textContent).toBe("Move planned mail");
     expect(mounted.execute.disabled).toBe(false);
     expect(mounted.status.textContent).toBe("Cleanup plan ready for user confirmation.");
+    expect(mounted.callTool).toHaveBeenCalledWith("record_widget_diagnostic", expect.objectContaining({
+      event: "widget_loaded",
+      widgetVersion: "qferry-ui v2026-06-28-1930",
+      resourceUri: "ui://qferry/cleanup-execution.v11.html",
+      widgetSessionId: "widget-session-test",
+    }));
+    expect(mounted.callTool).toHaveBeenCalledWith("record_widget_diagnostic", expect.objectContaining({
+      event: "widget_hydrated",
+      operationPlanId: "op_normal_plan",
+      runId: "run-normal-infra",
+      sensitivity: "normal",
+      totalPlanMessages: 95,
+      callToolAvailable: true,
+    }));
 
     await mounted.execute.click();
 
@@ -182,6 +200,16 @@ describe("QFerry cleanup execution widget harness", () => {
       operationPlanId: "op_normal_plan",
       maxMessages: 95,
     });
+    expect(mounted.callTool).toHaveBeenCalledWith("record_widget_diagnostic", expect.objectContaining({
+      event: "execute_clicked",
+      operationPlanId: "op_normal_plan",
+    }));
+    expect(mounted.callTool).toHaveBeenCalledWith("record_widget_diagnostic", expect.objectContaining({
+      event: "execute_result",
+      operationPlanId: "op_normal_plan",
+      totalPlanMessages: 0,
+      message: "ok",
+    }));
     expect(mounted.total.textContent).toBe("Done");
     expect(mounted.status.textContent).toBe("Moved 95 messages.");
   });
@@ -272,6 +300,32 @@ describe("QFerry cleanup execution widget harness", () => {
       operationPlanId: "op_click_plan",
       totalPlanMessages: 0,
       completed: true,
+    }));
+  });
+
+  it("reports bridge execution errors without blocking the UI error state", async () => {
+    const mounted = await mountWidget({
+      toolOutput: {
+        operationPlanId: "op_error_plan",
+        sensitivity: "normal",
+        categories: { infra: 2 },
+        totalPlanMessages: 2,
+      },
+      widgetState: {},
+    });
+    mounted.callTool.mockImplementation(async (name: string) => {
+      if (name === "record_widget_diagnostic") return { structuredContent: { ok: true } };
+      throw new Error("bridge unavailable");
+    });
+
+    await mounted.execute.click();
+
+    expect(mounted.status.textContent).toBe("bridge unavailable");
+    expect(mounted.execute.disabled).toBe(false);
+    expect(mounted.callTool).toHaveBeenCalledWith("record_widget_diagnostic", expect.objectContaining({
+      event: "widget_error",
+      operationPlanId: "op_error_plan",
+      message: "bridge unavailable",
     }));
   });
 

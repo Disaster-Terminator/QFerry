@@ -36,6 +36,8 @@ describe("QFerry ChatGPT App MCP server", () => {
       "list_mailboxes",
       "get_mailbox_summary",
       "get_capability_snapshot",
+      "get_widget_diagnostics",
+      "record_widget_diagnostic",
       "search",
       "fetch",
       "classify_messages",
@@ -66,6 +68,12 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "triage_inbox")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "group_spam_candidates")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "get_capability_snapshot")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "get_widget_diagnostics")?.annotations?.readOnlyHint).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "record_widget_diagnostic")?._meta).toMatchObject({
+      ui: { visibility: ["app"] },
+      "openai/widgetAccessible": true,
+      "openai/visibility": "private",
+    });
     expect(tools.tools.find((tool) => tool.name === "classification_map")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "classification_sweep")?.annotations?.readOnlyHint).toBe(true);
     expect(tools.tools.find((tool) => tool.name === "plan_cleanup")?.annotations?.destructiveHint).toBe(false);
@@ -124,7 +132,7 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(html).toContain("Done");
     expect(html).toContain("No remaining mail in this plan.");
     expect(html).toContain("completed");
-    expect(html).toContain("qferry-ui v2026-06-28-1125");
+    expect(html).toContain("qferry-ui v2026-06-28-1930");
     expect(html).toContain("plan none");
     expect(html).toContain("shortPlanId");
     expect(html).toContain("remaining ");
@@ -138,11 +146,100 @@ describe("QFerry ChatGPT App MCP server", () => {
     expect(html).toContain("mergedSamePlanData");
     expect(html).toContain("zeroCategories");
     expect(html).toContain("toolResponseMetadata");
+    expect(html).toContain("record_widget_diagnostic");
+    expect(html).toContain("widget_loaded");
+    expect(html).toContain("widget_hydrated");
+    expect(html).toContain("widget_error");
+    expect(html).toContain("widgetSessionId");
     expect(html).not.toContain("Move selected mail");
     expect(html).not.toContain("No cleanup plan is loaded");
 
     await client.close();
     await server.close();
+  });
+
+  it("records a resource-read widget diagnostic without mailbox content", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "qferry-widget-diagnostics-"));
+    process.env.QFERRY_STATE_DIR = stateRoot;
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    try {
+      await client.readResource({ uri: "ui://qferry/cleanup-execution.v11.html" });
+      const result = await client.callTool({ name: "get_widget_diagnostics", arguments: { limit: 5 } });
+
+      expect(result.structuredContent).toMatchObject({
+        count: 1,
+        diagnostics: [expect.objectContaining({
+          event: "resource_read",
+          widgetVersion: "qferry-ui v2026-06-28-1930",
+          resourceUri: "ui://qferry/cleanup-execution.v11.html",
+        })],
+      });
+      expect(JSON.stringify(result.structuredContent)).not.toContain("messageRefs");
+      expect(JSON.stringify(result.structuredContent)).not.toContain("snippet");
+    } finally {
+      await client.close();
+      await server.close();
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("records only sanitized app widget diagnostics", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "qferry-widget-diagnostics-"));
+    process.env.QFERRY_STATE_DIR = stateRoot;
+    const server = createQFerryMcpServer();
+    const client = new Client({ name: "qferry-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      server.connect(serverTransport),
+      client.connect(clientTransport),
+    ]);
+
+    try {
+      await client.callTool({
+        name: "record_widget_diagnostic",
+        arguments: {
+          event: "widget_error",
+          operationPlanId: "op_" + "x".repeat(200),
+          runId: "run-" + "y".repeat(200),
+          widgetSessionId: "session-" + "z".repeat(200),
+          message: "m".repeat(500),
+          stackHash: "stack-hash",
+          totalPlanMessages: 7,
+          hasConfirmToken: false,
+          bridgeAvailable: true,
+          callToolAvailable: false,
+        },
+      });
+      const result = await client.callTool({ name: "get_widget_diagnostics", arguments: { limit: 1 } });
+      const diagnostics = (result.structuredContent as { diagnostics?: Array<Record<string, unknown>> }).diagnostics ?? [];
+      const diagnostic = diagnostics[0] ?? {};
+
+      expect(diagnostic).toMatchObject({
+        event: "widget_error",
+        totalPlanMessages: 7,
+        hasConfirmToken: false,
+        bridgeAvailable: true,
+        callToolAvailable: false,
+        stackHash: "stack-hash",
+      });
+      expect(String(diagnostic.operationPlanId).length).toBeLessThanOrEqual(80);
+      expect(String(diagnostic.runId).length).toBeLessThanOrEqual(120);
+      expect(String(diagnostic.widgetSessionId).length).toBeLessThanOrEqual(120);
+      expect(String(diagnostic.message).length).toBeLessThanOrEqual(500);
+    } finally {
+      await client.close();
+      await server.close();
+      await rm(stateRoot, { recursive: true, force: true });
+    }
   });
 
   it("calls classification map through the MCP server without creating a plan", async () => {

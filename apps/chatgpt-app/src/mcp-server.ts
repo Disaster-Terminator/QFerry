@@ -16,9 +16,9 @@ import {
 } from "@qferry/core";
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const messageRefSchema = z.object({
@@ -92,7 +92,7 @@ const bulkGovernanceCategorySchema = z.enum([
 
 const PLAN_TTL_MS = 15 * 60 * 1000;
 const CLEANUP_EXECUTION_WIDGET_URI = "ui://qferry/cleanup-execution.v11.html";
-const CLEANUP_EXECUTION_WIDGET_VERSION = "qferry-ui v2026-06-28-1125";
+const CLEANUP_EXECUTION_WIDGET_VERSION = "qferry-ui v2026-06-28-1930";
 const SENSITIVE_CATEGORY_IDS = new Set([
   "security_or_account",
   "github_account_security",
@@ -119,6 +119,31 @@ interface StoredPlan {
   previewSummary?: Record<string, unknown>;
   executionPolicy?: PlanExecutionPolicy;
 }
+
+const widgetDiagnosticSchema = z.object({
+  event: z.enum([
+    "resource_read",
+    "widget_loaded",
+    "widget_hydrated",
+    "widget_error",
+    "execute_clicked",
+    "execute_result",
+  ]),
+  operationPlanId: z.string().optional(),
+  runId: z.string().optional(),
+  widgetVersion: z.string().optional(),
+  resourceUri: z.string().optional(),
+  sensitivity: z.enum(["normal", "sensitive"]).optional(),
+  totalPlanMessages: z.number().int().min(0).max(10000).optional(),
+  hasConfirmToken: z.boolean().optional(),
+  bridgeAvailable: z.boolean().optional(),
+  callToolAvailable: z.boolean().optional(),
+  widgetSessionId: z.string().optional(),
+  message: z.string().max(500).optional(),
+  stackHash: z.string().max(80).optional(),
+});
+
+type WidgetDiagnosticInput = z.infer<typeof widgetDiagnosticSchema>;
 
 interface OperationPlanStore {
   get(operationPlanId: string): Promise<StoredPlan | undefined>;
@@ -183,28 +208,35 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       description: "Confirm and execute planned mail cleanup from a user-clicked ChatGPT app UI.",
       mimeType: "text/html",
     },
-    async (uri) => ({
-      contents: [{
-        uri: uri.href,
-        mimeType: "text/html;profile=mcp-app",
-        text: cleanupExecutionWidgetHtml(),
-        _meta: {
-          ui: {
-            prefersBorder: true,
-            csp: {
-              connectDomains: [],
-              resourceDomains: [],
+    async (uri) => {
+      await recordWidgetDiagnostic({
+        event: "resource_read",
+        widgetVersion: CLEANUP_EXECUTION_WIDGET_VERSION,
+        resourceUri: uri.href,
+      });
+      return {
+        contents: [{
+          uri: uri.href,
+          mimeType: "text/html;profile=mcp-app",
+          text: cleanupExecutionWidgetHtml(),
+          _meta: {
+            ui: {
+              prefersBorder: true,
+              csp: {
+                connectDomains: [],
+                resourceDomains: [],
+              },
+            },
+            "openai/widgetDescription": "QFerry confirmation card for planned mail cleanup.",
+            "openai/widgetPrefersBorder": true,
+            "openai/widgetCSP": {
+              connect_domains: [],
+              resource_domains: [],
             },
           },
-          "openai/widgetDescription": "QFerry confirmation card for planned mail cleanup.",
-          "openai/widgetPrefersBorder": true,
-          "openai/widgetCSP": {
-            connect_domains: [],
-            resource_domains: [],
-          },
-        },
-      }],
-    }),
+        }],
+      };
+    },
   );
 
   server.registerTool(
@@ -246,6 +278,42 @@ export function createQFerryMcpServer(options: CreateQFerryMcpServerOptions = {}
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => toToolResult(await tools.getCapabilitySnapshot()),
+  );
+
+  server.registerTool(
+    "get_widget_diagnostics",
+    {
+      title: "Get QFerry widget diagnostics",
+      description: "Read recent QFerry ChatGPT App widget diagnostics. This returns only redacted lifecycle metadata and never returns mail content or message refs.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => toToolResult(await getWidgetDiagnostics(input.limit ?? 20)),
+  );
+
+  server.registerTool(
+    "record_widget_diagnostic",
+    {
+      title: "Record QFerry widget diagnostic",
+      description: "App-only diagnostic endpoint for QFerry widgets to report redacted lifecycle and bridge errors.",
+      inputSchema: widgetDiagnosticSchema.shape,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      _meta: {
+        ui: { visibility: ["app"] },
+        "openai/widgetAccessible": true,
+        "openai/visibility": "private",
+      },
+    },
+    async (input) => {
+      const event = await recordWidgetDiagnostic(input);
+      return toToolResult({
+        ok: true,
+        event: event.event,
+        timestamp: event.timestamp,
+      });
+    },
   );
 
   server.registerTool(
@@ -1294,6 +1362,7 @@ function cleanupExecutionWidgetHtml(): string {
   <script>
     const state = {
       operationPlanId: undefined,
+      runId: undefined,
       confirmToken: undefined,
       sensitivity: "normal",
       categories: {},
@@ -1303,6 +1372,7 @@ function cleanupExecutionWidgetHtml(): string {
       busy: false,
       error: undefined,
     };
+    let lastHydrationDiagnosticKey = "";
     const total = document.getElementById("total");
     const categories = document.getElementById("categories");
     const execute = document.getElementById("execute");
@@ -1396,6 +1466,50 @@ function cleanupExecutionWidgetHtml(): string {
       return typeof value === "string" && value.length > 8 ? value.slice(-8) : value || "none";
     }
 
+    function widgetSessionId() {
+      return window.openai?.widgetSessionId
+        || window.openai?.context?.widgetSessionId
+        || window.openai?.toolResponseMetadata?.["openai/widgetSessionId"]
+        || window.openai?.toolResponseMetadata?.widgetSessionId;
+    }
+
+    function stackHash(value) {
+      const text = String(value || "");
+      let hash = 0;
+      for (let index = 0; index < text.length; index += 1) {
+        hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+      }
+      return Math.abs(hash).toString(16);
+    }
+
+    function bridgeState() {
+      const openai = window.openai;
+      return {
+        bridgeAvailable: Boolean(openai),
+        callToolAvailable: Boolean(openai?.callTool || openai?.tools?.call),
+      };
+    }
+
+    async function recordDiagnostic(event, extra = {}) {
+      try {
+        await callTool("record_widget_diagnostic", {
+          event,
+          operationPlanId: state.operationPlanId,
+          runId: state.runId,
+          widgetVersion: "${CLEANUP_EXECUTION_WIDGET_VERSION}",
+          resourceUri: "${CLEANUP_EXECUTION_WIDGET_URI}",
+          sensitivity: state.sensitivity,
+          totalPlanMessages: state.totalPlanMessages,
+          hasConfirmToken: Boolean(state.confirmToken),
+          widgetSessionId: widgetSessionId(),
+          ...bridgeState(),
+          ...extra,
+        });
+      } catch {
+        // Diagnostics must never change cleanup UI behavior.
+      }
+    }
+
     async function resetStoredStateForPlan(plan) {
       const openai = window.openai;
       if (!plan.operationPlanId || openai?.widgetState?.operationPlanId === plan.operationPlanId) return;
@@ -1421,6 +1535,7 @@ function cleanupExecutionWidgetHtml(): string {
         state.error = undefined;
       }
       state.operationPlanId = nextOperationPlanId || state.operationPlanId;
+      state.runId = samePlan ? (plan.runId || state.runId) : plan.runId;
       state.confirmToken = samePlan ? (plan.confirmToken || state.confirmToken) : plan.confirmToken;
       state.sensitivity = plan.sensitivity || (samePlan ? state.sensitivity : "normal") || "normal";
       state.lastResult = samePlan ? (plan.lastResult || state.lastResult) : plan.lastResult;
@@ -1434,6 +1549,20 @@ function cleanupExecutionWidgetHtml(): string {
         ? 0
         : remaining ?? Object.values(state.categories).reduce((sum, value) => sum + Number(value || 0), 0);
       render();
+      if (state.operationPlanId) {
+        const diagnosticKey = [
+          state.operationPlanId,
+          state.runId || "",
+          state.sensitivity,
+          String(state.totalPlanMessages),
+          String(state.completed),
+          String(Boolean(state.confirmToken)),
+        ].join("|");
+        if (diagnosticKey !== lastHydrationDiagnosticKey) {
+          lastHydrationDiagnosticKey = diagnosticKey;
+          void recordDiagnostic("widget_hydrated");
+        }
+      }
     }
 
     function render() {
@@ -1534,6 +1663,7 @@ function cleanupExecutionWidgetHtml(): string {
           maxMessages: state.totalPlanMessages,
         };
         if (state.confirmToken) args.confirmToken = state.confirmToken;
+        void recordDiagnostic("execute_clicked");
         const result = await callTool("execute_cleanup_from_ui", args);
         const content = result?.structuredContent || result || {};
         const moved = Number(content.moved ?? content.result?.moved ?? 0);
@@ -1547,6 +1677,7 @@ function cleanupExecutionWidgetHtml(): string {
         state.error = undefined;
         const nextWidgetState = {
           operationPlanId: state.operationPlanId,
+          runId: state.runId,
           sensitivity: state.sensitivity,
           categories: state.categories,
           totalPlanMessages: remaining,
@@ -1556,8 +1687,13 @@ function cleanupExecutionWidgetHtml(): string {
         await window.openai?.setWidgetState?.(nextWidgetState);
         hydrate(nextWidgetState);
         syncOpenAiState();
+        void recordDiagnostic("execute_result", { message: "ok" });
       } catch (error) {
         state.error = error instanceof Error ? error.message : String(error);
+        void recordDiagnostic("widget_error", {
+          message: state.error,
+          stackHash: stackHash(error?.stack || state.error),
+        });
       } finally {
         state.busy = false;
         render();
@@ -1568,8 +1704,22 @@ function cleanupExecutionWidgetHtml(): string {
     window.addEventListener("message", (event) => hydrateBridgePayload(event.data || {}));
     window.addEventListener("openai:set_globals", (event) => hydrateOpenAiGlobals(event.detail?.globals || event.detail || {}));
     window.addEventListener("focus", () => syncOpenAiState());
+    window.addEventListener("error", (event) => {
+      void recordDiagnostic("widget_error", {
+        message: event?.message || "window error",
+        stackHash: stackHash(event?.error?.stack || event?.message),
+      });
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason = event?.reason;
+      void recordDiagnostic("widget_error", {
+        message: reason instanceof Error ? reason.message : String(reason || "unhandled rejection"),
+        stackHash: stackHash(reason?.stack || reason),
+      });
+    });
     document.addEventListener("visibilitychange", () => syncOpenAiState());
     syncOpenAiState();
+    void recordDiagnostic("widget_loaded");
     let syncCount = 0;
     const syncTimer = window.setInterval(() => {
       syncOpenAiState();
@@ -1697,16 +1847,75 @@ function createFileOperationPlanStore(rootDir = defaultOperationPlanStoreRoot())
 function defaultOperationPlanStoreRoot(): string {
   const configured = process.env.QFERRY_OPERATION_PLAN_STORE_DIR?.trim();
   if (configured) return configured;
-  const stateRoot = process.env.QFERRY_STATE_DIR?.trim() || (
+  return join(defaultQFerryStateRoot(), "operation-plans");
+}
+
+function defaultQFerryStateRoot(): string {
+  return process.env.QFERRY_STATE_DIR?.trim() || (
     process.platform === "win32"
       ? join(process.env.LOCALAPPDATA || os.homedir(), "qferry")
       : join(process.env.XDG_STATE_HOME || join(os.homedir(), ".local", "state"), "qferry")
   );
-  return join(stateRoot, "operation-plans");
 }
 
 function planPath(rootDir: string, operationPlanId: string): string {
   return join(rootDir, `${encodeURIComponent(operationPlanId)}.json`);
+}
+
+function widgetDiagnosticsPath(): string {
+  return join(defaultQFerryStateRoot(), "widget-diagnostics", "events.jsonl");
+}
+
+async function recordWidgetDiagnostic(input: WidgetDiagnosticInput): Promise<WidgetDiagnosticInput & { timestamp: string }> {
+  const event = sanitizeWidgetDiagnostic(input);
+  const path = widgetDiagnosticsPath();
+  await mkdir(dirname(path), { recursive: true });
+  await appendFile(path, `${JSON.stringify(event)}\n`, "utf8");
+  console.error(JSON.stringify({
+    logEvent: "qferry_widget_diagnostic",
+    ...event,
+  }));
+  return event;
+}
+
+async function getWidgetDiagnostics(limit: number): Promise<{ diagnostics: Array<WidgetDiagnosticInput & { timestamp: string }>; count: number }> {
+  try {
+    const raw = await readFile(widgetDiagnosticsPath(), "utf8");
+    const parsed = raw.split("\n")
+      .filter((line) => line.trim().length > 0)
+      .slice(-limit)
+      .flatMap((line) => {
+        try {
+          const value = JSON.parse(line) as WidgetDiagnosticInput & { timestamp: string };
+          return [sanitizeWidgetDiagnostic(value)];
+        } catch {
+          return [];
+        }
+      });
+    return { diagnostics: parsed, count: parsed.length };
+  } catch (error) {
+    if (isMissing(error)) return { diagnostics: [], count: 0 };
+    throw error;
+  }
+}
+
+function sanitizeWidgetDiagnostic(input: WidgetDiagnosticInput & { timestamp?: string }): WidgetDiagnosticInput & { timestamp: string } {
+  return {
+    timestamp: input.timestamp ?? new Date().toISOString(),
+    event: input.event,
+    ...(typeof input.operationPlanId === "string" ? { operationPlanId: input.operationPlanId.slice(0, 80) } : {}),
+    ...(typeof input.runId === "string" ? { runId: input.runId.slice(0, 120) } : {}),
+    ...(typeof input.widgetVersion === "string" ? { widgetVersion: input.widgetVersion.slice(0, 80) } : {}),
+    ...(typeof input.resourceUri === "string" ? { resourceUri: input.resourceUri.slice(0, 160) } : {}),
+    ...(input.sensitivity ? { sensitivity: input.sensitivity } : {}),
+    ...(typeof input.totalPlanMessages === "number" ? { totalPlanMessages: input.totalPlanMessages } : {}),
+    ...(typeof input.hasConfirmToken === "boolean" ? { hasConfirmToken: input.hasConfirmToken } : {}),
+    ...(typeof input.bridgeAvailable === "boolean" ? { bridgeAvailable: input.bridgeAvailable } : {}),
+    ...(typeof input.callToolAvailable === "boolean" ? { callToolAvailable: input.callToolAvailable } : {}),
+    ...(typeof input.widgetSessionId === "string" ? { widgetSessionId: input.widgetSessionId.slice(0, 120) } : {}),
+    ...(typeof input.message === "string" ? { message: input.message.slice(0, 500) } : {}),
+    ...(typeof input.stackHash === "string" ? { stackHash: input.stackHash.slice(0, 80) } : {}),
+  };
 }
 
 function isMissing(error: unknown): boolean {
